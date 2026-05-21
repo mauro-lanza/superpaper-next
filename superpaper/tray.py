@@ -124,10 +124,9 @@ hotkeys will not work. Exception: %s", excep)
         if self.g_settings.show_help is True:
             config_frame = ConfigFrame(self)
             help_frame = HelpFrame()
-
-        # KDE Plasma 6 workaround: tray icon clicks don't work with wxPython
-        # Automatically open the config GUI on startup
-        if wpproc.running_kde():
+        elif wpproc.running_kde():
+            # KDE Plasma 6 workaround: tray icon clicks don't work with wxPython
+            # Automatically open the config GUI on startup
             sp_logging.G_LOGGER.info("KDE Plasma detected: Auto-opening configuration GUI")
             wx.CallAfter(self.configure_wallpapers, None)
 
