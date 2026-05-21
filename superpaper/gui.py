@@ -1082,9 +1082,11 @@ class WallpaperSettingsPanel(wx.Panel):
                     offs_strs.append("0,0")
             tmp_profile.manual_offsets = ";".join(offs_strs)
         # perspective
-        tmp_profile.perspective = self.ch_persp.GetString(
-            self.ch_persp.GetSelection()
-        )
+        persp_sel = self.ch_persp.GetSelection()
+        if persp_sel != wx.NOT_FOUND:
+            tmp_profile.perspective = self.ch_persp.GetString(persp_sel)
+        else:
+            tmp_profile.perspective = "default"
 
         # span groups
         groups = None
@@ -1250,9 +1252,11 @@ class WallpaperSettingsPanel(wx.Panel):
             for pix in off:
                 flat_offsets.append(pix)
 
-        perspective = self.ch_persp.GetString(
-            self.ch_persp.GetSelection()
-        )
+        persp_sel = self.ch_persp.GetSelection()
+        if persp_sel != wx.NOT_FOUND:
+            perspective = self.ch_persp.GetString(persp_sel)
+        else:
+            perspective = "default"
 
         busy = wx.BusyCursor()
 
@@ -1363,7 +1367,7 @@ class WallpaperPreviewPanel(wx.Panel):
         self.clr_prw_mntr = wx.Colour(0, 0, 0, alpha=wx.ALPHA_OPAQUE)
         self.clr_prw_bkg = wx.Colour(30, 30, 30, alpha=wx.ALPHA_OPAQUE)
         self.SetBackgroundColour(self.clr_prw_bkg)
-        
+
         # Display data and sizes
         self.display_sys = display_sys
         self.display_data = self.display_sys.get_disp_list()
@@ -1727,7 +1731,7 @@ class WallpaperPreviewPanel(wx.Panel):
 
         Returns a size tuple in so that along the longer
         edge of the canvas, at most 90% of the panel dimensions are used.
-        
+
         Input is either canvas size in true pixels or in PPI normalized
         pixels."""
         rel_factor = 0.9
@@ -1998,7 +2002,11 @@ class WallpaperPreviewPanel(wx.Panel):
                 "positions of you displays on your desk."
         )
         use_per = self.display_sys.use_perspective
-        persname = self.frame.ch_persp.GetString(self.frame.ch_persp.GetSelection())
+        persp_sel = self.frame.ch_persp.GetSelection()
+        if persp_sel != wx.NOT_FOUND:
+            persname = self.frame.ch_persp.GetString(persp_sel)
+        else:
+            persname = "default"
         pop = HelpPopup(self, text,
                         show_image_quality=True,
                         use_perspective=use_per,
@@ -2173,7 +2181,7 @@ class WallpaperPreviewPanel(wx.Panel):
         # Hiding bitmap widgets, probably unnecessary
         # for st_bmp in self.preview_img_list:
             # st_bmp.Hide()
-        
+
         # Canvas drawing
         if (not self.config_mode
             and not self.use_multi_image
