@@ -142,8 +142,8 @@ class WallpaperSettingsPanel(wx.Panel):
         for prof in self.list_of_profiles:
             self.profnames.append(prof.name)
         self.profnames.append("Create a new profile")
-        self.choice_profiles = wx.Choice(self, -1, name="ProfileChoice", choices=self.profnames)
-        self.choice_profiles.Bind(wx.EVT_CHOICE, self.onSelect)
+        self.choice_profiles = wx.ComboBox(self, -1, name="ProfileChoice", choices=self.profnames, style=wx.CB_READONLY)
+        self.choice_profiles.Bind(wx.EVT_COMBOBOX, self.onSelect)
         st_choice_profiles = wx.StaticText(self, -1, "Setting profiles:")
         # name txt ctrl
         st_name = wx.StaticText(self, -1, "Profile name:")
@@ -183,9 +183,9 @@ class WallpaperSettingsPanel(wx.Panel):
         statbox_parent_sshow = self.sizer_setting_slideshow.GetStaticBox()
         sizer_sshow_subsettings = wx.GridSizer(2, 5, 5)
         self.st_sshow_sort = wx.StaticText(statbox_parent_sshow, -1, "Slideshow order:")
-        self.ch_sshow_sort = wx.Choice(statbox_parent_sshow, -1, name="SortChoice",
+        self.ch_sshow_sort = wx.ComboBox(statbox_parent_sshow, -1, name="SortChoice",
                                        #  size=(self.tc_width*0.7, -1),
-                                       choices=["Shuffle", "Alphabetical", "Date seeded shuffle"])
+                                       choices=["Shuffle", "Alphabetical", "Date seeded shuffle"], style=wx.CB_READONLY)
         # ch_sort_size = self.ch_sshow_sort.GetClientSize()
         self.st_sshow_delay = wx.StaticText(statbox_parent_sshow, -1, "Delay (minutes):")
         self.tc_sshow_delay = wx.TextCtrl(
@@ -385,9 +385,9 @@ class WallpaperSettingsPanel(wx.Panel):
         persp_choices = (["default"]
                          + list(self.display_sys.perspective_dict.keys())
                          + ["disabled"])
-        self.ch_persp = wx.Choice(self, -1, name="PerspChoice",
+        self.ch_persp = wx.ComboBox(self, -1, name="PerspChoice",
                                        size=(165, -1),
-                                       choices=persp_choices)
+                                       choices=persp_choices, style=wx.CB_READONLY)
         self.sizer_setting_persp.Add(st_perspprof, 0, wx.ALIGN_LEFT|wx.ALL|wx.ALIGN_CENTER_VERTICAL, 0)
         self.sizer_setting_persp.Add(self.ch_persp, 0, wx.ALIGN_LEFT|wx.ALL|wx.ALIGN_CENTER_VERTICAL, 5)
 
@@ -632,9 +632,9 @@ class WallpaperSettingsPanel(wx.Panel):
         ch_list = []
         for i in range(num_disp):
             ch_list.append(
-                wx.Choice(ctrl_parent, -1,
+                wx.ComboBox(ctrl_parent, -1,
                           size=(self.tc_width * fraction, -1),
-                          # style=wx.TE_RIGHT
+                          style=wx.CB_READONLY
                          )
             )
         return ch_list
@@ -648,7 +648,7 @@ class WallpaperSettingsPanel(wx.Panel):
                 if (
                     isinstance(widget, wx.TextCtrl) or
                     isinstance(widget, wx.StaticText) or
-                    isinstance(widget, wx.Choice) or
+                    isinstance(widget, (wx.Choice, wx.ComboBox)) or
                     isinstance(widget, wx.Button) or
                     isinstance(widget, wx.CheckBox) and toggle_cb
                 ):

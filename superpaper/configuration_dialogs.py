@@ -609,9 +609,9 @@ class PerspectiveConfig(wx.Dialog):
         self.sizer_prof_bar = wx.BoxSizer(wx.HORIZONTAL)
         self.profnames = list(self.persp_dict.keys())
         self.profnames.append("Create a new profile")
-        self.choice_profiles = wx.Choice(statbox_profs, -1,
-                                         name="ProfileChoice", choices=self.profnames)
-        self.choice_profiles.Bind(wx.EVT_CHOICE, self.onSelect)
+        self.choice_profiles = wx.ComboBox(statbox_profs, -1,
+                                         name="ProfileChoice", choices=self.profnames, style=wx.CB_READONLY)
+        self.choice_profiles.Bind(wx.EVT_COMBOBOX, self.onSelect)
         st_choice_profiles = wx.StaticText(statbox_profs, -1, "Perspective profiles:")
         # name txt ctrl
         st_name = wx.StaticText(statbox_profs, -1, "Profile name:")
@@ -648,8 +648,8 @@ class PerspectiveConfig(wx.Dialog):
         sizer_centr_disp = wx.BoxSizer(wx.HORIZONTAL)
         st_centr_disp = wx.StaticText(statbox_profs, -1, "Central display:")
         disp_ids = [str(idx) for idx in range(wpproc.NUM_DISPLAYS)]
-        self.choice_centr_disp = wx.Choice(statbox_profs, -1,
-                                           name="CentDispChoice", choices=disp_ids)
+        self.choice_centr_disp = wx.ComboBox(statbox_profs, -1,
+                                           name="CentDispChoice", choices=disp_ids, style=wx.CB_READONLY)
         self.choice_centr_disp.SetSelection(0)
         sizer_centr_disp.Add(st_centr_disp, 0, wx.ALL|wx.ALIGN_CENTER_VERTICAL, 5)
         sizer_centr_disp.Add(self.choice_centr_disp, 0, wx.ALL|wx.ALIGN_CENTER_VERTICAL, 5)
@@ -740,9 +740,9 @@ class PerspectiveConfig(wx.Dialog):
         """Return a display option widget row."""
         statbox_disp_opts = self.sizer_disp_opts.GetStaticBox()
         row_id = wx.StaticText(statbox_disp_opts, -1, str(row_id))
-        row_sax = wx.Choice(statbox_disp_opts, -1, name="SwivelAxisChoice",
+        row_sax = wx.ComboBox(statbox_disp_opts, -1, name="SwivelAxisChoice",
                             size=(self.tc_width*0.7, -1),
-                            choices=["No swivel", "Left", "Right"])
+                            choices=["No swivel", "Left", "Right"], style=wx.CB_READONLY)
         row_san = wx.TextCtrl(statbox_disp_opts, -1, size=(self.tc_width*0.69, -1),
                               style=wx.TE_RIGHT)
         row_sol = wx.TextCtrl(statbox_disp_opts, -1, size=(self.tc_width*0.69, -1),
