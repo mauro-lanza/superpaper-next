@@ -198,6 +198,8 @@ hotkeys will not work. Exception: %s", excep)
 Check that it is formatted properly and valid keys.".format(self.g_settings.hk_binding_next)
                             sp_logging.G_LOGGER.warning(msg)
                             sp_logging.G_LOGGER.warning(sys.exc_info()[0])
+                            if not wpproc.running_kde():
+                                show_message_dialog(msg, "Error")
                     if self.g_settings.hk_binding_pause not in self.seen_binding:
                         try:
                             self.hk.register(
@@ -211,6 +213,8 @@ Check that it is formatted properly and valid keys.".format(self.g_settings.hk_b
 Check that it is formatted properly and valid keys.".format(self.g_settings.hk_binding_pause)
                             sp_logging.G_LOGGER.warning(msg)
                             sp_logging.G_LOGGER.warning(sys.exc_info()[0])
+                            if not wpproc.running_kde():
+                                show_message_dialog(msg, "Error")
                     # try:
                         # self.hk.register(('control', 'super', 'shift', 'q'),
                                         #  callback=lambda x: self.on_exit(wx.EVT_MENU))
@@ -237,10 +241,14 @@ Check that it is formatted properly and valid keys.".format(self.g_settings.hk_b
 Check that it is formatted properly and valid keys.".format(profile.hk_binding)
                                 sp_logging.G_LOGGER.warning(msg)
                                 sp_logging.G_LOGGER.warning(sys.exc_info()[0])
+                                if not wpproc.running_kde():
+                                    show_message_dialog(msg, "Error")
                         elif profile.hk_binding in self.seen_binding:
                             msg = "Could not register hotkey: '{}' for profile: '{}'.\n\
 It is already registered for another action.".format(profile.hk_binding, profile.name)
                             sp_logging.G_LOGGER.warning(msg)
+                            if not wpproc.running_kde():
+                                show_message_dialog(msg, "Error")
                 # except (SystemHotkeyError, SystemRegisterError, UnregisterError, InvalidKeyError):
                 except:
                     if sp_logging.DEBUG:
@@ -267,6 +275,8 @@ It is already registered for another action.".format(profile.hk_binding, profile
 Check that it is formatted properly and valid keys.".format(profile.hk_binding)
                 sp_logging.G_LOGGER.warning(msg)
                 sp_logging.G_LOGGER.warning(sys.exc_info()[0])
+                if not wpproc.running_kde():
+                    show_message_dialog(msg, "Error")
 
     def get_profile_by_name(self, name):
         for prof in self.list_of_profiles:
@@ -320,14 +330,12 @@ Check that it is formatted properly and valid keys.".format(profile.hk_binding)
 
     def on_left_down(self, *event):
         """Allows binding left click event."""
-        print('Tray icon was left-clicked.')
         sp_logging.G_LOGGER.info('Tray icon was left-clicked.')
         # Open configuration on left click as fallback
         self.configure_wallpapers(event)
 
     def on_right_down(self, event):
         """Handle right click event."""
-        print('Tray icon was right-clicked.')
         sp_logging.G_LOGGER.info('Tray icon was right-clicked.')
 
     def open_config(self, event):
@@ -351,17 +359,9 @@ Check that it is formatted properly and valid keys.".format(profile.hk_binding)
     def configure_wallpapers(self, event):
         """Opens wallpaper configuration panel."""
         try:
-            print("configure_wallpapers called")
-            sp_logging.G_LOGGER.info("configure_wallpapers called")
             config_frame = ConfigFrame(self)
-            print("ConfigFrame created successfully")
-            sp_logging.G_LOGGER.info("ConfigFrame created successfully")
         except Exception as e:
-            print("configure_wallpapers error: {}".format(e))
-            sp_logging.G_LOGGER.error("configure_wallpapers error: %s", e)
-            import traceback
-            traceback.print_exc()
-            sp_logging.G_LOGGER.error(traceback.format_exc())
+            sp_logging.G_LOGGER.error("configure_wallpapers error: %s", e, exc_info=True)
 
     def configure_settings(self, event):
         """Opens general settings panel."""

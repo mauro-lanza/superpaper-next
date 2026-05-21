@@ -8,11 +8,13 @@ Written by Henri Hänninen, copyright 2022 under MIT licence.
 """
 
 import configparser
+import json
 import math
 import os
 import platform
 import subprocess
 import sys
+import traceback
 from operator import itemgetter
 from threading import Lock, Thread, Timer
 
@@ -872,7 +874,7 @@ def get_display_data():
     display_list.sort(key=lambda x: x.digital_offset)
     # extract global variables for legacy compatibility
     RESOLUTION_ARRAY, DISPLAY_OFFSET_ARRAY = extract_global_vars(display_list)
-    
+
     if sp_logging.DEBUG:
         sp_logging.G_LOGGER.info(
             "get_display_data output: NUM_DISPLAYS = %s, RES_ARR = %s, OFF_ARR = %s",
@@ -1113,7 +1115,7 @@ def compute_working_canvas(crop_tuples):
 
 def alternating_outputfile(prof_name):
     """Return alternating output filename and old filename.
-    
+
     This is done so that the cache doesn't become a huge dump of unused files,
     and it is alternating since some OSs don't update their wallpapers if the
     current image file is overwritten.
@@ -1448,7 +1450,7 @@ def set_wallpaper_macos(outputfile, image_piece_list = None, force = False):
             )
             if error:
                 sp_logging.G_LOGGER.info("setDesktopImageURL failed with error: %s", error)
-    
+
     # Delete old images after new ones are set
     if outputfile:
         remove_old_temp_files(outputfile)
@@ -1626,10 +1628,18 @@ def remove_old_temp_files(outputfile):
                 # print(temp_file)
                 os.remove(os.path.join(TEMP_PATH, temp_file))
 
+def _escape_js_string(s):
+    """Escape a string for safe embedding in a JavaScript string literal."""
+    s = s.replace('\\', '\\\\')
+    s = s.replace('"', '\\"')
+    s = s.replace("'", "\\'")
+    s = s.replace('\n', '\\n')
+    s = s.replace('\r', '\\r')
+    return s
+
 def get_kde_activity_mapping():
     """Get mapping of activity IDs to activity names."""
     try:
-        import subprocess
         # Get list of activity IDs
         result = subprocess.run(
             ["qdbus", "org.kde.ActivityManager", "/ActivityManager/Activities", "ListActivities"],
@@ -1664,12 +1674,19 @@ def kde_load_desktop_mapping_cache():
     cache_file = os.path.join(CONFIG_PATH, "kde_desktop_mapping.json")
     try:
         if os.path.isfile(cache_file):
-            import json
             with open(cache_file, 'r') as f:
                 data = json.load(f)
-                # Convert string keys back to integers
-                return {int(k): v for k, v in data.items()}
-    except Exception as e:
+                if not isinstance(data, dict):
+                    sp_logging.G_LOGGER.warning("Invalid cache format, expected dict, got %s", type(data).__name__)
+                    return {}
+                result = {}
+                for k, v in data.items():
+                    try:
+                        result[int(k)] = str(v)
+                    except (ValueError, TypeError):
+                        sp_logging.G_LOGGER.warning("Skipping invalid cache entry: %s -> %s", k, v)
+                return result
+    except (json.JSONDecodeError, OSError) as e:
         sp_logging.G_LOGGER.error("Failed to load desktop mapping cache: %s", e)
     return {}
 
@@ -1677,7 +1694,6 @@ def kde_save_desktop_mapping_cache(mapping):
     """Save desktop-to-activity mapping to file."""
     cache_file = os.path.join(CONFIG_PATH, "kde_desktop_mapping.json")
     try:
-        import json
         with open(cache_file, 'w') as f:
             json.dump(mapping, f, indent=2)
         sp_logging.G_LOGGER.info("Saved desktop mapping cache to %s", cache_file)
@@ -1694,8 +1710,6 @@ def kde_get_desktop_to_activity_mapping():
     and uses cached information for other activities.
     """
     try:
-        import subprocess
-
         # Load cached mapping
         desktop_to_activity = kde_load_desktop_mapping_cache()
 
@@ -1782,7 +1796,6 @@ print(result.join(';'));
 
     except Exception as e:
         sp_logging.G_LOGGER.error("Failed to get desktop-activity mapping: %s", e)
-        import traceback
         sp_logging.G_LOGGER.error(traceback.format_exc())
         return {}
 
@@ -1809,7 +1822,7 @@ def kde_set_activity_wallpapers(activity_wallpapers_map):
         if activity_id in activity_wallpapers_map:
             images = activity_wallpapers_map[activity_id]
             file_urls = ['file://' + img for img in images]
-            images_str = ', '.join('"' + url + '"' for url in file_urls)
+            images_str = ', '.join('"' + _escape_js_string(url) + '"' for url in file_urls)
             desktop_images_js += f'    {desktop_id}: [{images_str}],\n'
     desktop_images_js += "}"
 
@@ -1911,7 +1924,6 @@ for(var idx = 0; idx < allDesktops.length; idx++) {
         sp_logging.G_LOGGER.info("kde_set_activity_wallpapers: Script evaluation complete")
     except Exception as e:
         sp_logging.G_LOGGER.error("kde_set_activity_wallpapers failed: %s", e)
-        import traceback
         sp_logging.G_LOGGER.error(traceback.format_exc())
 
 def kdeplasma_actions(outputfile, image_piece_list = None, force=False, profile_name=None):
@@ -2072,7 +2084,7 @@ for(var idx = 0; idx < allDesktops.length; idx++) {{
     filess_img_names = []
     for fname in img_names:
         filess_img_names.append("file://" + fname)
-    filess_img_names_str = ', '.join('"' + item + '"' for item in filess_img_names)
+    filess_img_names_str = ', '.join('"' + _escape_js_string(item) + '"' for item in filess_img_names)
     # print(script.format(imagelist=filess_img_names_str))
 
     sp_logging.G_LOGGER.info("kdeplasma_actions: Creating dbus connection")
@@ -2225,7 +2237,7 @@ def quick_profile_job(profile):
 
 def use_image_pieces():
     """Determine if it improves perfomance to use existing image pieces.
-    
+
     Systems that use image pieces are: KDE, XFCE.
     """
     pltform = platform.system()

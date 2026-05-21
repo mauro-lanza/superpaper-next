@@ -1,7 +1,18 @@
-# pycharm
+# IDE
 .idea
+.vscode
 
 # Python
 __pycache__/
 *.pyc
 *.egg-info
+.venv
+
+# Build artifacts
+build/
+dist/
+prime/
+releases/
+*.AppImage
+*.snap
+*.spec
