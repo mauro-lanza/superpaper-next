@@ -12,6 +12,7 @@ import json
 import math
 import os
 import platform
+import shutil
 import subprocess
 import sys
 import traceback
@@ -1538,9 +1539,12 @@ settings file superpaper/general_settings. Exiting."
             else:
                 os.system(set_command.format(image=outputfile))
     else:
-        sp_logging.G_LOGGER.info("DESKTOP_SESSION variable is empty, \
+        if running_kde():
+            kdeplasma_actions(outputfile, force=force, profile_name=G_ACTIVE_PROFILE)
+        elif set_command == "":
+            sp_logging.G_LOGGER.info("DESKTOP_SESSION variable is empty, \
 attempting to use feh to set the wallpaper.")
-        subprocess.run(["feh", "--bg-scale", "--no-xinerama", outputfile])
+            subprocess.run(["feh", "--bg-scale", "--no-xinerama", outputfile])
 
 def set_wallpaper_piecewise(image_piece_list):
     """
@@ -1637,12 +1641,23 @@ def _escape_js_string(s):
     s = s.replace('\r', '\\r')
     return s
 
+def _get_qdbus_cmd():
+    """Return the available qdbus command name (qdbus6 for Plasma 6, qdbus otherwise)."""
+    for cmd in ("qdbus6", "qdbus"):
+        if shutil.which(cmd):
+            return cmd
+    return None
+
 def get_kde_activity_mapping():
     """Get mapping of activity IDs to activity names."""
     try:
+        qdbus = _get_qdbus_cmd()
+        if not qdbus:
+            sp_logging.G_LOGGER.error("Neither qdbus6 nor qdbus found")
+            return {}
         # Get list of activity IDs
         result = subprocess.run(
-            ["qdbus", "org.kde.ActivityManager", "/ActivityManager/Activities", "ListActivities"],
+            [qdbus, "org.kde.ActivityManager", "/ActivityManager/Activities", "ListActivities"],
             capture_output=True, text=True, timeout=5
         )
         if result.returncode != 0:
@@ -1655,7 +1670,7 @@ def get_kde_activity_mapping():
         for activity_id in activity_ids:
             if activity_id:
                 result = subprocess.run(
-                    ["qdbus", "org.kde.ActivityManager", "/ActivityManager/Activities",
+                    [qdbus, "org.kde.ActivityManager", "/ActivityManager/Activities",
                      "ActivityName", activity_id],
                     capture_output=True, text=True, timeout=5
                 )
@@ -1713,9 +1728,14 @@ def kde_get_desktop_to_activity_mapping():
         # Load cached mapping
         desktop_to_activity = kde_load_desktop_mapping_cache()
 
+        qdbus = _get_qdbus_cmd()
+        if not qdbus:
+            sp_logging.G_LOGGER.error("Neither qdbus6 nor qdbus found")
+            return desktop_to_activity
+
         # Get list of all activities
         result = subprocess.run(
-            ["qdbus", "org.kde.ActivityManager", "/ActivityManager/Activities", "ListActivities"],
+            [qdbus, "org.kde.ActivityManager", "/ActivityManager/Activities", "ListActivities"],
             capture_output=True, text=True, timeout=5
         )
         if result.returncode != 0:
@@ -1725,7 +1745,7 @@ def kde_get_desktop_to_activity_mapping():
 
         # Get current activity
         result = subprocess.run(
-            ["qdbus", "org.kde.ActivityManager", "/ActivityManager/Activities", "CurrentActivity"],
+            [qdbus, "org.kde.ActivityManager", "/ActivityManager/Activities", "CurrentActivity"],
             capture_output=True, text=True, timeout=5
         )
         current_activity_id = result.stdout.strip() if result.returncode == 0 else None
