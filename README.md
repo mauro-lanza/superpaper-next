@@ -1,34 +1,34 @@
-# Superpaper (for Plasma 6)
+# Superpaper Next
 
-Superpaper is an advanced multi monitor wallpaper manager for **Linux** and **Windows** operating systems, with
-partial support (no hotkeys) for **MacOS**.
+A community-maintained fork of [Superpaper](https://github.com/hhannine/superpaper), an advanced multi monitor wallpaper manager for **Linux** and **Windows** operating systems, with partial support (no hotkeys) for **MacOS**.
 
-But that's not what this project is about, to be honest.  This project is about making SuperPaper's monitor-spanning
-wallpapers work with KDE's Activities.
+This fork focuses on KDE Plasma 6 support and improving the wallpaper selection experience. Development and testing is primarily done on Plasma 6; other desktop environments may work but are not actively tested.
 
 ![](https://raw.githubusercontent.com/hhannine/Superpaper/branch-resources/readme-banner.jpg)
 ![](https://raw.githubusercontent.com/hhannine/Superpaper/branch-resources/gui-screenshot.png)
 
-### Updated functionality for Plasma 6
-#### Per-activity wallpaper support
-It's a bit awkward now, but it does work.  The pattern is to:
 
-- fire up the gui and define profiles that use the wallpapers you want to use for each activity.
-- name the profiles with the same (case-sensitive) name as the activities you want to uuse them for.
-- build each profile while in the activity you're wanting it to work for.
-- Rejoice! then complain about how awkward the UX is now that Fred's been working on it.
+## What's new in this fork
 
-#### Notes
-This project is literally only for using SuperPaper in a KDE/Plasma 6 environment and it is likely very broken
-for every other environment. 
+### KDE Plasma 6 & Activity Support
+*Contributed by [FredworkLemmas](https://github.com/FredworkLemmas)*
 
-#### Installation of this forked project
-The major points are:
+- Per-activity wallpaper support: name your profiles to match your KDE Activities (case-sensitive) and the wallpaper will follow the active activity.
+- Updated installation and dependency handling for Plasma 6 environments.
 
-1. Clone the repo
-2. create a virtualenv for the project
-3. install the requirements: `pip install -r requirements_install_python_package.txt`
-4. run the project: `python -m superpaper`
+### Wallpaper Selection Improvements
+- **Click-to-preview**: clicking a wallpaper in the source list updates the preview panel immediately
+- **Apply selected image**: when slideshow is off, "Apply" sets the specific image you selected instead of a random one from the rotation
+- **Consistent preview after save**: the preview shows your selected wallpaper instead of a random pick from a freshly shuffled list
+
+
+## Planned Improvements
+
+- **Visual wallpaper selector**: replace the file path list with an image grid/icon view, showing the path on hover
+- **Manual wallpaper positioning**: allow resizing/stretching the wallpaper beyond screen boundaries for manual alignment of specific image elements to monitor gaps
+
+
+## Features
 
 ### Novel features include
 - Advanced wallpaper spanning options
@@ -79,7 +79,7 @@ if support for your system of choice is not built-in.
 
 
 ### Support
-If you find Superpaper useful please consider supporting its development:
+If you find Superpaper useful please consider supporting the original developer:
 
 - [Support via PayPal](https://www.paypal.me/superpaper/5)
 - [Support via Github Sponsors](https://github.com/sponsors/hhannine)
@@ -89,14 +89,21 @@ If you find Superpaper useful please consider supporting its development:
 
 ### Linux
 
-An AppImage package is available on the [releases page](https://github.com/hhannine/superpaper/releases).  
+An AppImage package is available on the [releases page](https://github.com/mauro-lanza/superpaper-next/releases).
 The AppImage will run once you make it executable.
 
- For native, and other, installation options head over to: [installing on linux](./docs/installation-linux.md). System theme and icon integration can be better on the native (PyPI) installation.
+#### From source
+
+1. Clone the repo
+2. Create a virtualenv: `python -m venv .venv && source .venv/bin/activate`
+3. Install requirements: `pip install -r requirements_install_python_package.txt`
+4. Run: `python -m superpaper`
+
+For other installation options see: [installing on linux](./docs/installation-linux.md).
 
 ### Windows 10 & 11
 
- A Windows installer and a portable package are available on the [releases page](https://github.com/hhannine/superpaper/releases).
+A Windows installer and a portable package are available on the upstream [releases page](https://github.com/hhannine/superpaper/releases).
 
 ### MacOS
 
