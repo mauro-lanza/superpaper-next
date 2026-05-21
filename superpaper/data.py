@@ -275,6 +275,7 @@ class ProfileData(object):
         self.hk_binding = None
         self.perspective = "default"
         self.paths_array = []
+        self._selected_wallpaper = None
 
         self.parse_profile(self.file)
         if self.ppimode is True:
@@ -450,7 +451,7 @@ class ProfileData(object):
         else:
             sp_logging.G_LOGGER("Couldn't compute relative densities: %s, %s", self.name, self.file)
             return 1
-        
+
         bez_px_offs=[0]   # never offset 1st disp, anchor to it.
         inch_per_mm = 1.0 / 25.4
         for bez_mm in self.bezels:
@@ -495,7 +496,17 @@ class ProfileData(object):
 
     def next_wallpaper_files(self, peek=False):
         """Asks the file handler iterator for next image(s) for the wallpaper."""
+        if self._selected_wallpaper:
+            return self._selected_wallpaper
         return self.file_handler.next_wallpaper_files(peek=peek)
+
+    def set_selected_wallpaper(self, files):
+        """Set specific wallpaper file(s) to use instead of cycling."""
+        self._selected_wallpaper = files
+
+    def clear_selected_wallpaper(self):
+        """Clear selected wallpaper, resuming normal cycling."""
+        self._selected_wallpaper = None
 
     class Filehandler(object):
         """
@@ -589,7 +600,7 @@ Use absolute paths for best reliabilty.".format(path)
                 # print("next {}".format([self.files[self.counter]]))
                 self.counter += 1
                 return image
-            
+
             def __peek__(self):
                 if self.counter < len(self.files):
                     image = self.files[self.counter]

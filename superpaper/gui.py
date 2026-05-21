@@ -260,6 +260,7 @@ class WallpaperSettingsPanel(wx.Panel):
                                              )
             self.path_listctrl.InsertColumn(0, 'Source', width = 500)
         self.path_listctrl.SetImageList(self.image_list, wx.IMAGE_LIST_SMALL)
+        self.path_listctrl.Bind(wx.EVT_LIST_ITEM_SELECTED, self.onWallpaperItemSelected)
 
         self.sizer_setting_paths.Add(st_paths_info, 0, wx.ALIGN_LEFT|wx.ALL, 5)
         self.sizer_setting_paths.Add(
@@ -735,6 +736,7 @@ class WallpaperSettingsPanel(wx.Panel):
                                                 )
                 self.path_listctrl.InsertColumn(0, 'Source', width=500)
             self.path_listctrl.SetImageList(self.image_list, wx.IMAGE_LIST_SMALL)
+            self.path_listctrl.Bind(wx.EVT_LIST_ITEM_SELECTED, self.onWallpaperItemSelected)
             self.sizer_setting_paths.Insert(1, self.path_listctrl, 1,
                                             wx.CENTER | wx.EXPAND | wx.ALL, 5)
             self.path_listctrl.InvalidateBestSize()
@@ -938,6 +940,43 @@ class WallpaperSettingsPanel(wx.Panel):
     #
     # Top level button definitions
     #
+    def onWallpaperItemSelected(self, event):
+        """Preview the selected wallpaper image in the preview panel."""
+        item_idx = event.GetIndex()
+        columns = self.path_listctrl.GetColumnCount()
+        if columns == 2:
+            path = self.path_listctrl.GetItemText(item_idx, 1)
+        else:
+            path = self.path_listctrl.GetItemText(item_idx, 0)
+
+        if not path:
+            return
+
+        # Resolve folder to first image inside it
+        preview_file = None
+        if os.path.isdir(path):
+            for f in sorted(os.listdir(path)):
+                if f.lower().endswith(wpproc.G_SUPPORTED_IMAGE_EXTENSIONS):
+                    preview_file = os.path.join(path, f)
+                    break
+        elif os.path.isfile(path):
+            preview_file = path
+
+        if not preview_file:
+            return
+
+        if self.show_advanced_settings:
+            display_data = self.display_sys.get_disp_list(True)
+        else:
+            display_data = self.display_sys.get_disp_list(False)
+        self.wpprev_pnl.preview_wallpaper(
+            [preview_file],
+            self.show_advanced_settings,
+            self.use_multi_image,
+            display_data,
+            self.read_spangroups(True)
+        )
+
     def onOverrideSizes(self, event):
         self.create_sizer_diaginch_override()
 
@@ -1038,14 +1077,35 @@ class WallpaperSettingsPanel(wx.Panel):
             saved_profile_name = ProfileData(saved_file).name
             self.parent_tray_obj.reload_profiles(event)
             saved_profile_to_start = self.parent_tray_obj.get_profile_by_name(saved_profile_name)
+            # When slideshow is off, apply the selected wallpaper instead of cycling
+            if not saved_profile_to_start.slideshow:
+                selected_file = self._get_selected_wallpaper_path()
+                if selected_file and os.path.isfile(selected_file):
+                    saved_profile_to_start.set_selected_wallpaper([selected_file])
             wx.Yield()
             thrd = self.parent_tray_obj.start_profile(event, saved_profile_to_start, force_reload=True)
             if thrd:
                 while thrd.is_alive():
                     time.sleep(0.5)
+            if not saved_profile_to_start.slideshow:
+                saved_profile_to_start.clear_selected_wallpaper()
         else:
             pass
         del busy
+
+    def _get_selected_wallpaper_path(self):
+        """Get the file path of the currently selected item in the wallpaper list."""
+        item_idx = self.path_listctrl.GetFocusedItem()
+        if item_idx == -1:
+            return None
+        columns = self.path_listctrl.GetColumnCount()
+        if columns == 2:
+            path = self.path_listctrl.GetItemText(item_idx, 1)
+        else:
+            path = self.path_listctrl.GetItemText(item_idx, 0)
+        if os.path.isdir(path):
+            return None
+        return path
 
     def onSave(self, event):
         """Saves currently open profile into file. A test method is called to verify data."""
@@ -1155,9 +1215,14 @@ class WallpaperSettingsPanel(wx.Panel):
                 display_data = self.display_sys.get_disp_list(True)
             else:
                 display_data = self.display_sys.get_disp_list(False)
+            # Use the currently selected wallpaper for preview when slideshow is off
+            selected_file = self._get_selected_wallpaper_path()
+            if not saved_profile.slideshow and selected_file and os.path.isfile(selected_file):
+                preview_files = [selected_file]
+            else:
+                preview_files = self.parent_tray_obj.get_profile_by_name(saved_profile.name).next_wallpaper_files(peek=True)
             self.wpprev_pnl.preview_wallpaper(
-                # saved_profile.next_wallpaper_files(),
-                self.parent_tray_obj.get_profile_by_name(saved_profile.name).next_wallpaper_files(peek=True),
+                preview_files,
                 self.show_advanced_settings,
                 self.use_multi_image,
                 display_data,
