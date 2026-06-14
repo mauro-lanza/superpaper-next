@@ -524,16 +524,6 @@ class ProfileData(object):
             return self.selected
         return self.file_handler.next_wallpaper_files(peek=peek)
 
-    def set_selected_wallpaper(self, files, persist=True):
-        """Set specific wallpaper file(s) as the current selection."""
-        self.selected = files
-        if persist:
-            self._write_selected()
-
-    def clear_selected_wallpaper(self):
-        """Clear the in-memory selection (does not touch the saved profile)."""
-        self.selected = None
-
     def advance_wallpaper(self):
         """Cycle to the next image(s) and make the result the current selection."""
         files = self.file_handler.next_wallpaper_files()
@@ -549,6 +539,8 @@ class ProfileData(object):
         try:
             with open(self.file, "r", encoding="utf-8") as prof_f:
                 lines = [ln for ln in prof_f if not ln.startswith("selected=")]
+            if lines and not lines[-1].endswith("\n"):
+                lines[-1] += "\n"
             lines.append("selected=" + ";".join(self.selected) + "\n")
             with open(self.file, "w", encoding="utf-8") as prof_f:
                 prof_f.writelines(lines)
@@ -723,7 +715,7 @@ class CLIProfileData(ProfileData):
         # so the renderer never tries to cycle.
         self.selected = self.files
 
-    def next_wallpaper_files(self):
+    def next_wallpaper_files(self, peek=False):
         """Returns a list of the real paths of the images given at construction time."""
         return self.files
 
