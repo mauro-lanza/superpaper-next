@@ -54,8 +54,6 @@ ignore = [
     "SIM105",  # contextlib.suppress: slower and less explicit than try/except/pass
     "RUF059",  # unused unpacked variable: legacy tuple unpacking is intentional
     "RUF002",  # ambiguous unicode char in docstring: false positives
-    "SIM115",  # open() without context manager: real, but needs careful per-site
-               # refactoring of legacy try/finally I/O - tracked as a follow-up.
 ]
 
 [tool.ruff.lint.isort]

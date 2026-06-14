@@ -65,8 +65,7 @@ def read_active_profile():
     profname = ""
     profile = None
     if os.path.isfile(fname):
-        rp_file = open(fname, encoding="utf-8")
-        try:
+        with open(fname, encoding="utf-8") as rp_file:
             for line in rp_file:  # loop through line by line
                 line.rstrip("\r\n")
                 profname = line
@@ -84,11 +83,9 @@ def read_active_profile():
                         profile name: %s?",
                         profname,
                     )
-        finally:
-            rp_file.close()
     else:
-        rp_file = open(fname, "x", encoding="utf-8")
-        rp_file.close()
+        with open(fname, "x", encoding="utf-8"):
+            pass
         profile = None
     return profile
 
@@ -96,9 +93,8 @@ def read_active_profile():
 def write_active_profile(profname):
     """Writes active profile name to file after profile has changed."""
     fname = os.path.join(sp_paths.TEMP_PATH, "running_profile")
-    rp_file = open(fname, "w", encoding="utf-8")
-    rp_file.write(profname)
-    rp_file.close()
+    with open(fname, "w", encoding="utf-8") as rp_file:
+        rp_file.write(profname)
 
 
 class GeneralSettingsData:
@@ -119,8 +115,7 @@ class GeneralSettingsData:
         """Parse general_settings file. Create it if it doesn't exists."""
         fname = os.path.join(CONFIG_PATH, "general_settings")
         if os.path.isfile(fname):
-            general_settings_file = open(fname)
-            try:
+            with open(fname) as general_settings_file:
                 for line in general_settings_file:
                     words = line.strip().split("=")
                     if words[0] == "logging":
@@ -181,62 +176,57 @@ class GeneralSettingsData:
                         sp_logging.G_LOGGER.info(
                             "GeneralSettings parse Exception: Unkown general setting: %s", words[0]
                         )
-            finally:
-                general_settings_file.close()
         else:
             # if file does not exist, create it and write default values.
-            general_settings_file = open(fname, "x")
-            general_settings_file.write("logging=false\n")
-            if IS_MACOS:
-                general_settings_file.write("use hotkeys=false\n")
-            else:
-                general_settings_file.write("use hotkeys=true\n")
-            general_settings_file.write("next wallpaper hotkey=control+super+w\n")
-            self.hk_binding_next = ("control", "super", "w")
-            general_settings_file.write("pause wallpaper hotkey=control+super+shift+p\n")
-            self.hk_binding_pause = ("control", "super", "shift", "p")
-            general_settings_file.write("set_command=\n")
-            general_settings_file.write("browse_default_dir=\n")
-            general_settings_file.write("warn_large_img=true")
-            general_settings_file.close()
+            with open(fname, "x") as general_settings_file:
+                general_settings_file.write("logging=false\n")
+                if IS_MACOS:
+                    general_settings_file.write("use hotkeys=false\n")
+                else:
+                    general_settings_file.write("use hotkeys=true\n")
+                general_settings_file.write("next wallpaper hotkey=control+super+w\n")
+                self.hk_binding_next = ("control", "super", "w")
+                general_settings_file.write("pause wallpaper hotkey=control+super+shift+p\n")
+                self.hk_binding_pause = ("control", "super", "shift", "p")
+                general_settings_file.write("set_command=\n")
+                general_settings_file.write("browse_default_dir=\n")
+                general_settings_file.write("warn_large_img=true")
 
     def save_settings(self):
         """Save the current state of the general settings object."""
 
         fname = os.path.join(CONFIG_PATH, "general_settings")
-        general_settings_file = open(fname, "w")
+        with open(fname, "w") as general_settings_file:
+            if self.logging:
+                general_settings_file.write("logging=true\n")
+            else:
+                general_settings_file.write("logging=false\n")
 
-        if self.logging:
-            general_settings_file.write("logging=true\n")
-        else:
-            general_settings_file.write("logging=false\n")
+            if self.use_hotkeys:
+                general_settings_file.write("use hotkeys=true\n")
+            else:
+                general_settings_file.write("use hotkeys=false\n")
 
-        if self.use_hotkeys:
-            general_settings_file.write("use hotkeys=true\n")
-        else:
-            general_settings_file.write("use hotkeys=false\n")
+            if self.hk_binding_next:
+                hk_string = "+".join(self.hk_binding_next)
+                general_settings_file.write(f"next wallpaper hotkey={hk_string}\n")
 
-        if self.hk_binding_next:
-            hk_string = "+".join(self.hk_binding_next)
-            general_settings_file.write(f"next wallpaper hotkey={hk_string}\n")
+            if self.hk_binding_pause:
+                hk_string_p = "+".join(self.hk_binding_pause)
+                general_settings_file.write(f"pause wallpaper hotkey={hk_string_p}\n")
 
-        if self.hk_binding_pause:
-            hk_string_p = "+".join(self.hk_binding_pause)
-            general_settings_file.write(f"pause wallpaper hotkey={hk_string_p}\n")
+            if self.show_help:
+                general_settings_file.write("show_help_at_start=true\n")
+            else:
+                general_settings_file.write("show_help_at_start=false\n")
 
-        if self.show_help:
-            general_settings_file.write("show_help_at_start=true\n")
-        else:
-            general_settings_file.write("show_help_at_start=false\n")
+            general_settings_file.write(f"set_command={self.set_command}\n")
+            general_settings_file.write(f"browse_default_dir={self.browse_default_dir}\n")
 
-        general_settings_file.write(f"set_command={self.set_command}\n")
-        general_settings_file.write(f"browse_default_dir={self.browse_default_dir}\n")
-
-        if self.warn_large_img:
-            general_settings_file.write("warn_large_img=true")
-        else:
-            general_settings_file.write("warn_large_img=false")
-        general_settings_file.close()
+            if self.warn_large_img:
+                general_settings_file.write("warn_large_img=true")
+            else:
+                general_settings_file.write("warn_large_img=false")
 
 
 class ProfileDataException(Exception):
@@ -296,140 +286,137 @@ class ProfileData:
 
     def parse_profile(self, parse_file):
         """Read wallpaper profile settings from file."""
-        profile_file = open(parse_file, encoding="utf-8")
         try:
-            for line in profile_file:
-                line.strip()
-                words = line.split("=")
-                if words[0] == "name":
-                    self.name = words[1].strip()
-                elif words[0] == "spanmode":
-                    wrd1 = words[1].strip().lower()
-                    if wrd1 == "single" or wrd1 == "advanced" or wrd1 == "multi":
-                        self.spanmode = wrd1
-                    else:
-                        sp_logging.G_LOGGER.info(
-                            "Exception: unknown spanmode: %s \
-                                in profile: %s",
-                            words[1],
-                            self.name,
-                        )
-                elif words[0] == "spangroups":
-                    spangroups = []
-                    groups = words[1].strip().split(",")
-                    for grp in groups:
-                        try:
-                            ids = [int(idx) for idx in grp]
-                            spangroups.append(sorted(set(ids)))  # drop duplicates
-                        except ValueError:
-                            spangroups = None
-                            break
-                    self.spangroups = spangroups
-                elif words[0] == "slideshow":
-                    wrd1 = words[1].strip().lower()
-                    if wrd1 == "true":
-                        self.slideshow = True
-                    else:
-                        self.slideshow = False
-                elif words[0] == "delay":
-                    self.delay_list = []
-                    delay_strings = words[1].strip().split(";")
-                    for delstr in delay_strings:
-                        self.delay_list.append(float(delstr))
-                elif words[0] == "sortmode":
-                    wrd1 = words[1].strip().lower()
-                    if wrd1 == "shuffle" or wrd1 == "date_seeded_shuffle" or wrd1 == "alphabetical":
-                        self.sortmode = wrd1
-                    else:
-                        sp_logging.G_LOGGER.info(
-                            "Exception: unknown sortmode: %s \
-                                in profile: %s",
-                            words[1],
-                            self.name,
-                        )
-                elif words[0] == "offsets":
-                    # Use PPI mode algorithm to do cuts.
-                    # Defaults assume uniform pixel density
-                    # if no custom values are given.
-                    offs = []
-                    offs_user_only = []
-                    # w1,h1;w2,h2;...
-                    offset_strings = words[1].strip().split(";")
-                    for offstr in offset_strings:
-                        res_str = offstr.split(",")
-                        try:
-                            offs.append((int(res_str[0]), int(res_str[1])))
-                            offs_user_only.append((int(res_str[0]), int(res_str[1])))
-                        except (ValueError, IndexError):
+            with open(parse_file, encoding="utf-8") as profile_file:
+                for line in profile_file:
+                    line.strip()
+                    words = line.split("=")
+                    if words[0] == "name":
+                        self.name = words[1].strip()
+                    elif words[0] == "spanmode":
+                        wrd1 = words[1].strip().lower()
+                        if wrd1 == "single" or wrd1 == "advanced" or wrd1 == "multi":
+                            self.spanmode = wrd1
+                        else:
+                            sp_logging.G_LOGGER.info(
+                                "Exception: unknown spanmode: %s \
+                                    in profile: %s",
+                                words[1],
+                                self.name,
+                            )
+                    elif words[0] == "spangroups":
+                        spangroups = []
+                        groups = words[1].strip().split(",")
+                        for grp in groups:
+                            try:
+                                ids = [int(idx) for idx in grp]
+                                spangroups.append(sorted(set(ids)))  # drop duplicates
+                            except ValueError:
+                                spangroups = None
+                                break
+                        self.spangroups = spangroups
+                    elif words[0] == "slideshow":
+                        wrd1 = words[1].strip().lower()
+                        if wrd1 == "true":
+                            self.slideshow = True
+                        else:
+                            self.slideshow = False
+                    elif words[0] == "delay":
+                        self.delay_list = []
+                        delay_strings = words[1].strip().split(";")
+                        for delstr in delay_strings:
+                            self.delay_list.append(float(delstr))
+                    elif words[0] == "sortmode":
+                        wrd1 = words[1].strip().lower()
+                        if wrd1 == "shuffle" or wrd1 == "date_seeded_shuffle" or wrd1 == "alphabetical":
+                            self.sortmode = wrd1
+                        else:
+                            sp_logging.G_LOGGER.info(
+                                "Exception: unknown sortmode: %s \
+                                    in profile: %s",
+                                words[1],
+                                self.name,
+                            )
+                    elif words[0] == "offsets":
+                        # Use PPI mode algorithm to do cuts.
+                        # Defaults assume uniform pixel density
+                        # if no custom values are given.
+                        offs = []
+                        offs_user_only = []
+                        # w1,h1;w2,h2;...
+                        offset_strings = words[1].strip().split(";")
+                        for offstr in offset_strings:
+                            res_str = offstr.split(",")
+                            try:
+                                offs.append((int(res_str[0]), int(res_str[1])))
+                                offs_user_only.append((int(res_str[0]), int(res_str[1])))
+                            except (ValueError, IndexError):
+                                offs.append((0, 0))
+                                offs_user_only.append((0, 0))
+                        while len(offs) < wpproc.NUM_DISPLAYS:
                             offs.append((0, 0))
                             offs_user_only.append((0, 0))
-                    while len(offs) < wpproc.NUM_DISPLAYS:
-                        offs.append((0, 0))
-                        offs_user_only.append((0, 0))
-                    self.ppimode = True
-                    self.manual_offsets = offs
-                    self.manual_offsets_useronly = offs_user_only
-                elif words[0] == "bezels":
-                    bez_mm_strings = words[1].strip().split(";")
-                    for bezstr in bez_mm_strings:
-                        self.bezels.append(float(bezstr))
-                elif words[0] == "ppi":
-                    self.ppimode = True
-                    # overwrite initialized arrays.
-                    self.ppi_array = []
-                    self.ppi_array_relative_density = []
-                    ppi_strings = words[1].strip().split(";")
-                    for ppistr in ppi_strings:
-                        self.ppi_array.append(int(ppistr))
-                elif words[0] == "diagonal_inches":
-                    self.ppimode = True
-                    # overwrite initialized arrays.
-                    self.ppi_array = []
-                    self.ppi_array_relative_density = []
-                    inch_strings = words[1].strip().split(";")
-                    self.inches = []
-                    for inchstr in inch_strings:
-                        self.inches.append(float(inchstr))
-                    self.ppi_array = self.compute_ppis(self.inches)
-                elif words[0] == "hotkey":
-                    binding_strings = words[1].strip().split("+")
-                    self.hk_binding = tuple(binding_strings)
-                    # if sp_logging.DEBUG:
-                    #     sp_logging.G_LOGGER.info("hkBinding: %s", self.hk_binding)
-                elif words[0] == "perspective":
-                    self.perspective = words[1].strip()
-                    # if sp_logging.DEBUG:
-                    #     sp_logging.G_LOGGER.info("perspective preset: %s", self.perspective)
-                elif words[0] == "zoom":
-                    try:
-                        self.zoom = max(1.0, float(words[1].strip()))
-                    except ValueError:
-                        self.zoom = 1.0
-                elif words[0] == "align":
-                    try:
-                        parts = words[1].strip().split(",")
-                        off_x = min(1.0, max(-1.0, float(parts[0])))
-                        off_y = min(1.0, max(-1.0, float(parts[1])))
-                        self.offsets = (off_x, off_y)
-                    except (ValueError, IndexError):
-                        self.offsets = (0.0, 0.0)
-                elif words[0] == "selected":
-                    sel = line.split("=", 1)[1].strip()
-                    sel_files = [p for p in sel.split(";") if p]
-                    self.selected = sel_files if sel_files else None
-                elif words[0].startswith("display"):
-                    paths = words[1].strip().split(";")
-                    paths = list(filter(None, paths))  # drop empty strings
-                    self.paths_array.append(paths)
-                else:
-                    sp_logging.G_LOGGER.info("Unknown setting line in config: %s", line)
+                        self.ppimode = True
+                        self.manual_offsets = offs
+                        self.manual_offsets_useronly = offs_user_only
+                    elif words[0] == "bezels":
+                        bez_mm_strings = words[1].strip().split(";")
+                        for bezstr in bez_mm_strings:
+                            self.bezels.append(float(bezstr))
+                    elif words[0] == "ppi":
+                        self.ppimode = True
+                        # overwrite initialized arrays.
+                        self.ppi_array = []
+                        self.ppi_array_relative_density = []
+                        ppi_strings = words[1].strip().split(";")
+                        for ppistr in ppi_strings:
+                            self.ppi_array.append(int(ppistr))
+                    elif words[0] == "diagonal_inches":
+                        self.ppimode = True
+                        # overwrite initialized arrays.
+                        self.ppi_array = []
+                        self.ppi_array_relative_density = []
+                        inch_strings = words[1].strip().split(";")
+                        self.inches = []
+                        for inchstr in inch_strings:
+                            self.inches.append(float(inchstr))
+                        self.ppi_array = self.compute_ppis(self.inches)
+                    elif words[0] == "hotkey":
+                        binding_strings = words[1].strip().split("+")
+                        self.hk_binding = tuple(binding_strings)
+                        # if sp_logging.DEBUG:
+                        #     sp_logging.G_LOGGER.info("hkBinding: %s", self.hk_binding)
+                    elif words[0] == "perspective":
+                        self.perspective = words[1].strip()
+                        # if sp_logging.DEBUG:
+                        #     sp_logging.G_LOGGER.info("perspective preset: %s", self.perspective)
+                    elif words[0] == "zoom":
+                        try:
+                            self.zoom = max(1.0, float(words[1].strip()))
+                        except ValueError:
+                            self.zoom = 1.0
+                    elif words[0] == "align":
+                        try:
+                            parts = words[1].strip().split(",")
+                            off_x = min(1.0, max(-1.0, float(parts[0])))
+                            off_y = min(1.0, max(-1.0, float(parts[1])))
+                            self.offsets = (off_x, off_y)
+                        except (ValueError, IndexError):
+                            self.offsets = (0.0, 0.0)
+                    elif words[0] == "selected":
+                        sel = line.split("=", 1)[1].strip()
+                        sel_files = [p for p in sel.split(";") if p]
+                        self.selected = sel_files if sel_files else None
+                    elif words[0].startswith("display"):
+                        paths = words[1].strip().split(";")
+                        paths = list(filter(None, paths))  # drop empty strings
+                        self.paths_array.append(paths)
+                    else:
+                        sp_logging.G_LOGGER.info("Unknown setting line in config: %s", line)
         except Exception as excep:
-            profile_file.close()
             raise ProfileDataException(
                 "There was an error parsing the profile:", self.name, self.file, excep
             ) from excep
-        finally:
-            profile_file.close()
 
     def compute_ppis(self, inches):
         """Compute monitor PPIs from user input diagonal inches."""
@@ -742,43 +729,41 @@ class TempProfileData:
         if self.name is not None:
             fname = os.path.join(PROFILES_PATH, self.name + ".profile")
             try:
-                tpfile = open(fname, "w", encoding="utf-8")
+                with open(fname, "w", encoding="utf-8") as tpfile:
+                    tpfile.write("name=" + str(self.name) + "\n")
+                    if self.spanmode:
+                        tpfile.write("spanmode=" + str(self.spanmode) + "\n")
+                    if self.spangroups:
+                        tpfile.write("spangroups=" + str(self.spangroups) + "\n")
+                    if self.slideshow is not None:
+                        tpfile.write("slideshow=" + str(self.slideshow) + "\n")
+                    if self.delay:
+                        tpfile.write("delay=" + str(self.delay) + "\n")
+                    if self.sortmode:
+                        tpfile.write("sortmode=" + str(self.sortmode) + "\n")
+                    if self.inches:
+                        tpfile.write("diagonal_inches=" + str(self.inches) + "\n")
+                    if self.manual_offsets:
+                        tpfile.write("offsets=" + str(self.manual_offsets) + "\n")
+                    if self.bezels:
+                        tpfile.write("bezels=" + str(self.bezels) + "\n")
+                    if self.hk_binding:
+                        tpfile.write("hotkey=" + str(self.hk_binding) + "\n")
+                    if self.perspective:
+                        tpfile.write("perspective=" + str(self.perspective) + "\n")
+                    if self.zoom is not None and self.zoom != 1.0:
+                        tpfile.write("zoom=" + str(self.zoom) + "\n")
+                    if self.align is not None and tuple(self.align) != (0.0, 0.0):
+                        tpfile.write(f"align={self.align[0]},{self.align[1]}\n")
+                    if self.selected:
+                        tpfile.write("selected=" + ";".join(self.selected) + "\n")
+                    if self.paths_array:
+                        for paths in self.paths_array:
+                            tpfile.write("display" + str(self.paths_array.index(paths)) + "paths=" + paths + "\n")
             except OSError:
                 msg = f"Cannot write to file {fname}"
                 show_message_dialog(msg, "Error")
                 return None
-            tpfile.write("name=" + str(self.name) + "\n")
-            if self.spanmode:
-                tpfile.write("spanmode=" + str(self.spanmode) + "\n")
-            if self.spangroups:
-                tpfile.write("spangroups=" + str(self.spangroups) + "\n")
-            if self.slideshow is not None:
-                tpfile.write("slideshow=" + str(self.slideshow) + "\n")
-            if self.delay:
-                tpfile.write("delay=" + str(self.delay) + "\n")
-            if self.sortmode:
-                tpfile.write("sortmode=" + str(self.sortmode) + "\n")
-            if self.inches:
-                tpfile.write("diagonal_inches=" + str(self.inches) + "\n")
-            if self.manual_offsets:
-                tpfile.write("offsets=" + str(self.manual_offsets) + "\n")
-            if self.bezels:
-                tpfile.write("bezels=" + str(self.bezels) + "\n")
-            if self.hk_binding:
-                tpfile.write("hotkey=" + str(self.hk_binding) + "\n")
-            if self.perspective:
-                tpfile.write("perspective=" + str(self.perspective) + "\n")
-            if self.zoom is not None and self.zoom != 1.0:
-                tpfile.write("zoom=" + str(self.zoom) + "\n")
-            if self.align is not None and tuple(self.align) != (0.0, 0.0):
-                tpfile.write(f"align={self.align[0]},{self.align[1]}\n")
-            if self.selected:
-                tpfile.write("selected=" + ";".join(self.selected) + "\n")
-            if self.paths_array:
-                for paths in self.paths_array:
-                    tpfile.write("display" + str(self.paths_array.index(paths)) + "paths=" + paths + "\n")
-
-            tpfile.close()
             return fname
         else:
             print("tmp.Save(): name is not set.")
@@ -790,8 +775,8 @@ class TempProfileData:
         if self.name is not None and self.name.strip() != "":
             fname = os.path.join(PROFILES_PATH, self.name + ".deleteme")
             try:
-                testfile = open(fname, "w", encoding="utf-8")
-                testfile.close()
+                with open(fname, "w", encoding="utf-8"):
+                    pass
                 os.remove(fname)
             except OSError:
                 msg = f"Cannot write to file {fname}"
