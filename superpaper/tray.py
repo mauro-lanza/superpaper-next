@@ -142,8 +142,8 @@ hotkeys will not work. Exception: %s",
                     excep,
                 )
         if self.g_settings.show_help is True:
-            config_frame = ConfigFrame(self)  # noqa: F841
-            help_frame = HelpFrame()  # noqa: F841
+            ConfigFrame(self)
+            HelpFrame()
         elif wpproc.running_kde():
             # KDE Plasma 6 workaround: tray icon clicks don't work with wxPython
             # Automatically open the config GUI on startup
@@ -156,14 +156,11 @@ hotkeys will not work. Exception: %s",
             if "system_hotkey" not in sys.modules:
                 try:
                     # import keyboard # https://github.com/boppreh/keyboard
-                    # This import allows access to the specific errors in this method.
-                    from system_hotkey import (
-                        InvalidKeyError,  # noqa: F401
-                        SystemHotkey,  # noqa: F401
-                        SystemHotkeyError,  # noqa: F401
-                        SystemRegisterError,  # noqa: F401
-                        UnregisterError,  # noqa: F401
-                    )
+                    # Imported here only to verify availability; the registration
+                    # error handling below uses broad ``except Exception`` clauses
+                    # because the specific exception classes are not reliably in
+                    # scope (this import is conditional on sys.modules).
+                    import system_hotkey  # noqa: F401
                 except ImportError as import_e:
                     sp_logging.G_LOGGER.info(
                         "WARNING: Could not import keyboard hotkey hook library, \
@@ -216,7 +213,7 @@ hotkeys will not work. Exception: %s",
                             )
                             self.seen_binding.add(self.g_settings.hk_binding_next)
                         # except (SystemHotkeyError, SystemRegisterError, InvalidKeyError):
-                        except:  # noqa: E722
+                        except Exception:
                             msg = f"Error: could not register hotkey {self.g_settings.hk_binding_next}. \
 Check that it is formatted properly and valid keys."
                             sp_logging.G_LOGGER.warning(msg)
@@ -232,7 +229,7 @@ Check that it is formatted properly and valid keys."
                             )
                             self.seen_binding.add(self.g_settings.hk_binding_pause)
                         # except (SystemHotkeyError, SystemRegisterError, InvalidKeyError):
-                        except:  # noqa: E722
+                        except Exception:
                             msg = f"Error: could not register hotkey {self.g_settings.hk_binding_pause}. \
 Check that it is formatted properly and valid keys."
                             sp_logging.G_LOGGER.warning(msg)
@@ -260,7 +257,7 @@ Check that it is formatted properly and valid keys."
                                 self.hk2.register(profile.hk_binding, profile, overwrite=False)
                                 self.seen_binding.add(profile.hk_binding)
                             # except (SystemHotkeyError, SystemRegisterError, InvalidKeyError):
-                            except:  # noqa: E722
+                            except Exception:
                                 msg = f"Error: could not register hotkey {profile.hk_binding}. \
 Check that it is formatted properly and valid keys."
                                 sp_logging.G_LOGGER.warning(msg)
@@ -274,7 +271,7 @@ It is already registered for another action."
                             if not wpproc.running_kde():
                                 show_message_dialog(msg, "Error")
                 # except (SystemHotkeyError, SystemRegisterError, UnregisterError, InvalidKeyError):
-                except:  # noqa: E722
+                except Exception:
                     if sp_logging.DEBUG:
                         sp_logging.G_LOGGER.info("Coulnd't register hotkeys, exception:")
                         sp_logging.G_LOGGER.info(sys.exc_info()[0])
@@ -294,7 +291,7 @@ It is already registered for another action."
             try:
                 self.hk2.register(new_hotkey, profile, overwrite=False)
                 self.seen_binding.add(new_hotkey)
-            except:  # noqa: E722
+            except Exception:
                 msg = f"Error: could not register hotkey {profile.hk_binding}. \
 Check that it is formatted properly and valid keys."
                 sp_logging.G_LOGGER.warning(msg)
@@ -382,13 +379,13 @@ Check that it is formatted properly and valid keys."
     def configure_wallpapers(self, event):
         """Opens wallpaper configuration panel."""
         try:
-            config_frame = ConfigFrame(self)  # noqa: F841
+            ConfigFrame(self)
         except Exception as e:
             sp_logging.G_LOGGER.error("configure_wallpapers error: %s", e, exc_info=True)
 
     def configure_settings(self, event):
         """Opens general settings panel."""
-        setting_frame = SettingsFrame(self)  # noqa: F841
+        SettingsFrame(self)
 
     def reload_profiles(self, event):
         """Reloads profiles from disk."""

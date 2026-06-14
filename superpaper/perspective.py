@@ -98,7 +98,7 @@ def get_backprojected_display_system(crops, persp_data, plot=False):
         colors = ("red", "orange", "blue", "cyan")
         # groups = ("orig", "rotated")
 
-        fig = plt.figure()  # noqa: F841
+        plt.figure()
         # ax = fig.add_subplot(1, 1, 1, facecolor="1.0")
         # for dat, color, group in zip(data, colors, groups):
         for dat, color in zip(data, colors):
@@ -178,8 +178,6 @@ def get_backprojected_display(
     tilt_ang *= 2 * pi / 360
 
     display_plane = XYPlaneRectangle(display_center, display_size)
-    display_normal = display_plane.normal()  # noqa: F841
-    display_basis = display_plane.basis()  # noqa: F841
     display_center = display_plane.center
     axis_swivel = display_plane.swivel_axis(swiv_ax, depth_offset=swiv_depth, lateral_offset=swiv_loff)
     axis_tilt = display_plane.tilt_axis(depth_offset=tilt_depth, vertical_offset=tilt_voff)

@@ -5,7 +5,7 @@ New wallpaper configuration GUI for Superpaper.
 import os
 import time
 from operator import itemgetter
-from typing import Literal, Tuple, overload  # noqa: UP035
+from typing import Literal, overload
 
 from PIL import Image, ImageEnhance, UnidentifiedImageError
 
@@ -342,7 +342,6 @@ class WallpaperSettingsPanel(wx.Panel):
     def create_sizer_settings_advanced(self):
         """Create sizer for advanced spanning settings."""
         self.sizer_setting_adv = wx.StaticBoxSizer(wx.VERTICAL, self, "Advanced wallpaper adjustment")
-        statbox_parent_adv = self.sizer_setting_adv.GetStaticBox()  # noqa: F841
 
         # Fallback Diagonal Inches
         self.sizer_setting_diaginch = wx.BoxSizer(wx.VERTICAL)
@@ -936,7 +935,7 @@ class WallpaperSettingsPanel(wx.Panel):
         cb_state = self.cb_diaginch.GetValue()
         sizer = self.sizer_setting_diaginch
         self.sizer_toggle_children(sizer, cb_state)
-        if cb_state == False:  # noqa: E712
+        if not cb_state:
             # revert to automatic detection and save
             self.display_sys.update_display_diags("auto")
             self.display_sys.save_system()
@@ -1246,7 +1245,6 @@ class WallpaperSettingsPanel(wx.Panel):
             path_lc_contents.append(item_dat)
 
         # format paths
-        paths_array = []  # noqa: F841
         if columns == 1:
             flat_contents = [path for row in path_lc_contents for path in row]
             semicol_sep_paths = ";".join(flat_contents)
@@ -1370,8 +1368,6 @@ class WallpaperSettingsPanel(wx.Panel):
             msg = f"Test image not found in {testimage}."
             show_message_dialog(msg, "Error")
 
-        inches = [dsp.diagonal_size()[1] for dsp in self.display_sys.disp_list]  # noqa: F841
-
         offsets = []
         for off_tc in self.tc_list_offsets:
             off = off_tc.GetLineText(0).split(",")
@@ -1408,7 +1404,7 @@ class WallpaperSettingsPanel(wx.Panel):
     def onPerspectives(self, event):
         """Open perspective configuration dialog."""
         dlg = PerspectiveConfig(self)
-        res = dlg.ShowModal()  # noqa: F841
+        dlg.ShowModal()
         # if res == wx.ID_OK:
         # pass
         dlg.Destroy()
@@ -1430,7 +1426,7 @@ class WallpaperSettingsPanel(wx.Panel):
 
     def onHelp(self, event):
         """Open help dialog."""
-        help_frame = HelpFrame(self)  # noqa: F841
+        HelpFrame(self)
 
     def onHelpHotkey(self, evt):
         """Popup hotkey help."""
@@ -1542,8 +1538,6 @@ class WallpaperPreviewPanel(wx.Panel):
     # UI drawing methods
     #
     def draw_displays(self, use_ppi_px=False, use_multi_image=False):
-        work_sz = self.GetSize()  # noqa: F841
-
         # draw canvas
         bmp_canv = wx.Bitmap.FromRGBA(
             self.dtop_canvas_relsz[0], self.dtop_canvas_relsz[1], red=0, green=0, blue=0, alpha=255
@@ -1791,16 +1785,17 @@ class WallpaperPreviewPanel(wx.Panel):
     @overload
     def resize_and_bitmap(self, fname, size, enhance_color: Literal[False] = False) -> "wx.Bitmap": ...
     @overload
-    def resize_and_bitmap(self, fname, size, enhance_color: Literal[True]) -> "Tuple[wx.Bitmap, wx.Bitmap]": ...  # noqa: UP006
+    def resize_and_bitmap(self, fname, size, enhance_color: Literal[True]) -> "tuple[wx.Bitmap, wx.Bitmap]": ...
 
     def resize_and_bitmap(self, fname, size, enhance_color=False):
         """Take filename of an image and resize and crop it to size."""
         try:
             pil = resize_to_fill(Image.open(fname), size, quality="fast", zoom=self.zoom, offset=self.offset)
         except UnidentifiedImageError:
-            msg = (  # noqa: UP031
-                "Opening image '%s' failed with PIL.UnidentifiedImageError.It could be corrupted or is of foreign type."
-            ) % fname
+            msg = (
+                f"Opening image '{fname}' failed with PIL.UnidentifiedImageError."
+                "It could be corrupted or is of foreign type."
+            )
             sp_logging.G_LOGGER.info(msg)
             # show_message_dialog(msg)
             black_bmp = wx.Bitmap.FromRGBA(size[0], size[1], red=0, green=0, blue=0, alpha=255)
@@ -1953,11 +1948,9 @@ class WallpaperPreviewPanel(wx.Panel):
                 display_szs_pos.append(
                     (
                         tuple([round(px * scaling_fac) for px in disp.resolution]),
-                        tuple(  # noqa: C409
-                            [
-                                round(doff[0] * scaling_fac) + off[0],
-                                round(doff[1] * scaling_fac) + off[1],
-                            ]
+                        (
+                            round(doff[0] * scaling_fac) + off[0],
+                            round(doff[1] * scaling_fac) + off[1],
                         ),
                     )
                 )
@@ -2101,7 +2094,7 @@ class WallpaperPreviewPanel(wx.Panel):
 
     def onEntry(self, evt):
         """Opens display positions accurate entry dialog."""
-        dlg = DisplayPositionEntry(self, dragged_positions=self.positions_dragged)  # noqa: F841
+        DisplayPositionEntry(self, dragged_positions=self.positions_dragged)
 
     def onCancel(self, evt):
         """Cancel out of diplay position config mode."""
@@ -2441,7 +2434,6 @@ class WallpaperPreviewPanel(wx.Panel):
 
         # create bitmap buttons
         for st_bmp in self.preview_img_list:
-            butts = []  # noqa: F841
             butt_rb = wx.BitmapButton(self, bitmap=rb_bmp, name="butt_bez_r", style=wx.BORDER_NONE)
             butt_bb = wx.BitmapButton(self, bitmap=bb_bmp, name="butt_bez_b", style=wx.BORDER_NONE)
             bez_butt_color = wx.Colour(41, 47, 52)
@@ -2605,7 +2597,6 @@ class WallpaperPreviewPanel(wx.Panel):
                 self.Show()
                 return -1
             self.current_bez_val = entered_val
-            display_sys = self.preview.display_sys  # noqa: F841
             pops = self.preview.bezel_popups
             bezel_mms = []
             for pop_pair in pops:

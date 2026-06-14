@@ -127,16 +127,18 @@ class GeneralSettingsData:
                         wrds1 = words[1].strip().lower()
                         if wrds1 == "true":
                             self.logging = True
-                            sp_logging.LOGGING = True  # ty:ignore[invalid-assignment]
-                            sp_logging.DEBUG = True  # ty:ignore[invalid-assignment]
+                            sp_logging.LOGGING = True
+                            sp_logging.DEBUG = True
                             sp_logging.G_LOGGER = logging.getLogger("default")
                             sp_logging.G_LOGGER.setLevel(logging.INFO)
                             # Install exception handler
                             sys.excepthook = sp_logging.custom_exception_handler
-                            sp_logging.FILE_HANDLER = logging.FileHandler(os.path.join(TEMP_PATH, "log"), mode="w")  # ty:ignore[unresolved-attribute]
-                            sp_logging.G_LOGGER.addHandler(sp_logging.FILE_HANDLER)  # ty:ignore[unresolved-attribute]
-                            sp_logging.CONSOLE_HANDLER = logging.StreamHandler()  # ty:ignore[unresolved-attribute]
-                            sp_logging.G_LOGGER.addHandler(sp_logging.CONSOLE_HANDLER)  # ty:ignore[unresolved-attribute]
+                            file_handler = logging.FileHandler(os.path.join(TEMP_PATH, "log"), mode="w")
+                            sp_logging.FILE_HANDLER = file_handler
+                            sp_logging.G_LOGGER.addHandler(file_handler)
+                            console_handler = logging.StreamHandler()
+                            sp_logging.CONSOLE_HANDLER = console_handler
+                            sp_logging.G_LOGGER.addHandler(console_handler)
                             sp_logging.G_LOGGER.info("Enabled logging to file.")
                     elif words[0] == "use hotkeys":
                         wrds1 = words[1].strip().lower()
@@ -268,7 +270,7 @@ class ProfileData:
         self.spanmode = "single"  # single / advanced / multi
         self.spangroups = None
         self.slideshow = True
-        self.delay_list = [600]
+        self.delay_list: list[float] = [600]
         self.sortmode = "shuffle"  # shuffle / alphabetical / date_seeded_shuffle
         self.ppimode = False
         self.ppi_array = wpproc.NUM_DISPLAYS * [100]
@@ -322,7 +324,7 @@ class ProfileData:
                     for grp in groups:
                         try:
                             ids = [int(idx) for idx in grp]
-                            spangroups.append(sorted(list(set(ids))))  # drop duplicates  # noqa: C414
+                            spangroups.append(sorted(set(ids)))  # drop duplicates
                         except ValueError:
                             spangroups = None
                             break
@@ -337,7 +339,7 @@ class ProfileData:
                     self.delay_list = []
                     delay_strings = words[1].strip().split(";")
                     for delstr in delay_strings:
-                        self.delay_list.append(float(delstr))  # ty:ignore[invalid-argument-type]
+                        self.delay_list.append(float(delstr))
                 elif words[0] == "sortmode":
                     wrd1 = words[1].strip().lower()
                     if wrd1 == "shuffle":
@@ -775,7 +777,7 @@ class TempProfileData:
             if self.zoom is not None and self.zoom != 1.0:
                 tpfile.write("zoom=" + str(self.zoom) + "\n")
             if self.align is not None and tuple(self.align) != (0.0, 0.0):
-                tpfile.write("align=%s,%s\n" % (self.align[0], self.align[1]))  # noqa: UP031
+                tpfile.write(f"align={self.align[0]},{self.align[1]}\n")
             if self.selected:
                 tpfile.write("selected=" + ";".join(self.selected) + "\n")
             if self.paths_array:
@@ -907,7 +909,7 @@ Valid modifiers are 'control', 'super', 'alt', 'shift'."
         list_input = input_string.split(";")
         for item in list_input:
             try:
-                val = float(item)  # noqa: F841
+                float(item)
             except ValueError:
                 sp_logging.G_LOGGER.info("float type check failed for: '%s'", item)
                 return False
@@ -926,8 +928,8 @@ Valid modifiers are 'control', 'super', 'alt', 'shift'."
                 if len(offset) != 2:
                     return False
                 try:
-                    val_w = int(offset[0])  # noqa: F841
-                    val_h = int(offset[1])  # noqa: F841
+                    int(offset[0])
+                    int(offset[1])
                 except ValueError:
                     sp_logging.G_LOGGER.info("int type check failed for: '%s' or '%s'", offset[0], offset[1])
                     return False

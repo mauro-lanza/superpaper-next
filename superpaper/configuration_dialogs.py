@@ -213,7 +213,6 @@ class BrowsePaths(wx.Dialog):
 
     def onAdd(self, event):
         """Adds selected path to export field."""
-        path_data_tuples = []  # noqa: F841
         sel_path = self.dir3.GetPath()
         # self.dir3.GetPaths(paths) # more efficient but couldn't get to work
         if self.use_multi_image:
@@ -919,7 +918,6 @@ class PerspectiveConfig(wx.Dialog):
         """Acts once a profile is picked in the dropdown menu."""
         event_object = event.GetEventObject()
         if event_object.GetName() == "ProfileChoice":
-            item = event.GetSelection()  # noqa: F841
             item_str = event.GetString()
             if item_str == "Create a new profile":
                 self.onCreateNewProfile(event)
@@ -1067,8 +1065,6 @@ class PerspectiveConfig(wx.Dialog):
             return 0
 
         # Use the settings currently written out in the fields!
-        inches = [dsp.diagonal_size()[1] for dsp in self.display_sys.disp_list]  # noqa: F841
-
         offsets = []
         for off_tc in self.frame.tc_list_offsets:
             off = off_tc.GetLineText(0).split(",")

@@ -1616,11 +1616,9 @@ def remove_old_temp_files(outputfile):
     # print(opname)
     oldfileid = ""
     if opname.endswith("-a"):
-        newfileid = "-a"
         oldfileid = "-b"
         # print(oldfileid)
     elif opname.endswith("-b"):
-        newfileid = "-b"  # noqa: F841
         oldfileid = "-a"
         # print(oldfileid)
     else:
@@ -2182,7 +2180,7 @@ def xfce_actions(outputfile):
         if "workspace0/image-style" in prop:
             os.system("xfconf-query -c xfce4-desktop -p " + prop + " -s 6")  # ty:ignore[deprecated]
         elif "workspace0/last-image" in prop:
-            os.system("xfconf-query -c xfce4-desktop -p " + prop + " -s '%s'" % outputfile)  # noqa: UP031  # ty:ignore[deprecated]
+            os.system("xfconf-query -c xfce4-desktop -p " + prop + f" -s '{outputfile}'")  # ty:ignore[deprecated]
 
     # Delete old images after new ones are set
     if outputfile:
@@ -2277,7 +2275,7 @@ def quick_profile_job(profile):
                 # Skip quick switch on Windows if not using perspective corrections.
                 if profile.spanmode == "advanced" and G_ACTIVE_DISPLAYSYSTEM.use_perspective:
                     if (
-                        profile.perspective == "default" and G_ACTIVE_DISPLAYSYSTEM.default_perspective != None  # noqa: E711
+                        profile.perspective == "default" and G_ACTIVE_DISPLAYSYSTEM.default_perspective is not None
                     ) or profile.perspective not in ["default", "disabled"]:
                         thrd = Thread(
                             target=set_wallpaper,

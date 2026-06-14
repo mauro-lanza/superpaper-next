@@ -1,5 +1,5 @@
 import ctypes
-from typing import List, Optional  # noqa: UP035
+from typing import Optional
 
 # pywin32 ships type stubs but the compiled modules are Windows-only, so the
 # source can't be resolved off-Windows (reportMissingModuleSource).
@@ -28,7 +28,7 @@ def _make_filter(class_name: Optional[str], title: Optional[str]):
 
 def find_window_handles(
     parent: Optional[int] = None, window_class: Optional[str] = None, title: Optional[str] = None
-) -> List[int]:  # noqa: UP006
+) -> list[int]:
     cb = _make_filter(window_class, title)
     try:
         handle_list = []

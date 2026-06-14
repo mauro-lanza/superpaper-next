@@ -78,12 +78,13 @@ def cli_logic():
     args = parser.parse_args()
 
     if args.debug:
-        sp_logging.DEBUG = True  # ty:ignore[invalid-assignment]
+        sp_logging.DEBUG = True
         sp_logging.G_LOGGER.setLevel(logging.INFO)
         # Install exception handler
         # sys.excepthook = custom_exception_handler
-        sp_logging.CONSOLE_HANDLER = logging.StreamHandler()  # ty:ignore[unresolved-attribute]
-        sp_logging.G_LOGGER.addHandler(sp_logging.CONSOLE_HANDLER)  # ty:ignore[unresolved-attribute]
+        console_handler = logging.StreamHandler()
+        sp_logging.CONSOLE_HANDLER = console_handler
+        sp_logging.G_LOGGER.addHandler(console_handler)
         sp_logging.G_LOGGER.info(f"Input images: {args.setimages}")
         sp_logging.G_LOGGER.info(f"Input profile: {args.profile}")
         sp_logging.G_LOGGER.info(f"Input perspective: {args.perspective}")
@@ -138,7 +139,7 @@ Exiting.""")
             for grp in args.spangroups:
                 try:
                     ids = [int(idx) for idx in grp]
-                    spangrp.append(sorted(list(set(ids))))  # drop duplicates  # noqa: C414
+                    spangrp.append(sorted(set(ids)))  # drop duplicates
                 except ValueError:
                     sp_logging.G_LOGGER.error(
                         f"Exception: One of the display ids \
