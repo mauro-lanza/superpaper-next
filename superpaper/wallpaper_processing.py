@@ -922,10 +922,18 @@ def compute_ppi_corrected_res_array(res_array, ppi_list_rel_density):
     return eff_res_array
 
 
-# resize image to fill given rectangle and do a centered crop to size.
+# resize image to fill given rectangle and do a positioned crop to size.
 # Return output image.
-def resize_to_fill(img, res, quality=Image.LANCZOS):
-    """Resize image to fill given rectangle and do a centered crop to size."""
+def resize_to_fill(img, res, quality=Image.LANCZOS, zoom=1.0, offset=(0.0, 0.0)):
+    """Resize image to fill given rectangle and do a positioned crop to size.
+
+    The image is always scaled so that it fully covers the target rectangle
+    ``res`` (no letterboxing). ``zoom`` (>= 1.0) scales the image further in,
+    cropping away more of the source. ``offset`` is an (x, y) pair in the range
+    [-1.0, 1.0] that slides the crop window within the available overflow:
+    0.0 keeps the default centered crop, -1.0 aligns to the left/top edge and
+    +1.0 aligns to the right/bottom edge. The result always fills ``res``.
+    """
     if quality == "fast":
         quality = Image.HAMMING
         reducing_gap = 1.5
@@ -936,76 +944,53 @@ def resize_to_fill(img, res, quality=Image.LANCZOS):
     if not img.mode == "RGB":
         img = img.convert("RGB")
 
+    # Sanitize positioning parameters.
+    try:
+        zoom = float(zoom)
+    except (TypeError, ValueError):
+        zoom = 1.0
+    if zoom < 1.0:
+        zoom = 1.0
+    try:
+        offset_x = min(1.0, max(-1.0, float(offset[0])))
+        offset_y = min(1.0, max(-1.0, float(offset[1])))
+    except (TypeError, ValueError, IndexError):
+        offset_x, offset_y = 0.0, 0.0
+
     image_size = img.size  # returns image (width,height)
-    if image_size == res:
+    if image_size == res and zoom == 1.0 and offset_x == 0.0 and offset_y == 0.0:
         # input image is already of the correct size, no action needed.
         return img
-    image_ratio = image_size[0] / image_size[1]
-    target_ratio = res[0] / res[1]
-    # resize along the shorter edge to get an image that is at least of the
-    # target size on the shorter edge.
-    if image_ratio < target_ratio:      # img not wide enough / is too tall
-        resize_multiplier = res[0] / image_size[0]
-        new_size = (
-            round(resize_multiplier * image_size[0]),
-            round(resize_multiplier * image_size[1]))
-        img = img.resize(new_size, resample=quality, reducing_gap=reducing_gap)
-        # crop vertically to target height
-        extra_height = new_size[1] - res[1]
-        if extra_height < 0:
-            sp_logging.G_LOGGER.info(
-                "Error with cropping vertically, resized image \
-                wasn't taller than target size.")
-            return -1
-        if extra_height == 0:
-            # image is already at right height, no cropping needed.
-            return img
-        # (left edge, half of extra height from top,
-        # right edge, bottom = top + res[1]) : force correct height
-        crop_tuple = (
-            0,
-            round(extra_height/2),
-            new_size[0],
-            round(extra_height/2) + res[1])
-        cropped_res = img.crop(crop_tuple)
-        if cropped_res.size == res:
-            return cropped_res
-        else:
-            sp_logging.G_LOGGER.info(
-                "Error: result image not of correct size. crp:%s, res:%s",
-                cropped_res.size, res)
-            return -1
-    elif image_ratio >= target_ratio:      # img not tall enough / is too wide
-        resize_multiplier = res[1] / image_size[1]
-        new_size = (
-            round(resize_multiplier * image_size[0]),
-            round(resize_multiplier * image_size[1]))
-        img = img.resize(new_size, resample=quality, reducing_gap=reducing_gap)
-        # crop horizontally to target width
-        extra_width = new_size[0] - res[0]
-        if extra_width < 0:
-            sp_logging.G_LOGGER.info(
-                "Error with cropping horizontally, resized image \
-                wasn't wider than target size.")
-            return -1
-        if extra_width == 0:
-            # image is already at right width, no cropping needed.
-            return img
-        # (half of extra from left edge, top edge,
-        # right = left + desired width, bottom) : force correct width
-        crop_tuple = (
-            round(extra_width/2),
-            0,
-            round(extra_width/2) + res[0],
-            new_size[1])
-        cropped_res = img.crop(crop_tuple)
-        if cropped_res.size == res:
-            return cropped_res
-        else:
-            sp_logging.G_LOGGER.info(
-                "Error: result image not of correct size. crp:%s, res:%s",
-                cropped_res.size, res)
-            return -1
+
+    # Scale so the image at least covers the target rectangle (cover fit),
+    # then apply the additional user zoom. Using max() of the edge ratios
+    # guarantees coverage regardless of aspect ratios.
+    cover_multiplier = max(res[0] / image_size[0], res[1] / image_size[1])
+    resize_multiplier = cover_multiplier * zoom
+    # Guarantee the scaled image is never smaller than the target on either
+    # edge despite rounding, so the final crop always yields exactly res.
+    new_size = (
+        max(round(resize_multiplier * image_size[0]), res[0]),
+        max(round(resize_multiplier * image_size[1]), res[1]))
+    img = img.resize(new_size, resample=quality, reducing_gap=reducing_gap)
+
+    extra_width = new_size[0] - res[0]
+    extra_height = new_size[1] - res[1]
+    # offset 0.0 -> centered crop (extra/2); -1.0 -> 0; +1.0 -> extra.
+    left = round(extra_width / 2 * (1 + offset_x))
+    top = round(extra_height / 2 * (1 + offset_y))
+    # Clamp the crop origin so the window stays fully inside the image.
+    left = min(max(left, 0), extra_width)
+    top = min(max(top, 0), extra_height)
+    crop_tuple = (left, top, left + res[0], top + res[1])
+    cropped_res = img.crop(crop_tuple)
+    if cropped_res.size == res:
+        return cropped_res
+    else:
+        sp_logging.G_LOGGER.info(
+            "Error: result image not of correct size. crp:%s, res:%s",
+            cropped_res.size, res)
+        return -1
 
 
 def get_center(res):
@@ -1152,7 +1137,8 @@ def span_single_image_simple(profile, force):
         sp_logging.G_LOGGER.info(("Opening image '%s' failed with PIL.UnidentifiedImageError."
                                   "It could be corrupted or is of foreign type."), file)
     canvas_tuple = tuple(compute_canvas(RESOLUTION_ARRAY, DISPLAY_OFFSET_ARRAY))
-    img_resize = resize_to_fill(img, canvas_tuple)
+    img_resize = resize_to_fill(img, canvas_tuple,
+                                zoom=profile.zoom, offset=profile.offsets)
 
     outputfile, outputfile_old = alternating_outputfile(profile.name)
     img_resize.save(outputfile, quality=95) # set quality if jpg is used, png unaffected
@@ -1250,7 +1236,8 @@ def span_single_image_advanced(profile, force):
             # Canvas containing ppi normalized displays
             canvas_tuple_trgt = tuple(compute_working_canvas(grp_crops))
             sp_logging.G_LOGGER.info("Back-projected canvas size: %s", canvas_tuple_proj)
-            img_workingsize = resize_to_fill(img, canvas_tuple_proj)
+            img_workingsize = resize_to_fill(img, canvas_tuple_proj,
+                                             zoom=profile.zoom, offset=profile.offsets)
             for crop_tup, coeffs, ppin_crop, (i_res, res) in zip(proj_plane_crops,
                                                                  persp_coeffs,
                                                                  grp_crops,
@@ -1277,7 +1264,8 @@ def span_single_image_advanced(profile, force):
             # Image is now the height of the eff tallest display + possible manual
             # offsets and the width of the combined eff widths + possible manual
             # offsets.
-            img_workingsize = resize_to_fill(img, canvas_tuple_eff)
+            img_workingsize = resize_to_fill(img, canvas_tuple_eff,
+                                             zoom=profile.zoom, offset=profile.offsets)
             # Simultaneously make crops at working size and then resize down to actual
             # resolution from RESOLUTION_ARRAY as needed.
             for crop_tup, (i_res, res) in zip(grp_crops, enumerate(grp_res_arr)):
@@ -1329,7 +1317,8 @@ def set_multi_image_wallpaper(profile, force):
         except UnidentifiedImageError:
             sp_logging.G_LOGGER.info(("Opening image '%s' failed with PIL.UnidentifiedImageError."
                                       "It could be corrupted or is of foreign type."), file)
-        img_resized.append(resize_to_fill(image, res))
+        img_resized.append(resize_to_fill(image, res,
+                                          zoom=profile.zoom, offset=profile.offsets))
     canvas_tuple = tuple(compute_canvas(RESOLUTION_ARRAY, DISPLAY_OFFSET_ARRAY))
     combined_image = Image.new("RGB", canvas_tuple, color=0)
     combined_image.load()
