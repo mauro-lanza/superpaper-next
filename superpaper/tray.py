@@ -381,7 +381,11 @@ Check that it is formatted properly and valid keys.".format(profile.hk_binding)
             if profile is None:
                 sp_logging.G_LOGGER.info("No previous profile was found.")
             else:
-                self.repeating_timer, thrd = run_profile_job(profile)
+                # Restore the last rendered wallpaper without cycling, then arm
+                # the slideshow timer (if any). The wallpaper is not changed on
+                # launch; cycling only happens later on the timer's schedule.
+                quick_profile_job(profile)
+                self.repeating_timer, thrd = run_profile_job(profile, startup=True)
 
     def start_profile(self, event, profile, force_reload=False):
         """
@@ -457,10 +461,10 @@ Check that it is formatted properly and valid keys.".format(profile.hk_binding)
             if (self.repeating_timer is not None
                     and self.repeating_timer.is_running):
                 self.repeating_timer.stop()
-                change_wallpaper_job(self.active_profile)
+                change_wallpaper_job(self.active_profile, advance=True)
                 self.repeating_timer.start()
             else:
-                change_wallpaper_job(self.active_profile)
+                change_wallpaper_job(self.active_profile, advance=True)
 
     def rt_stop(self):
         """Stops running slideshow timer if one is active."""
