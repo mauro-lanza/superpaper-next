@@ -914,6 +914,25 @@ class WallpaperSettingsPanel(wx.Panel):
         cb_state = self.cb_slideshow.GetValue()
         sizer = self.sizer_setting_slideshow
         self.sizer_toggle_children(sizer, cb_state)
+        # Zoom/pan is tuned to a single image's framing. In a slideshow the same
+        # crop would be forced onto every (differently composed) image, so reset
+        # the controls to defaults and disable them while slideshow is enabled.
+        if cb_state:
+            self.reset_zoom_offset()
+        self.toggle_zoom_widgets(not cb_state)
+
+    def reset_zoom_offset(self):
+        """Return the zoom/position sliders to their no-op defaults."""
+        self.sld_zoom.SetValue(100)
+        self.sld_offx.SetValue(0)
+        self.sld_offy.SetValue(0)
+        self.onZoomOffsetChange(None)
+
+    def toggle_zoom_widgets(self, enable):
+        """Enable/disable the image scaling & position controls."""
+        self.sizer_toggle_children(self.sizer_setting_zoom, enable)
+        for sld in (self.sld_zoom, self.sld_offx, self.sld_offy):
+            sld.Enable(enable)
 
     def onCheckboxHotkey(self, event):
         cb_state = self.cb_hotkey.GetValue()
@@ -1146,11 +1165,8 @@ class WallpaperSettingsPanel(wx.Panel):
             saved_profile_name = ProfileData(saved_file).name
             self.parent_tray_obj.reload_profiles(event)
             saved_profile_to_start = self.parent_tray_obj.get_profile_by_name(saved_profile_name)
-            # When slideshow is off, apply the selected wallpaper instead of cycling
-            if not saved_profile_to_start.slideshow:
-                selected_file = self._get_selected_wallpaper_path()
-                if selected_file and os.path.isfile(selected_file):
-                    saved_profile_to_start.set_selected_wallpaper([selected_file])
+            # The chosen wallpaper is persisted in the profile; applying renders
+            # that selection and never cycles on its own.
             wx.Yield()
             thrd = self.parent_tray_obj.start_profile(event, saved_profile_to_start, force_reload=True)
             if thrd:
@@ -1159,8 +1175,6 @@ class WallpaperSettingsPanel(wx.Panel):
                 while thrd.is_alive():
                     wx.YieldIfNeeded()
                     time.sleep(0.05)
-            if not saved_profile_to_start.slideshow:
-                saved_profile_to_start.clear_selected_wallpaper()
         else:
             pass
         del busy
@@ -1220,10 +1234,27 @@ class WallpaperSettingsPanel(wx.Panel):
         else:
             tmp_profile.perspective = "default"
 
-        # image scaling & position
-        tmp_profile.zoom = self.sld_zoom.GetValue() / 100.0
-        tmp_profile.align = (self.sld_offx.GetValue() / 100.0,
-                             self.sld_offy.GetValue() / 100.0)
+        # image scaling & position. Zoom/pan only applies to a single fixed
+        # image; a slideshow always renders at defaults regardless of slider state.
+        if self.cb_slideshow.GetValue():
+            tmp_profile.zoom = 1.0
+            tmp_profile.align = (0.0, 0.0)
+        else:
+            tmp_profile.zoom = self.sld_zoom.GetValue() / 100.0
+            tmp_profile.align = (self.sld_offx.GetValue() / 100.0,
+                                 self.sld_offy.GetValue() / 100.0)
+
+        # wallpaper selection (persistent). For single/advanced span the
+        # focused list item is the chosen image. If the user didn't pick a new
+        # one, preserve any selection already saved in the profile.
+        if tmp_profile.spanmode != "multi":
+            selected_file = self._get_selected_wallpaper_path()
+            if selected_file and os.path.isfile(selected_file):
+                tmp_profile.selected = [selected_file]
+            else:
+                existing = open_profile(tmp_profile.name)
+                if existing and existing.selected:
+                    tmp_profile.selected = existing.selected
 
         # span groups
         groups = None
@@ -1286,18 +1317,15 @@ class WallpaperSettingsPanel(wx.Panel):
             self.update_choiceprofile()
             self.parent_tray_obj.update_hotkey(tmp_profile.name, old_profile_binding, tmp_profile.hk_binding)
             self.choice_profiles.SetSelection(self.choice_profiles.FindString(tmp_profile.name))
-            # Update wallpaper preview from selected profile
+            # Update wallpaper preview from selected profile. The profile's
+            # persistent selection (if any) is what next_wallpaper_files returns.
             saved_profile = ProfileData(saved_file)
             if self.show_advanced_settings:
                 display_data = self.display_sys.get_disp_list(True)
             else:
                 display_data = self.display_sys.get_disp_list(False)
-            # Use the currently selected wallpaper for preview when slideshow is off
-            selected_file = self._get_selected_wallpaper_path()
-            if not saved_profile.slideshow and selected_file and os.path.isfile(selected_file):
-                preview_files = [selected_file]
-            else:
-                preview_files = self.parent_tray_obj.get_profile_by_name(saved_profile.name).next_wallpaper_files(peek=True)
+            preview_files = self.parent_tray_obj.get_profile_by_name(
+                saved_profile.name).next_wallpaper_files(peek=True)
             self.wpprev_pnl.preview_wallpaper(
                 preview_files,
                 self.show_advanced_settings,

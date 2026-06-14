@@ -254,7 +254,7 @@ class ProfileData(object):
         if not wpproc.RESOLUTION_ARRAY:
             msg = "Cannot parse profile, monitor resolution data is missing."
             show_message_dialog(msg)
-            sp_logging.G_LOGGER(msg)
+            sp_logging.G_LOGGER.error(msg)
             exit()
 
         self.file = profile_file
@@ -277,7 +277,7 @@ class ProfileData(object):
         self.zoom = 1.0
         self.offsets = (0.0, 0.0)
         self.paths_array = []
-        self._selected_wallpaper = None
+        self.selected = None
 
         self.parse_profile(self.file)
         if self.ppimode is True:
@@ -404,6 +404,10 @@ class ProfileData(object):
                         self.offsets = (off_x, off_y)
                     except (ValueError, IndexError):
                         self.offsets = (0.0, 0.0)
+                elif words[0] == "selected":
+                    sel = line.split("=", 1)[1].strip()
+                    sel_files = [p for p in sel.split(";") if p]
+                    self.selected = sel_files if sel_files else None
                 elif words[0].startswith("display"):
                     paths = words[1].strip().split(";")
                     paths = list(filter(None, paths))  # drop empty strings
@@ -451,7 +455,7 @@ class ProfileData(object):
         if self.ppi_array:
             max_density = max(self.ppi_array)
         else:
-            sp_logging.G_LOGGER("Couldn't compute relative densities: %s, %s", self.name, self.file)
+            sp_logging.G_LOGGER.error("Couldn't compute relative densities: %s, %s", self.name, self.file)
             return 1
         for ppi in self.ppi_array:
             self.ppi_array_relative_density.append((1 / max_density) * float(ppi))
@@ -464,7 +468,7 @@ class ProfileData(object):
         if self.ppi_array:
             max_ppi = max(self.ppi_array)
         else:
-            sp_logging.G_LOGGER("Couldn't compute relative densities: %s, %s", self.name, self.file)
+            sp_logging.G_LOGGER.error("Couldn't compute relative densities: %s, %s", self.name, self.file)
             return 1
 
         bez_px_offs=[0]   # never offset 1st disp, anchor to it.
@@ -510,18 +514,38 @@ class ProfileData(object):
                 self.manual_offsets)
 
     def next_wallpaper_files(self, peek=False):
-        """Asks the file handler iterator for next image(s) for the wallpaper."""
-        if self._selected_wallpaper:
-            return self._selected_wallpaper
+        """Return the current wallpaper file(s).
+
+        A persistent selection is the source of truth for what is shown. Only
+        an explicit cycle (advance_wallpaper) moves to the next image, so the
+        wallpaper never changes merely because the profile is rendered again.
+        """
+        if self.selected:
+            return self.selected
         return self.file_handler.next_wallpaper_files(peek=peek)
 
-    def set_selected_wallpaper(self, files):
-        """Set specific wallpaper file(s) to use instead of cycling."""
-        self._selected_wallpaper = files
+    def advance_wallpaper(self):
+        """Cycle to the next image(s) and make the result the current selection."""
+        files = self.file_handler.next_wallpaper_files()
+        if files:
+            self.selected = files
+            self._write_selected()
+        return files
 
-    def clear_selected_wallpaper(self):
-        """Clear selected wallpaper, resuming normal cycling."""
-        self._selected_wallpaper = None
+    def _write_selected(self):
+        """Persist the current selection into the profile file."""
+        if not self.selected or not self.file:
+            return
+        try:
+            with open(self.file, "r", encoding="utf-8") as prof_f:
+                lines = [ln for ln in prof_f if not ln.startswith("selected=")]
+            if lines and not lines[-1].endswith("\n"):
+                lines[-1] += "\n"
+            lines.append("selected=" + ";".join(self.selected) + "\n")
+            with open(self.file, "w", encoding="utf-8") as prof_f:
+                prof_f.writelines(lines)
+        except OSError as err:
+            sp_logging.G_LOGGER.info("Failed to persist wallpaper selection: %s", err)
 
     class Filehandler(object):
         """
@@ -607,32 +631,23 @@ Use absolute paths for best reliabilty.".format(path)
             def __iter__(self):
                 return self
 
-            def __next__(self):
+            def _current_image(self):
+                """Return the file at the current position, reshuffling when exhausted."""
                 if not self.files:
                     return None
-                if self.counter < len(self.files):
-                    image = self.files[self.counter]
-                else:
+                if self.counter >= len(self.files):
                     self.counter = 0
                     self.arrange_list()
-                    image = self.files[self.counter]
-                # print(self.counter)
-                # print("next {}".format([self.files[self.counter]]))
-                self.counter += 1
+                return self.files[self.counter]
+
+            def __next__(self):
+                image = self._current_image()
+                if image is not None:
+                    self.counter += 1
                 return image
 
             def __peek__(self):
-                if not self.files:
-                    return None
-                if self.counter < len(self.files):
-                    image = self.files[self.counter]
-                else:
-                    self.counter = 0
-                    self.arrange_list()
-                    image = self.files[self.counter]
-                # print(self.counter)
-                # print("peek {}".format([self.files[self.counter]]))
-                return image
+                return self._current_image()
 
             def arrange_list(self):
                 """Reorders the image list as requested. Mostly for reoccuring shuffling."""
@@ -687,9 +702,16 @@ class CLIProfileData(ProfileData):
 
         for item in files:
             self.files.append(os.path.realpath(item))
+        # CLI/preview profiles use a fixed image set; treat it as the selection
+        # so the renderer never tries to cycle.
+        self.selected = self.files
 
-    def next_wallpaper_files(self):
+    def next_wallpaper_files(self, peek=False):
         """Returns a list of the real paths of the images given at construction time."""
+        return self.files
+
+    def advance_wallpaper(self):
+        """CLI/preview profiles have a fixed image set; cycling is a no-op."""
         return self.files
 
 
@@ -710,6 +732,7 @@ class TempProfileData(object):
         self.perspective = None
         self.zoom = None
         self.align = None
+        self.selected = None
         self.paths_array = []
 
     def save(self):
@@ -747,6 +770,8 @@ class TempProfileData(object):
                 tpfile.write("zoom=" + str(self.zoom) + "\n")
             if self.align is not None and tuple(self.align) != (0.0, 0.0):
                 tpfile.write("align=%s,%s\n" % (self.align[0], self.align[1]))
+            if self.selected:
+                tpfile.write("selected=" + ";".join(self.selected) + "\n")
             if self.paths_array:
                 for paths in self.paths_array:
                     tpfile.write("display" + str(self.paths_array.index(paths))
