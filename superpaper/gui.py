@@ -914,6 +914,25 @@ class WallpaperSettingsPanel(wx.Panel):
         cb_state = self.cb_slideshow.GetValue()
         sizer = self.sizer_setting_slideshow
         self.sizer_toggle_children(sizer, cb_state)
+        # Zoom/pan is tuned to a single image's framing. In a slideshow the same
+        # crop would be forced onto every (differently composed) image, so reset
+        # the controls to defaults and disable them while slideshow is enabled.
+        if cb_state:
+            self.reset_zoom_offset()
+        self.toggle_zoom_widgets(not cb_state)
+
+    def reset_zoom_offset(self):
+        """Return the zoom/position sliders to their no-op defaults."""
+        self.sld_zoom.SetValue(100)
+        self.sld_offx.SetValue(0)
+        self.sld_offy.SetValue(0)
+        self.onZoomOffsetChange(None)
+
+    def toggle_zoom_widgets(self, enable):
+        """Enable/disable the image scaling & position controls."""
+        self.sizer_toggle_children(self.sizer_setting_zoom, enable)
+        for sld in (self.sld_zoom, self.sld_offx, self.sld_offy):
+            sld.Enable(enable)
 
     def onCheckboxHotkey(self, event):
         cb_state = self.cb_hotkey.GetValue()
@@ -1215,10 +1234,15 @@ class WallpaperSettingsPanel(wx.Panel):
         else:
             tmp_profile.perspective = "default"
 
-        # image scaling & position
-        tmp_profile.zoom = self.sld_zoom.GetValue() / 100.0
-        tmp_profile.align = (self.sld_offx.GetValue() / 100.0,
-                             self.sld_offy.GetValue() / 100.0)
+        # image scaling & position. Zoom/pan only applies to a single fixed
+        # image; a slideshow always renders at defaults regardless of slider state.
+        if self.cb_slideshow.GetValue():
+            tmp_profile.zoom = 1.0
+            tmp_profile.align = (0.0, 0.0)
+        else:
+            tmp_profile.zoom = self.sld_zoom.GetValue() / 100.0
+            tmp_profile.align = (self.sld_offx.GetValue() / 100.0,
+                                 self.sld_offy.GetValue() / 100.0)
 
         # wallpaper selection (persistent). For single/advanced span the
         # focused list item is the chosen image. If the user didn't pick a new
