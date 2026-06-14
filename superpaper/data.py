@@ -274,6 +274,8 @@ class ProfileData(object):
         self.bezel_px_offsets = []
         self.hk_binding = None
         self.perspective = "default"
+        self.zoom = 1.0
+        self.offsets = (0.0, 0.0)
         self.paths_array = []
         self._selected_wallpaper = None
 
@@ -389,6 +391,19 @@ class ProfileData(object):
                     self.perspective = words[1].strip()
                     # if sp_logging.DEBUG:
                     #     sp_logging.G_LOGGER.info("perspective preset: %s", self.perspective)
+                elif words[0] == "zoom":
+                    try:
+                        self.zoom = max(1.0, float(words[1].strip()))
+                    except ValueError:
+                        self.zoom = 1.0
+                elif words[0] == "align":
+                    try:
+                        parts = words[1].strip().split(",")
+                        off_x = min(1.0, max(-1.0, float(parts[0])))
+                        off_y = min(1.0, max(-1.0, float(parts[1])))
+                        self.offsets = (off_x, off_y)
+                    except (ValueError, IndexError):
+                        self.offsets = (0.0, 0.0)
                 elif words[0].startswith("display"):
                     paths = words[1].strip().split(";")
                     paths = list(filter(None, paths))  # drop empty strings
@@ -651,6 +666,8 @@ class CLIProfileData(ProfileData):
         self.spangroups = spangroups
         self.ppimode = False # keep this for legacy profile support
         self.perspective = perspective
+        self.zoom = 1.0
+        self.offsets = (0.0, 0.0)
         self.manual_offsets = wpproc.NUM_DISPLAYS * [(0, 0)]
 
         if len(files) == 1 and not advanced:
@@ -691,6 +708,8 @@ class TempProfileData(object):
         self.bezels = None
         self.hk_binding = None
         self.perspective = None
+        self.zoom = None
+        self.align = None
         self.paths_array = []
 
     def save(self):
@@ -724,6 +743,10 @@ class TempProfileData(object):
                 tpfile.write("hotkey=" + str(self.hk_binding) + "\n")
             if self.perspective:
                 tpfile.write("perspective=" + str(self.perspective) + "\n")
+            if self.zoom is not None and self.zoom != 1.0:
+                tpfile.write("zoom=" + str(self.zoom) + "\n")
+            if self.align is not None and tuple(self.align) != (0.0, 0.0):
+                tpfile.write("align=%s,%s\n" % (self.align[0], self.align[1]))
             if self.paths_array:
                 for paths in self.paths_array:
                     tpfile.write("display" + str(self.paths_array.index(paths))
