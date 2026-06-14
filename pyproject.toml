@@ -1,0 +1,72 @@
+# Tooling configuration for superpaper-next.
+#
+# NOTE: This file intentionally does NOT contain a [project] table. Packaging is
+# still driven by setup.py (used by PyInstaller, snap, and the release tooling).
+# This file only holds dev-tool configuration (ruff, ty) and the dev dependency
+# group managed by uv.
+
+[dependency-groups]
+dev = [
+    "ruff>=0.14.0",
+    "ty>=0.0.1a1",
+    "pre-commit>=4.0.0",
+]
+
+# ---------------------------------------------------------------------------
+# Ruff: linter + formatter
+# ---------------------------------------------------------------------------
+[tool.ruff]
+target-version = "py39"
+line-length = 120
+src = ["superpaper"]
+extend-exclude = [
+    "build",
+    "dist",
+    "releases",
+    "release-tooling",
+    "snap",
+    ".venv",
+    "superpaper.egg-info",
+]
+
+[tool.ruff.lint]
+# Gradual/pragmatic starting set. Mostly auto-fixable rules so the first pass
+# can be applied without a wall of manual fixes. Tighten over time by adding
+# rule groups such as "B" (bugbear), "SIM", "RUF", "PTH", etc.
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes
+    "W",   # pycodestyle warnings
+    "I",   # isort (import sorting)
+    "UP",  # pyupgrade
+    "C4",  # flake8-comprehensions
+]
+ignore = [
+    "E501",  # line length: not enforced as a lint error (formatter handles wrapping)
+    "E741",  # ambiguous variable names (e.g. l) - common in legacy code
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["superpaper"]
+
+[tool.ruff.format]
+quote-style = "double"
+docstring-code-format = true
+
+# ---------------------------------------------------------------------------
+# ty: static type checker (Astral, preview)
+# ---------------------------------------------------------------------------
+[tool.ty.src]
+include = ["superpaper"]
+exclude = [
+    "build",
+    "dist",
+    "releases",
+    "release-tooling",
+    "snap",
+    ".venv",
+    "**/__pycache__",
+]
+
+[tool.ty.environment]
+python-version = "3.9"
