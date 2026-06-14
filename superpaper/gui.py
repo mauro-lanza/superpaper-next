@@ -229,10 +229,53 @@ class WallpaperSettingsPanel(wx.Panel):
         self.sizer_setting_hotkey.Add(self.hotkey_bind_sizer, 0, wx.CENTER|wx.EXPAND|wx.ALL, 5)
         self.cb_hotkey.Bind(wx.EVT_CHECKBOX, self.onCheckboxHotkey)
 
+        # image scaling & position sizer
+        self.sizer_setting_zoom = wx.StaticBoxSizer(wx.VERTICAL, self, "Image scaling & position")
+        statbox_parent_zoom = self.sizer_setting_zoom.GetStaticBox()
+        zoom_grid = wx.FlexGridSizer(3, 3, 5, 5)
+        zoom_grid.AddGrowableCol(1, 1)
+        # Zoom
+        st_zoom = wx.StaticText(statbox_parent_zoom, -1, "Zoom:")
+        self.sld_zoom = wx.Slider(statbox_parent_zoom, -1, 100, 100, 400,
+                                  style=wx.SL_HORIZONTAL)
+        self.st_zoom_val = wx.StaticText(statbox_parent_zoom, -1, "100%",
+                                         size=(40, -1), style=wx.ALIGN_RIGHT)
+        # Horizontal position
+        st_offx = wx.StaticText(statbox_parent_zoom, -1, "Horizontal:")
+        self.sld_offx = wx.Slider(statbox_parent_zoom, -1, 0, -100, 100,
+                                  style=wx.SL_HORIZONTAL)
+        self.st_offx_val = wx.StaticText(statbox_parent_zoom, -1, "0",
+                                         size=(40, -1), style=wx.ALIGN_RIGHT)
+        # Vertical position
+        st_offy = wx.StaticText(statbox_parent_zoom, -1, "Vertical:")
+        self.sld_offy = wx.Slider(statbox_parent_zoom, -1, 0, -100, 100,
+                                  style=wx.SL_HORIZONTAL)
+        self.st_offy_val = wx.StaticText(statbox_parent_zoom, -1, "0",
+                                         size=(40, -1), style=wx.ALIGN_RIGHT)
+        self.sld_zoom.SetToolTip(wx.ToolTip(
+            "Zoom further into the image. The wallpaper always fills the screen."))
+        self.sld_offx.SetToolTip(wx.ToolTip(
+            "Move the visible area left or right within the image."))
+        self.sld_offy.SetToolTip(wx.ToolTip(
+            "Move the visible area up or down within the image."))
+        for sld in (self.sld_zoom, self.sld_offx, self.sld_offy):
+            sld.Bind(wx.EVT_SLIDER, self.onZoomOffsetChange)
+        zoom_grid.Add(st_zoom, 0, wx.ALIGN_CENTER_VERTICAL|wx.LEFT, 5)
+        zoom_grid.Add(self.sld_zoom, 1, wx.EXPAND)
+        zoom_grid.Add(self.st_zoom_val, 0, wx.ALIGN_CENTER_VERTICAL|wx.RIGHT, 5)
+        zoom_grid.Add(st_offx, 0, wx.ALIGN_CENTER_VERTICAL|wx.LEFT, 5)
+        zoom_grid.Add(self.sld_offx, 1, wx.EXPAND)
+        zoom_grid.Add(self.st_offx_val, 0, wx.ALIGN_CENTER_VERTICAL|wx.RIGHT, 5)
+        zoom_grid.Add(st_offy, 0, wx.ALIGN_CENTER_VERTICAL|wx.LEFT, 5)
+        zoom_grid.Add(self.sld_offy, 1, wx.EXPAND)
+        zoom_grid.Add(self.st_offy_val, 0, wx.ALIGN_CENTER_VERTICAL|wx.RIGHT, 5)
+        self.sizer_setting_zoom.Add(zoom_grid, 0, wx.EXPAND|wx.ALL, 5)
+
         # Add subsizers to the left column sizer
         self.sizer_settings_left.Add(self.radiobox_spanmode, 0, wx.EXPAND, 5)
         self.sizer_settings_left.Add(self.sizer_setting_slideshow, 0, wx.EXPAND, 5)
         self.sizer_settings_left.Add(self.sizer_setting_hotkey, 0, wx.EXPAND, 5)
+        self.sizer_settings_left.Add(self.sizer_setting_zoom, 0, wx.EXPAND, 5)
 
 
     def create_sizer_settings_right(self):
@@ -562,6 +605,19 @@ class WallpaperSettingsPanel(wx.Panel):
         # Paths displays: get number to show from profile.
         self.paths_array_to_listctrl(profile.paths_array)
 
+        # Image scaling & position
+        zoom_pct = int(round(profile.zoom * 100))
+        offx_pct = int(round(profile.offsets[0] * 100))
+        offy_pct = int(round(profile.offsets[1] * 100))
+        self.sld_zoom.SetValue(zoom_pct)
+        self.sld_offx.SetValue(offx_pct)
+        self.sld_offy.SetValue(offy_pct)
+        self.st_zoom_val.SetLabel("{}%".format(zoom_pct))
+        self.st_offx_val.SetLabel(str(offx_pct))
+        self.st_offy_val.SetLabel(str(offy_pct))
+        self.wpprev_pnl.zoom = profile.zoom
+        self.wpprev_pnl.offset = profile.offsets
+
         # Update wallpaper preview from selected profile
         if self.show_advanced_settings:
             display_data = self.display_sys.get_disp_list(True)
@@ -783,6 +839,19 @@ class WallpaperSettingsPanel(wx.Panel):
     #
     # Event methods
     #
+    def onZoomOffsetChange(self, event):
+        """Live-update the preview as zoom/position sliders move."""
+        zoom_pct = self.sld_zoom.GetValue()
+        offx_pct = self.sld_offx.GetValue()
+        offy_pct = self.sld_offy.GetValue()
+        self.st_zoom_val.SetLabel("{}%".format(zoom_pct))
+        self.st_offx_val.SetLabel(str(offx_pct))
+        self.st_offy_val.SetLabel(str(offy_pct))
+        self.wpprev_pnl.update_zoom_offset(
+            zoom_pct / 100.0,
+            (offx_pct / 100.0, offy_pct / 100.0)
+        )
+
     def onResize(self, event):
         self.resized = True
         self.wpprev_pnl.refresh_preview()
@@ -1151,6 +1220,11 @@ class WallpaperSettingsPanel(wx.Panel):
         else:
             tmp_profile.perspective = "default"
 
+        # image scaling & position
+        tmp_profile.zoom = self.sld_zoom.GetValue() / 100.0
+        tmp_profile.align = (self.sld_offx.GetValue() / 100.0,
+                             self.sld_offy.GetValue() / 100.0)
+
         # span groups
         groups = None
         if self.cb_spangroups.GetValue():
@@ -1449,6 +1523,13 @@ class WallpaperPreviewPanel(wx.Panel):
         self.preview_img_list = []
         self.bmp_list = []
 
+        # Image zoom & positioning (whole-viewport, applied in resize_to_fill)
+        self.zoom = 1.0
+        self.offset = (0.0, 0.0)
+        self._last_use_ppi = use_ppi_px
+        self._last_use_multi = use_multi_image
+        self._last_spangroups = None
+
         # Draw preview
         self.draw_displays()
 
@@ -1626,6 +1707,9 @@ class WallpaperPreviewPanel(wx.Panel):
         self.use_multi_image = use_multi_image
         if display_data:
             self.display_data = display_data
+        self._last_use_ppi = use_ppi_px
+        self._last_use_multi = use_multi_image
+        self._last_spangroups = spangroups
         self.refresh_preview(use_ppi_px)
         self.current_preview_images = image_list
 
@@ -1711,10 +1795,25 @@ class WallpaperPreviewPanel(wx.Panel):
         self.draw_monitor_numbers(use_ppi_px)
         self.Refresh()
 
+    def update_zoom_offset(self, zoom, offset):
+        """Re-render the current preview with new zoom & offset values."""
+        self.zoom = zoom
+        self.offset = offset
+        if not self.current_preview_images:
+            return
+        self.preview_wallpaper(
+            list(self.current_preview_images),
+            self._last_use_ppi,
+            self._last_use_multi,
+            self.display_data,
+            self._last_spangroups
+        )
+
     def resize_and_bitmap(self, fname, size, enhance_color=False):
-        """Take filename of an image and resize and center crop it to size."""
+        """Take filename of an image and resize and crop it to size."""
         try:
-            pil = resize_to_fill(Image.open(fname), size, quality="fast")
+            pil = resize_to_fill(Image.open(fname), size, quality="fast",
+                                 zoom=self.zoom, offset=self.offset)
         except UnidentifiedImageError:
             msg = ("Opening image '%s' failed with PIL.UnidentifiedImageError."
                    "It could be corrupted or is of foreign type.") % fname
