@@ -4,3 +4,4 @@ numpy>=1.18.0
 system_hotkey>=1.0
 xcffib>=0.8.0
 xpybutil>=0.0.5
+dbus-python>=1.2.0
