@@ -930,7 +930,7 @@ def compute_ppi_corrected_res_array(res_array, ppi_list_rel_density):
 
 # resize image to fill given rectangle and do a positioned crop to size.
 # Return output image.
-def resize_to_fill(img, res, quality=Image.LANCZOS, zoom=1.0, offset=(0.0, 0.0)):
+def resize_to_fill(img, res, quality: "str | Image.Resampling" = Image.Resampling.LANCZOS, zoom=1.0, offset=(0.0, 0.0)):
     """Resize image to fill given rectangle and do a positioned crop to size.
 
     The image is always scaled so that it fully covers the target rectangle
@@ -941,10 +941,10 @@ def resize_to_fill(img, res, quality=Image.LANCZOS, zoom=1.0, offset=(0.0, 0.0))
     +1.0 aligns to the right/bottom edge. The result always fills ``res``.
     """
     if quality == "fast":
-        quality = Image.HAMMING
+        quality = Image.Resampling.HAMMING
         reducing_gap = 1.5
     else:
-        quality = Image.LANCZOS
+        quality = Image.Resampling.LANCZOS
         reducing_gap = None
 
     if not img.mode == "RGB":
@@ -1255,14 +1255,14 @@ def span_single_image_advanced(profile, force):
                 # containing all displays and the full 'target' working canvas
                 # size canvas_tuple_trgt containing ppi normalized displays.
                 persp_crop = img_workingsize.transform(canvas_tuple_trgt,
-                                                       Image.PERSPECTIVE, coeffs,
-                                                       Image.BICUBIC)
+                                                       Image.Transform.PERSPECTIVE, coeffs,
+                                                       Image.Resampling.BICUBIC)
                 ## persp_crop.save(str(canvas_tuple_trgt)+str(crop_tup), "PNG")
                 # Crop desired region from transformed image which is now in
                 # ppi normalized resolution
                 crop_img = persp_crop.crop(ppin_crop)
                 # Resize correct crop to actual display resolution
-                crop_img = crop_img.resize(res, resample=Image.LANCZOS)
+                crop_img = crop_img.resize(res, resample=Image.Resampling.LANCZOS)
                 # cropped_images.append(crop_img) #old
                 cropped_images[grp[i_res]] = crop_img
         else:
@@ -1282,7 +1282,7 @@ def span_single_image_advanced(profile, force):
                     # cropped_images.append(crop_img)
                     cropped_images[grp[i_res]] = crop_img
                 else:
-                    crop_img = crop_img.resize(res, resample=Image.LANCZOS)
+                    crop_img = crop_img.resize(res, resample=Image.Resampling.LANCZOS)
                     # cropped_images.append(crop_img)
                     cropped_images[grp[i_res]] = crop_img
     # Combine crops to a single canvas of the size of the actual desktop
