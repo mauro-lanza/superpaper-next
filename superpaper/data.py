@@ -307,14 +307,16 @@ class ProfileData(object):
                         sp_logging.G_LOGGER.info("Exception: unknown spanmode: %s \
                                 in profile: %s", words[1], self.name)
                 elif words[0] == "spangroups":
-                    self.spangroups = []
+                    spangroups = []
                     groups = words[1].strip().split(",")
                     for grp in groups:
                         try:
                             ids = [int(idx) for idx in grp]
-                            self.spangroups.append(sorted(list(set(ids)))) # drop duplicates
+                            spangroups.append(sorted(list(set(ids)))) # drop duplicates
                         except ValueError:
-                            self.spangroups = None
+                            spangroups = None
+                            break
+                    self.spangroups = spangroups
                 elif words[0] == "slideshow":
                     wrd1 = words[1].strip().lower()
                     if wrd1 == "true":
@@ -904,7 +906,7 @@ Valid modifiers are 'control', 'super', 'alt', 'shift'."
             try:
                 val = float(item)
             except ValueError:
-                sp_logging.G_LOGGER.info("float type check failed for: '%s'", val)
+                sp_logging.G_LOGGER.info("float type check failed for: '%s'", item)
                 return False
         return is_floats
 
@@ -924,8 +926,8 @@ Valid modifiers are 'control', 'super', 'alt', 'shift'."
                     val_w = int(offset[0])
                     val_h = int(offset[1])
                 except ValueError:
-                    sp_logging.G_LOGGER.info("int type check failed for: '%s' or '%s",
-                                             val_w, val_h)
+                    sp_logging.G_LOGGER.info("int type check failed for: '%s' or '%s'",
+                                             offset[0], offset[1])
                     return False
         except TypeError:
             return False

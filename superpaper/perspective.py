@@ -279,6 +279,8 @@ class XYPlaneRectangle():
             mid = (self.corners[0]+self.corners[2]) / 2
         elif side == "right":
             mid = (self.corners[1]+self.corners[3]) / 2
+        else:
+            raise ValueError("Unknown side: {}".format(side))
         return mid
 
     def swivel_axis(self, side, depth_offset=0, lateral_offset=0):
@@ -290,6 +292,8 @@ class XYPlaneRectangle():
             axis_end = self.corners[0]
         elif side == "right":
             axis_end = self.corners[1]
+        else:
+            raise ValueError("Unknown side: {}".format(side))
         axis = axis_end - side_mid
         pt_on_line = side_mid
         pt_on_line[0] += lateral_offset
@@ -305,6 +309,8 @@ class XYPlaneRectangle():
             axis = side_mid - self.center
         elif side == "right":
             axis = self.center - side_mid
+        else:
+            raise ValueError("Unknown side: {}".format(side))
         pt_on_line = side_mid
         pt_on_line[1] += vertical_offset
         pt_on_line[2] += depth_offset

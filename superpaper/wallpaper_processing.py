@@ -101,7 +101,8 @@ class RepeatedTimer(object):
 
     def stop(self):
         """Stops timer."""
-        self._timer.cancel()
+        if self._timer is not None:
+            self._timer.cancel()
         self.is_running = False
 
 
@@ -421,12 +422,14 @@ class DisplaySystem():
 
 
         # Tile columns on to the plane with vertical centering
+        col_sizes = []
         try:
             col_sizes = [self.column_size(col) for col in columns]
         except (ValueError, IndexError):
             sp_logging.G_LOGGER.info("Problem with column sizes. col_sizes: %s",
                                      col_sizes)
         # print("col_sizes", col_sizes)
+        max_col_h = 0
         try:
             max_col_h = max([sz[1] for sz in col_sizes])
         except ValueError:
@@ -589,7 +592,7 @@ class DisplaySystem():
             - rotation angles of displays for perspective correction
         """
         archive_file = os.path.join(CONFIG_PATH, "display_systems.dat")
-        instance_key = hash(self)
+        instance_key = str(hash(self))
 
         # collect data for saving
         ppi_norm_offsets = []
@@ -646,8 +649,8 @@ class DisplaySystem():
         found_match = False
 
         # check if file exists and if the current key exists in it
+        config = configparser.ConfigParser()
         if os.path.exists(archive_file):
-            config = configparser.ConfigParser()
             config.read(archive_file)
             sp_logging.G_LOGGER.info("config.sections: %s", config.sections())
             if instance_key in config:
@@ -665,7 +668,8 @@ class DisplaySystem():
                                            item_len=2)
             bezel_mms = str_to_list(instance_data["bezel_mms"],
                                     item_len=2)
-            bezel_mms = [(round(bez[0], 2), round(bez[1], 2)) for bez in bezel_mms]
+            if bezel_mms:
+                bezel_mms = [(round(bez[0], 2), round(bez[1], 2)) for bez in bezel_mms]
             diagonal_inches = str_to_list(instance_data["user_diagonal_inches"],
                                           item_len=1)
             use_perspective = bool(int(instance_data.get("use_perspective", 0)))
@@ -810,6 +814,7 @@ def str_to_list(joined_list, item_len=1, strings=False):
                 try:
                     val = float(item)
                 except ValueError:
+                    val = item
                     if not strings:
                         sp_logging.G_LOGGER.info(
                             "str_to_list: ValueError: not int or float: %s", item
@@ -829,6 +834,7 @@ def str_to_list(joined_list, item_len=1, strings=False):
                     try:
                         val = float(sub_item)
                     except ValueError:
+                        val = sub_item
                         if not strings:
                             sp_logging.G_LOGGER.info(
                                 "str_to_list: ValueError: not int or float: %s", sub_item
@@ -990,7 +996,7 @@ def resize_to_fill(img, res, quality=Image.LANCZOS, zoom=1.0, offset=(0.0, 0.0))
         sp_logging.G_LOGGER.info(
             "Error: result image not of correct size. crp:%s, res:%s",
             cropped_res.size, res)
-        return -1
+        return cropped_res
 
 
 def get_center(res):
@@ -1136,6 +1142,7 @@ def span_single_image_simple(profile, force):
     except UnidentifiedImageError:
         sp_logging.G_LOGGER.info(("Opening image '%s' failed with PIL.UnidentifiedImageError."
                                   "It could be corrupted or is of foreign type."), file)
+        return
     canvas_tuple = tuple(compute_canvas(RESOLUTION_ARRAY, DISPLAY_OFFSET_ARRAY))
     img_resize = resize_to_fill(img, canvas_tuple,
                                 zoom=profile.zoom, offset=profile.offsets)
@@ -1200,6 +1207,7 @@ def span_single_image_advanced(profile, force):
     except UnidentifiedImageError:
         sp_logging.G_LOGGER.info(("Opening image '%s' failed with PIL.UnidentifiedImageError."
                                   "It could be corrupted or is of foreign type."), files)
+        return
 
     # Cropping now sections of the image to be shown, USE EFFECTIVE WORKING
     # SIZES. Also EFFECTIVE SIZE Offsets are now required.
@@ -1317,6 +1325,7 @@ def set_multi_image_wallpaper(profile, force):
         except UnidentifiedImageError:
             sp_logging.G_LOGGER.info(("Opening image '%s' failed with PIL.UnidentifiedImageError."
                                       "It could be corrupted or is of foreign type."), file)
+            return
         img_resized.append(resize_to_fill(image, res,
                                           zoom=profile.zoom, offset=profile.offsets))
     canvas_tuple = tuple(compute_canvas(RESOLUTION_ARRAY, DISPLAY_OFFSET_ARRAY))
@@ -1382,13 +1391,13 @@ def set_wallpaper(outputfile, force=False, source_files=None):
         # subprocess.Popen(script % outputfile, shell=True)
         set_wallpaper_macos(outputfile, image_piece_list=None, force=force)
     else:
-        sp_logging.G_LOGGER.info("Unknown platform.system(): %s", pltform)
+        sp_logging.G_LOGGER.info("Unknown platform: %s", sys.platform)
     script_file = os.path.join(CONFIG_PATH, "run-after-wp-change.py")
     if os.path.isfile(script_file):
         subprocess.run(["python3",
                         script_file,
-                        outputfile,
-                        source_files])
+                        str(outputfile),
+                        str(source_files)])
     return 0
 
 def set_wallpaper_macos(outputfile, image_piece_list = None, force = False):
@@ -1428,6 +1437,9 @@ def set_wallpaper_macos(outputfile, image_piece_list = None, force = False):
         if sp_logging.DEBUG:
             sp_logging.G_LOGGER.info("KDE: Using image piece list!")
         img_names = image_piece_list
+    else:
+        sp_logging.G_LOGGER.info("Error! macOS wallpaper setter called without arguments!")
+        return
     img_piece_urls = [NSURL.fileURLWithPath_(imagepath) for imagepath in img_names]
 
     # zip screens and image list and loop over setting the images using the shared workspace
@@ -2089,6 +2101,7 @@ for(var idx = 0; idx < allDesktops.length; idx++) {{
     else:
         if sp_logging.DEBUG:
             sp_logging.G_LOGGER.info("Error! KDE actions called without arguments!")
+        return
 
     filess_img_names = []
     for fname in img_names:
@@ -2133,7 +2146,9 @@ def xfce_actions(outputfile):
                                   "/backdrop",
                                   "-l"],
                                  stdout=subprocess.PIPE)
-    props = read_prop.stdout.read().decode("utf-8").split("\n")
+    props = []
+    if read_prop.stdout is not None:
+        props = read_prop.stdout.read().decode("utf-8").split("\n")
     for prop in props:
         if "workspace0/image-style" in prop:
             os.system(

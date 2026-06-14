@@ -118,7 +118,7 @@ def test_full_write_access(path):
         return False
 
 def test_git_path(path):
-    if "github\superpaper" in path.lower():
+    if r"github\superpaper" in path.lower():
         return True
     else:
         return False

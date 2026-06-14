@@ -939,11 +939,6 @@ class WallpaperSettingsPanel(wx.Panel):
         sizer = self.hotkey_bind_sizer
         self.sizer_toggle_children(sizer, cb_state)
 
-    def onCheckboxBezels(self, event):
-        cb_state = self.cb_bezels.GetValue()
-        sizer = self.sizer_setting_bezels
-        self.sizer_toggle_children(sizer, cb_state)
-
     def onCheckboxOffsets(self, event):
         cb_state = self.cb_offsets.GetValue()
         sizer = self.sizer_setting_offsets
@@ -1122,7 +1117,9 @@ class WallpaperSettingsPanel(wx.Panel):
         multiple_image_area = self.use_multi_image or self.use_spangroups()
         num_groups = None
         if self.use_spangroups():
-            num_groups = len(self.read_spangroups().keys())
+            groups = self.read_spangroups()
+            if groups is not None:
+                num_groups = len(groups.keys())
         dlg = BrowsePaths(self, multiple_image_area, self.defdir, num_groups)
         res = dlg.ShowModal()
         if res == wx.ID_OK:
@@ -1261,9 +1258,10 @@ class WallpaperSettingsPanel(wx.Panel):
         if self.cb_spangroups.GetValue():
             groups = self.read_spangroups()
             flat_groups = []
-            for grp in groups.keys():
-                ids = ''.join([str(i) for i in groups[grp]])
-                flat_groups.append(ids)
+            if groups is not None:
+                for grp in groups.keys():
+                    ids = ''.join([str(i) for i in groups[grp]])
+                    flat_groups.append(ids)
             tmp_profile.spangroups = ','.join(flat_groups)
 
         # Paths
@@ -1435,7 +1433,7 @@ class WallpaperSettingsPanel(wx.Panel):
         profile = CLIProfileData(testimage, advanced=True,
             perspective=perspective, spangroups=None, offsets=flat_offsets)
         thrd = change_wallpaper_job(profile, force=True)
-        while thrd.is_alive():
+        while thrd is not None and thrd.is_alive():
             time.sleep(0.5)
         del busy
 
@@ -2628,11 +2626,15 @@ class WallpaperPreviewPanel(wx.Panel):
         self.move_bezel_popups()
         #Get button instance and find it in list
         button = event.GetEventObject()
+        button_pos = None
         for butt_pair in self.bez_buttons:
             if button in butt_pair:
                 button_pos = (self.bez_buttons.index(butt_pair), butt_pair.index(button))
+                break
 
         # Pick and show respective popup
+        if button_pos is None:
+            return
         pop = self.bezel_popups[button_pos[0]][button_pos[1]]
         # pop.Popup()
         pop.Show()
@@ -2679,9 +2681,9 @@ class WallpaperPreviewPanel(wx.Panel):
             sizer.Fit(self)
             self.Layout()
 
-        def ProcessLeftDown(self, evt):
-            # return wx.PopupTransientWindow.ProcessLeftDown(self, evt)
-            pass
+        def ProcessLeftDown(self, event):
+            # return wx.PopupTransientWindow.ProcessLeftDown(self, event)
+            return False
 
         def OnEnter(self, evt):
             """Bind pressing Enter in the txtctrl to apply entered value."""

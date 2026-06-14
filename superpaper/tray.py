@@ -270,7 +270,7 @@ It is already registered for another action.".format(profile.hk_binding, profile
         if old_hotkey is not None:
             self.hk2.unregister(old_hotkey)
             self.seen_binding.remove(old_hotkey)
-        if new_hotkey is not None:
+        if new_hotkey is not None and profile is not None:
             try:
                 self.hk2.register(new_hotkey, profile, overwrite=False)
                 self.seen_binding.add(new_hotkey)

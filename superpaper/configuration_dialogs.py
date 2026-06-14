@@ -68,8 +68,8 @@ class BrowsePaths(wx.Dialog):
         self.sizer_paths_list.Add(st_paths_list, 0, wx.ALIGN_LEFT|wx.ALL, 5)
         self.create_paths_listctrl(self.use_multi_image)
 
+        sizer_radio = wx.BoxSizer(wx.VERTICAL)
         if self.use_multi_image:
-            sizer_radio = wx.BoxSizer(wx.VERTICAL)
             radio_choices_displays = [
                 self.wp_area_name + " {}".format(i) for i in range(self.num_wallpaper_area)
             ]
@@ -886,6 +886,9 @@ class PerspectiveConfig(wx.Dialog):
                                                                                     persp_data)
             # Canvas containing back-projected displays
             canv = wpproc.compute_working_canvas(proj_plane_crops)
+        else:
+            # No perspective data => no back-projection enlargement to check.
+            return (False, (0, 0))
         max_size = 12000
         if canv[0] > max_size or canv[1] > max_size:
             return (True, canv)
@@ -1107,7 +1110,7 @@ class PerspectiveConfig(wx.Dialog):
         profile = CLIProfileData(testimage, advanced=True,
             perspective=perspective, spangroups=None, offsets=flat_offsets)
         thrd = change_wallpaper_job(profile, force=True)
-        while thrd.is_alive():
+        while thrd is not None and thrd.is_alive():
             time.sleep(0.5)
         del busy
         return 1
@@ -1503,8 +1506,8 @@ class HelpPopup(wx.PopupTransientWindow):
         sizer.Fit(self)
         self.Layout()
 
-    def ProcessLeftDown(self, evt):
-        return wx.PopupTransientWindow.ProcessLeftDown(self, evt)
+    def ProcessLeftDown(self, event):
+        return wx.PopupTransientWindow.ProcessLeftDown(self, event)
 
     def OnDismiss(self):
         self.Destroy()
@@ -1513,7 +1516,7 @@ class HelpPopup(wx.PopupTransientWindow):
         "Return a sentence what the minimum source image size is for best quality."
         senten = ("For the best image quality with current settings your\n"
                   r" wallpapers should be {} or larger.")
-        if self.advanced_on:
+        if self.advanced_on and self.display_sys is not None:
             if self.mainframe.cb_offsets.GetValue():
                 offsets = []
                 for tc in self.mainframe.tc_list_offsets:
