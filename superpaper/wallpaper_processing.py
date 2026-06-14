@@ -1494,7 +1494,7 @@ def set_wallpaper_linux(outputfile, force=False):
         if desk_env in ["gnome", "gnome-wayland", "gnome-xorg",
                           "unity", "ubuntu",
                           "pantheon", "budgie-desktop",
-                          "pop"]:
+                          "pop", "zorin"]:
             subprocess.run(["/usr/bin/gsettings", "set",
                             "org.gnome.desktop.background", "picture-uri-dark",
                             file])

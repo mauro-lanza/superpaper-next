@@ -41,6 +41,11 @@ def tray_loop(profile=None):
     if not os.path.isdir(sp_paths.PROFILES_PATH):
         os.mkdir(sp_paths.PROFILES_PATH)
     if "wx" in sys.modules:
+        # On Linux (wxGTK) the tray icon (StatusNotifierItem) title is derived
+        # from the program name, i.e. the basename of sys.argv[0]. When launched
+        # via "python -m superpaper" this becomes "__main__.py", so normalize it
+        # to a clean application name before the wx.App is created.
+        sys.argv[0] = "Superpaper"
         if profile:
             STARTUP_PROFILE = profile
             sp_logging.G_LOGGER.info("Startup profile: {}".format(profile))
@@ -530,6 +535,8 @@ class App(wx.App):
 
     def OnInit(self):
         """Starts tray icon loop."""
+        self.SetAppName("Superpaper")
+        self.SetAppDisplayName("Superpaper")
         frame = wx.Frame(None)
         # self.locale = wx.Locale(wx.LANGUAGE_DEFAULT) # this has been causing errors?
         self.SetTopWindow(frame)

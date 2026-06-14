@@ -1,3 +1,4 @@
 wxPython
 dbus-python
+setuptools
 -e .

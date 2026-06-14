@@ -567,6 +567,9 @@ Use absolute paths for best reliabilty.".format(path)
                 else:
                     next_image = iterable.__next__()
                     # print("NEXT: {}".format(next_image))
+                if next_image is None:
+                    # No images available for this monitor, skip it.
+                    continue
                 if os.path.isfile(next_image):
                     files.append(next_image)
                 else:
@@ -590,6 +593,8 @@ Use absolute paths for best reliabilty.".format(path)
                 return self
 
             def __next__(self):
+                if not self.files:
+                    return None
                 if self.counter < len(self.files):
                     image = self.files[self.counter]
                 else:
@@ -602,6 +607,8 @@ Use absolute paths for best reliabilty.".format(path)
                 return image
 
             def __peek__(self):
+                if not self.files:
+                    return None
                 if self.counter < len(self.files):
                     image = self.files[self.counter]
                 else:
