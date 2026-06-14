@@ -2151,11 +2151,16 @@ def xfce_actions(outputfile):
         remove_old_temp_files(outputfile)
 
 
-def change_wallpaper_job(profile, force=False):
+def change_wallpaper_job(profile, force=False, advance=False):
     """Centralized wallpaper method that calls setter algorithm based on input prof settings.
-    When force, skip the profile name check
+    When force, skip the profile name check.
+    When advance, cycle to the next image before rendering (slideshow / manual next).
+    Otherwise the current persistent selection is rendered unchanged; if none has
+    been established yet, the first image is picked once and saved as the selection.
     """
     with G_WALLPAPER_CHANGE_LOCK:
+        if advance or not profile.selected:
+            profile.advance_wallpaper()
         if profile.spanmode.startswith("single") and profile.ppimode is False:
             thrd = Thread(target=span_single_image_simple, args=(profile, force), daemon=True)
             thrd.start()
@@ -2172,26 +2177,35 @@ def change_wallpaper_job(profile, force=False):
         return thrd
 
 
-def run_profile_job(profile):
-    """This method executes the input profile as the profile is configured."""
+def run_profile_job(profile, startup=False):
+    """This method executes the input profile as the profile is configured.
+
+    When ``startup`` is True the wallpaper is not changed immediately: the
+    currently shown wallpaper is kept and, for slideshow profiles, only the
+    repeating timer is armed so cycling happens later on its own schedule
+    instead of on every app launch.
+    """
     global G_ACTIVE_DISPLAYSYSTEM
     # get_display_data()  # Check here so new profile has fresh data.
     refresh_display_data() # Refresh available display data.
 
     repeating_timer = None
+    thrd = None
     if sp_logging.DEBUG:
         sp_logging.G_LOGGER.info("running profile job with profile: %s", profile.name)
 
     if not profile.slideshow:
         # if sp_logging.DEBUG:
         #     sp_logging.G_LOGGER.info("Running a one-off wallpaper change.")
-        thrd = change_wallpaper_job(profile)
+        if not startup:
+            thrd = change_wallpaper_job(profile)
     elif profile.slideshow:
         # if sp_logging.DEBUG:
         #     sp_logging.G_LOGGER.info("Running wallpaper slideshow.")
-        thrd = change_wallpaper_job(profile)
+        if not startup:
+            thrd = change_wallpaper_job(profile)
         repeating_timer = RepeatedTimer(
-            profile.delay_list[0], change_wallpaper_job, profile)
+            profile.delay_list[0], change_wallpaper_job, profile, advance=True)
     return (repeating_timer, thrd)
 
 
