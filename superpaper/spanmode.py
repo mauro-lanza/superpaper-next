@@ -1,15 +1,21 @@
 """Control host OS desktop background spanning mode when needed."""
 import os
-import platform
 import subprocess
+import sys
+from typing import Any
 
-if platform.system() == "Windows":
+from superpaper.sp_platform import IS_LINUX, IS_MACOS, IS_WINDOWS
+
+# winreg is a Windows-only stdlib module. Bind a fallback so the name is always
+# defined, and guard the import with a literal sys.platform comparison so type
+# checkers treat it as dead code off-Windows (a derived constant would not work).
+winreg: Any = None
+if sys.platform == "win32":
     import winreg
 
 def set_spanmode():
     """Sets host OS desktop background to span all displays."""
-    pltf = platform.system()
-    if pltf == "Windows":
+    if IS_WINDOWS:
         # Windows wallpaper fitting style codes:
         # Fill = 10
         # Fit = 6
@@ -24,7 +30,7 @@ def set_spanmode():
                                         0, winreg.KEY_SET_VALUE)
         winreg.SetValueEx(reg_key_desktop, "WallpaperStyle", 0, winreg.REG_SZ, "22")
         winreg.SetValueEx(reg_key_desktop, "TileWallpaper", 0, winreg.REG_SZ, "0")
-    elif pltf == "Linux":
+    elif IS_LINUX:
         desk_env = os.environ.get("DESKTOP_SESSION")
         if desk_env:
             if desk_env in ["gnome", "gnome-wayland", "gnome-xorg",
@@ -50,7 +56,7 @@ def set_spanmode():
                         subprocess.run(["pcmanfm-qt", "--wallpaper-mode=stretch"])
                     except OSError:
                         pass
-    elif pltf == "Darwin":
+    elif IS_MACOS:
         # Mac support TODO
         pass
     else:

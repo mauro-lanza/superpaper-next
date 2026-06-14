@@ -17,15 +17,23 @@ This fork focuses on KDE Plasma 6 support and improving the wallpaper selection 
 - Updated installation and dependency handling for Plasma 6 environments.
 
 ### Wallpaper Selection Improvements
+- **Select to use**: the wallpaper you choose is remembered as the profile's current wallpaper. Opening the app or switching to a profile shows that wallpaper and no longer cycles to a random image on launch.
 - **Click-to-preview**: clicking a wallpaper in the source list updates the preview panel immediately
 - **Apply selected image**: when slideshow is off, "Apply" sets the specific image you selected instead of a random one from the rotation
+- **Cycling on demand only**: the wallpaper changes when the slideshow timer fires or when you pick "Next Wallpaper" from the tray, never just because a profile was re-rendered
 - **Consistent preview after save**: the preview shows your selected wallpaper instead of a random pick from a freshly shuffled list
+
+### Image Scaling & Position
+- **Always fills the screen**: images are cover-fitted so there is never any letterboxing
+- **Zoom**: zoom further into the image while it keeps filling the display
+- **Horizontal / vertical positioning**: move the visible area within the image to place the content where you want it, with a live preview
+- Saved per profile. These controls apply to a single fixed image, so they are reset and disabled while a profile's slideshow is enabled.
 
 
 ## Planned Improvements
 
 - **Visual wallpaper selector**: replace the file path list with an image grid/icon view, showing the path on hover
-- **Manual wallpaper positioning**: allow resizing/stretching the wallpaper beyond screen boundaries for manual alignment of specific image elements to monitor gaps
+- **Interactive positioning**: drag-to-pan and scroll-to-zoom directly on the preview, in addition to the current sliders
 
 
 ## Features
@@ -50,6 +58,7 @@ This fork focuses on KDE Plasma 6 support and improving the wallpaper selection 
 - **Bezel correction**: let the image continuously span behind your bezels.
 - **Perspective correction**: span the image even more flawlessly!
 - Manual pixel offsets for fine-tuning
+- **Image zoom & positioning**: zoom into an image and move the visible area while it keeps filling the screen (single-image profiles)
 - Slideshow with configurable file order from local sources
 - Add wallpapers one by one or a folder at a time (no subfolders)
 - Command-line interface

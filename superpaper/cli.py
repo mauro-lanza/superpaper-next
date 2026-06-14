@@ -126,5 +126,6 @@ custom command in quotes. Exiting.")
                                  args.offsets
                                 )
         job_thread = change_wallpaper_job(profile, force=True)
-        job_thread.join()
+        if job_thread is not None:
+            job_thread.join()
         return 0

@@ -7,13 +7,14 @@ Written by Henri Hänninen.
 import logging
 import math
 import os
-import platform
 import random
 import datetime
 import sys
+from typing import Optional
 
 import superpaper.sp_logging as sp_logging
 from superpaper.message_dialog import show_message_dialog
+from superpaper.sp_platform import IS_MACOS
 import superpaper.wallpaper_processing as wpproc
 import superpaper.sp_paths as sp_paths
 from superpaper.sp_paths import (PATH, CONFIG_PATH, PROFILES_PATH, TEMP_PATH)
@@ -180,7 +181,7 @@ class GeneralSettingsData(object):
             # if file does not exist, create it and write default values.
             general_settings_file = open(fname, "x")
             general_settings_file.write("logging=false\n")
-            if platform.system() == "Darwin":
+            if IS_MACOS:
                 general_settings_file.write("use hotkeys=false\n")
             else:
                 general_settings_file.write("use hotkeys=true\n")
@@ -307,14 +308,16 @@ class ProfileData(object):
                         sp_logging.G_LOGGER.info("Exception: unknown spanmode: %s \
                                 in profile: %s", words[1], self.name)
                 elif words[0] == "spangroups":
-                    self.spangroups = []
+                    spangroups = []
                     groups = words[1].strip().split(",")
                     for grp in groups:
                         try:
                             ids = [int(idx) for idx in grp]
-                            self.spangroups.append(sorted(list(set(ids)))) # drop duplicates
+                            spangroups.append(sorted(list(set(ids)))) # drop duplicates
                         except ValueError:
-                            self.spangroups = None
+                            spangroups = None
+                            break
+                    self.spangroups = spangroups
                 elif words[0] == "slideshow":
                     wrd1 = words[1].strip().lower()
                     if wrd1 == "true":
@@ -719,20 +722,20 @@ class CLIProfileData(ProfileData):
 class TempProfileData(object):
     """Data object to test the validity of user input and for saving said input into profiles."""
     def __init__(self):
-        self.name = None
-        self.spanmode = None
-        self.spangroups = None
-        self.slideshow = None
-        self.delay = None
-        self.sortmode = None
+        self.name: Optional[str] = None
+        self.spanmode: Optional[str] = None
+        self.spangroups: Optional[str] = None
+        self.slideshow: Optional[bool] = None
+        self.delay: Optional[str] = None
+        self.sortmode: Optional[str] = None
         self.inches = None
-        self.manual_offsets = None
+        self.manual_offsets: Optional[str] = None
         self.bezels = None
-        self.hk_binding = None
-        self.perspective = None
-        self.zoom = None
-        self.align = None
-        self.selected = None
+        self.hk_binding: Optional[str] = None
+        self.perspective: Optional[str] = None
+        self.zoom: Optional[float] = None
+        self.align: Optional[tuple] = None
+        self.selected: Optional[list] = None
         self.paths_array = []
 
     def save(self):
@@ -904,7 +907,7 @@ Valid modifiers are 'control', 'super', 'alt', 'shift'."
             try:
                 val = float(item)
             except ValueError:
-                sp_logging.G_LOGGER.info("float type check failed for: '%s'", val)
+                sp_logging.G_LOGGER.info("float type check failed for: '%s'", item)
                 return False
         return is_floats
 
@@ -924,8 +927,8 @@ Valid modifiers are 'control', 'super', 'alt', 'shift'."
                     val_w = int(offset[0])
                     val_h = int(offset[1])
                 except ValueError:
-                    sp_logging.G_LOGGER.info("int type check failed for: '%s' or '%s",
-                                             val_w, val_h)
+                    sp_logging.G_LOGGER.info("int type check failed for: '%s' or '%s'",
+                                             offset[0], offset[1])
                     return False
         except TypeError:
             return False

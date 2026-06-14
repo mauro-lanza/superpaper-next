@@ -26,7 +26,7 @@ class BrowsePaths(wx.Dialog):
     def __init__(self, parent, use_multi_image, defdir, num_span_groups=None):
         wx.Dialog.__init__(self, parent, -1,
                            'Choose image source directories or image files',
-                           size=(250, 250),
+                           size=wx.Size(250, 250),
                            style=wx.RESIZE_BORDER|wx.DEFAULT_DIALOG_STYLE)
         # self.SetMinSize((250, 250))
         BMP_SIZE = 32
@@ -68,8 +68,8 @@ class BrowsePaths(wx.Dialog):
         self.sizer_paths_list.Add(st_paths_list, 0, wx.ALIGN_LEFT|wx.ALL, 5)
         self.create_paths_listctrl(self.use_multi_image)
 
+        sizer_radio = wx.BoxSizer(wx.VERTICAL)
         if self.use_multi_image:
-            sizer_radio = wx.BoxSizer(wx.VERTICAL)
             radio_choices_displays = [
                 self.wp_area_name + " {}".format(i) for i in range(self.num_wallpaper_area)
             ]
@@ -111,13 +111,13 @@ class BrowsePaths(wx.Dialog):
         sizer_main.Add(sizer_buttons, 0, wx.ALL|wx.EXPAND, 5)
         # self.SetSizer(sizer_main)
         self.SetSizerAndFit(sizer_main)
-        self.SetSize((-1, 650))
+        self.SetSize(wx.Size(-1, 650))
         # self.SetAutoLayout(True)
 
     def create_paths_listctrl(self, use_multi_image):
         if use_multi_image:
             self.paths_listctrl = wx.ListCtrl(self, -1,
-                                              size=(-1, -1),
+                                              size=wx.Size(-1, -1),
                                               style=wx.LC_REPORT
                                               #  | wx.BORDER_SUNKEN
                                               | wx.BORDER_SIMPLE
@@ -136,7 +136,7 @@ class BrowsePaths(wx.Dialog):
         else:
             # show simpler listing without header if only one wallpaper target
             self.paths_listctrl = wx.ListCtrl(self, -1,
-                                              size=(-1, -1),
+                                              size=wx.Size(-1, -1),
                                               style=wx.LC_REPORT
                                               #  | wx.BORDER_SUNKEN
                                               | wx.BORDER_SIMPLE
@@ -168,7 +168,7 @@ class BrowsePaths(wx.Dialog):
             # self.paths_listctrl.SetItem(index, 1, data[1])
 
     def add_to_imagelist(self, path):
-        folder_bmp =  wx.ArtProvider.GetBitmap(wx.ART_FOLDER, wx.ART_TOOLBAR, self.tsize)
+        folder_bmp =  wx.ArtProvider.GetBitmap(wx.ART_FOLDER, wx.ART_TOOLBAR, wx.Size(*self.tsize))
         # file_bmp =  wx.ArtProvider.GetBitmap(wx.ART_NORMAL_FILE, wx.ART_TOOLBAR, self.tsize)
         if os.path.isdir(path):
             img_id = self.il.Add(folder_bmp)
@@ -192,8 +192,8 @@ class BrowsePaths(wx.Dialog):
         bmp = wximg.Scale(round(target_w),
                           round(target_h),
                           quality=wx.IMAGE_QUALITY_BOX_AVERAGE
-                         ).Resize(self.tsize,
-                                  pos
+                         ).Resize(wx.Size(*self.tsize),
+                                  wx.Point(pos)
                                  ).ConvertToBitmap()
         return bmp
 
@@ -280,7 +280,7 @@ class DisplayPositionEntry(wx.Frame):
             self.parent.export_offsets(self.display_sys)  # export dragged offsets first
         self.old_ppinorm_offs = self.display_sys.get_ppinorm_offsets()  # back up the offsets
 
-        self.help_bmp = wx.ArtProvider.GetBitmap(wx.ART_QUESTION, wx.ART_BUTTON, (20, 20))
+        self.help_bmp = wx.ArtProvider.GetBitmap(wx.ART_QUESTION, wx.ART_BUTTON, wx.Size(20, 20))
 
         sizer_main = wx.BoxSizer(wx.VERTICAL)
 
@@ -338,17 +338,17 @@ class DisplayPositionEntry(wx.Frame):
         # statbox_disp_opts = self.sizer_disp_opts.GetStaticBox()
         statbox_disp_opts = self
         row_id = wx.StaticText(statbox_disp_opts, -1, str(row_id))
-        row_left = wx.TextCtrl(statbox_disp_opts, -1, size=(self.tc_width, -1),
+        row_left = wx.TextCtrl(statbox_disp_opts, -1, size=wx.Size(self.tc_width, -1),
                                style=wx.TE_RIGHT|wx.TE_READONLY)
-        row_top = wx.TextCtrl(statbox_disp_opts, -1, size=(self.tc_width, -1),
+        row_top = wx.TextCtrl(statbox_disp_opts, -1, size=wx.Size(self.tc_width, -1),
                               style=wx.TE_RIGHT|wx.TE_READONLY)
-        row_right = wx.TextCtrl(statbox_disp_opts, -1, size=(self.tc_width, -1),
+        row_right = wx.TextCtrl(statbox_disp_opts, -1, size=wx.Size(self.tc_width, -1),
                                 style=wx.TE_RIGHT|wx.TE_READONLY)
-        row_bottom = wx.TextCtrl(statbox_disp_opts, -1, size=(self.tc_width, -1),
+        row_bottom = wx.TextCtrl(statbox_disp_opts, -1, size=wx.Size(self.tc_width, -1),
                                  style=wx.TE_RIGHT|wx.TE_READONLY)
-        row_left_new = wx.TextCtrl(statbox_disp_opts, -1, size=(self.tc_width, -1),
+        row_left_new = wx.TextCtrl(statbox_disp_opts, -1, size=wx.Size(self.tc_width, -1),
                                    style=wx.TE_RIGHT|wx.TE_PROCESS_ENTER)
-        row_top_new = wx.TextCtrl(statbox_disp_opts, -1, size=(self.tc_width, -1),
+        row_top_new = wx.TextCtrl(statbox_disp_opts, -1, size=wx.Size(self.tc_width, -1),
                                   style=wx.TE_RIGHT|wx.TE_PROCESS_ENTER)
 
         row_left.Disable()
@@ -392,7 +392,7 @@ class DisplayPositionEntry(wx.Frame):
         self.button_apply.Bind(wx.EVT_BUTTON, self.onApply)
         self.button_cancel.Bind(wx.EVT_BUTTON, self.onCancel)
 
-        self.button_help_pos = wx.BitmapButton(self, bitmap=self.help_bmp)
+        self.button_help_pos = wx.BitmapButton(self, bitmap=wx.BitmapBundle(self.help_bmp))
         self.button_help_pos.Bind(wx.EVT_BUTTON, self.onHelpExactPositions)
 
         self.sizer_buttons.Add(self.cb_use_px, 0, wx.ALL|wx.ALIGN_CENTER_VERTICAL, 5)
@@ -499,7 +499,7 @@ class DisplayPositionEntry(wx.Frame):
         btn = evt.GetEventObject()
         pos = btn.ClientToScreen((0, 0))
         sz = btn.GetSize()
-        pop.Position(pos, (0, sz[1]))
+        pop.Position(pos, wx.Size(0, sz[1]))
         pop.Popup()
 
 
@@ -563,7 +563,7 @@ class PerspectiveConfig(wx.Dialog):
         self.display_sys = parent.display_sys
         self.persp_dict = self.display_sys.perspective_dict
         self.test_image = None
-        self.help_bmp = wx.ArtProvider.GetBitmap(wx.ART_QUESTION, wx.ART_BUTTON, (20, 20))
+        self.help_bmp = wx.ArtProvider.GetBitmap(wx.ART_QUESTION, wx.ART_BUTTON, wx.Size(20, 20))
         self.warn_large_img = GeneralSettingsData().warn_large_img
 
         sizer_main = wx.BoxSizer(wx.VERTICAL)
@@ -573,7 +573,7 @@ class PerspectiveConfig(wx.Dialog):
         self.cb_master = wx.CheckBox(self, -1, "Use perspective corrections")
         self.cb_master.SetValue(self.display_sys.use_perspective)
         # self.cb_master.Bind(wx.EVT_CHECKBOX, self.onCbmaster)
-        self.button_help_persp = wx.BitmapButton(self, bitmap=self.help_bmp)
+        self.button_help_persp = wx.BitmapButton(self, bitmap=wx.BitmapBundle(self.help_bmp))
         self.button_help_persp.Bind(wx.EVT_BUTTON, self.onHelpPerspective)
         sizer_top.Add(self.cb_master, 0, wx.ALL|wx.ALIGN_CENTER_VERTICAL, 5)
         sizer_top.AddStretchSpacer()
@@ -615,13 +615,13 @@ class PerspectiveConfig(wx.Dialog):
         st_choice_profiles = wx.StaticText(statbox_profs, -1, "Perspective profiles:")
         # name txt ctrl
         st_name = wx.StaticText(statbox_profs, -1, "Profile name:")
-        self.tc_name = wx.TextCtrl(statbox_profs, -1, size=(self.tc_width, -1))
+        self.tc_name = wx.TextCtrl(statbox_profs, -1, size=wx.Size(self.tc_width, -1))
         self.tc_name.SetMaxLength(14)
         # buttons
         self.button_new = wx.Button(statbox_profs, label="New")
         self.button_save = wx.Button(statbox_profs, label="Save")
         self.button_delete = wx.Button(statbox_profs, label="Delete")
-        self.button_help_perspprof = wx.BitmapButton(statbox_profs, bitmap=self.help_bmp)
+        self.button_help_perspprof = wx.BitmapButton(statbox_profs, bitmap=wx.BitmapBundle(self.help_bmp))
         self.button_new.Bind(wx.EVT_BUTTON, self.onCreateNewProfile)
         self.button_save.Bind(wx.EVT_BUTTON, self.onSave)
         self.button_delete.Bind(wx.EVT_BUTTON, self.onDeleteProfile)
@@ -663,9 +663,9 @@ class PerspectiveConfig(wx.Dialog):
             wx.StaticText(statbox_profs, -1, "dist:"),
         ]
         self.tclist_vieweroffs = [
-            wx.TextCtrl(statbox_profs, -1, size=(self.tc_width*0.69, -1), style=wx.TE_RIGHT),
-            wx.TextCtrl(statbox_profs, -1, size=(self.tc_width*0.69, -1), style=wx.TE_RIGHT),
-            wx.TextCtrl(statbox_profs, -1, size=(self.tc_width*0.69, -1), style=wx.TE_RIGHT)
+            wx.TextCtrl(statbox_profs, -1, size=wx.Size(int(self.tc_width*0.69), -1), style=wx.TE_RIGHT),
+            wx.TextCtrl(statbox_profs, -1, size=wx.Size(int(self.tc_width*0.69), -1), style=wx.TE_RIGHT),
+            wx.TextCtrl(statbox_profs, -1, size=wx.Size(int(self.tc_width*0.69), -1), style=wx.TE_RIGHT)
         ]
         for tc in self.tclist_vieweroffs:
             if isinstance(tc, wx.TextCtrl):
@@ -679,7 +679,7 @@ class PerspectiveConfig(wx.Dialog):
             sizer_viewer_off.Add(st[0], st[1], st[2], st[3])
             sizer_viewer_off.Add(tc[0], tc[1], tc[2], tc[3])
 
-        self.button_help_centrald = wx.BitmapButton(statbox_profs, bitmap=self.help_bmp)
+        self.button_help_centrald = wx.BitmapButton(statbox_profs, bitmap=wx.BitmapBundle(self.help_bmp))
         self.button_help_centrald.Bind(wx.EVT_BUTTON, self.onHelpCentralDisp)
         sizer_viewer_off.AddStretchSpacer()
         sizer_viewer_off.Add(self.button_help_centrald, 0, wx.ALIGN_CENTER_VERTICAL|wx.ALL, 5)
@@ -729,7 +729,7 @@ class PerspectiveConfig(wx.Dialog):
         self.sizer_disp_opts.Add(self.grid, 0, wx.ALL|wx.EXPAND, 5)
 
         # help
-        self.button_help_data = wx.BitmapButton(statbox_disp_opts, bitmap=self.help_bmp)
+        self.button_help_data = wx.BitmapButton(statbox_disp_opts, bitmap=wx.BitmapBundle(self.help_bmp))
         self.button_help_data.Bind(wx.EVT_BUTTON, self.onHelpData)
         self.sizer_disp_opts.AddStretchSpacer()
         self.sizer_disp_opts.Add(self.button_help_data, 0,
@@ -741,19 +741,19 @@ class PerspectiveConfig(wx.Dialog):
         statbox_disp_opts = self.sizer_disp_opts.GetStaticBox()
         row_id = wx.StaticText(statbox_disp_opts, -1, str(row_id))
         row_sax = wx.ComboBox(statbox_disp_opts, -1, name="SwivelAxisChoice",
-                            size=(self.tc_width*0.7, -1),
+                            size=wx.Size(int(self.tc_width*0.7), -1),
                             choices=["No swivel", "Left", "Right"], style=wx.CB_READONLY)
-        row_san = wx.TextCtrl(statbox_disp_opts, -1, size=(self.tc_width*0.69, -1),
+        row_san = wx.TextCtrl(statbox_disp_opts, -1, size=wx.Size(int(self.tc_width*0.69), -1),
                               style=wx.TE_RIGHT)
-        row_sol = wx.TextCtrl(statbox_disp_opts, -1, size=(self.tc_width*0.69, -1),
+        row_sol = wx.TextCtrl(statbox_disp_opts, -1, size=wx.Size(int(self.tc_width*0.69), -1),
                               style=wx.TE_RIGHT)
-        row_sod = wx.TextCtrl(statbox_disp_opts, -1, size=(self.tc_width*0.69, -1),
+        row_sod = wx.TextCtrl(statbox_disp_opts, -1, size=wx.Size(int(self.tc_width*0.69), -1),
                               style=wx.TE_RIGHT)
-        row_tan = wx.TextCtrl(statbox_disp_opts, -1, size=(self.tc_width*0.69, -1),
+        row_tan = wx.TextCtrl(statbox_disp_opts, -1, size=wx.Size(int(self.tc_width*0.69), -1),
                               style=wx.TE_RIGHT)
-        row_tov = wx.TextCtrl(statbox_disp_opts, -1, size=(self.tc_width*0.69, -1),
+        row_tov = wx.TextCtrl(statbox_disp_opts, -1, size=wx.Size(int(self.tc_width*0.69), -1),
                               style=wx.TE_RIGHT)
-        row_tod = wx.TextCtrl(statbox_disp_opts, -1, size=(self.tc_width*0.69, -1),
+        row_tod = wx.TextCtrl(statbox_disp_opts, -1, size=wx.Size(int(self.tc_width*0.69), -1),
                               style=wx.TE_RIGHT)
         # Prefill neutral data
         row_sax.SetSelection(0)
@@ -787,7 +787,7 @@ class PerspectiveConfig(wx.Dialog):
         self.sizer_buttons.Add(self.button_align_test, 0, wx.CENTER|wx.ALL, 5)
         sline = wx.StaticLine(self, -1, style=wx.LI_VERTICAL)
         self.sizer_buttons.Add(sline, 0, wx.EXPAND|wx.ALL, 5)
-        self.tc_testimage = wx.TextCtrl(self, -1, size=(self.tc_width, -1))
+        self.tc_testimage = wx.TextCtrl(self, -1, size=wx.Size(self.tc_width, -1))
         self.sizer_buttons.Add(self.tc_testimage, 0, wx.CENTER|wx.ALL, 5)
         self.sizer_buttons.Add(self.button_test_pick, 0, wx.CENTER|wx.ALL, 5)
         self.sizer_buttons.Add(self.button_test_imag, 0, wx.CENTER|wx.ALL, 5)
@@ -886,6 +886,9 @@ class PerspectiveConfig(wx.Dialog):
                                                                                     persp_data)
             # Canvas containing back-projected displays
             canv = wpproc.compute_working_canvas(proj_plane_crops)
+        else:
+            # No perspective data => no back-projection enlargement to check.
+            return (False, (0, 0))
         max_size = 12000
         if canv[0] > max_size or canv[1] > max_size:
             return (True, canv)
@@ -1107,7 +1110,7 @@ class PerspectiveConfig(wx.Dialog):
         profile = CLIProfileData(testimage, advanced=True,
             perspective=perspective, spangroups=None, offsets=flat_offsets)
         thrd = change_wallpaper_job(profile, force=True)
-        while thrd.is_alive():
+        while thrd is not None and thrd.is_alive():
             time.sleep(0.5)
         del busy
         return 1
@@ -1165,7 +1168,7 @@ class PerspectiveConfig(wx.Dialog):
         btn = evt.GetEventObject()
         pos = btn.ClientToScreen((0, 0))
         sz = btn.GetSize()
-        pop.Position(pos, (0, sz[1]))
+        pop.Position(pos, wx.Size(0, sz[1]))
         pop.Popup()
 
     def onHelpPersProfile(self, evt):
@@ -1177,7 +1180,7 @@ class PerspectiveConfig(wx.Dialog):
         btn = evt.GetEventObject()
         pos = btn.ClientToScreen((0, 0))
         sz = btn.GetSize()
-        pop.Position(pos, (0, sz[1]))
+        pop.Position(pos, wx.Size(0, sz[1]))
         pop.Popup()
 
     def onHelpCentralDisp(self, evt):
@@ -1196,7 +1199,7 @@ class PerspectiveConfig(wx.Dialog):
         btn = evt.GetEventObject()
         pos = btn.ClientToScreen((0, 0))
         sz = btn.GetSize()
-        pop.Position(pos, (0, sz[1]))
+        pop.Position(pos, wx.Size(0, sz[1]))
         pop.Popup()
 
     def onHelpData(self, evt):
@@ -1229,7 +1232,7 @@ class PerspectiveConfig(wx.Dialog):
         btn = evt.GetEventObject()
         pos = btn.ClientToScreen((0, 0))
         sz = btn.GetSize()
-        pop.Position(pos, (0, sz[1]))
+        pop.Position(pos, wx.Size(0, sz[1]))
         pop.Popup()
 
 
@@ -1268,9 +1271,9 @@ class SettingsPanel(wx.Panel):
         self.cb_logging = wx.CheckBox(pnl, -1, "")
         self.cb_usehotkeys = wx.CheckBox(pnl, -1, "")
         self.cb_warn_large = wx.CheckBox(pnl, -1, "")
-        self.tc_hk_next = wx.TextCtrl(pnl, -1, size=(200, -1))
-        self.tc_hk_pause = wx.TextCtrl(pnl, -1, size=(200, -1))
-        self.tc_setcmd = wx.TextCtrl(pnl, -1, size=(200, -1))
+        self.tc_hk_next = wx.TextCtrl(pnl, -1, size=wx.Size(200, -1))
+        self.tc_hk_pause = wx.TextCtrl(pnl, -1, size=wx.Size(200, -1))
+        self.tc_setcmd = wx.TextCtrl(pnl, -1, size=wx.Size(200, -1))
 
         self.sizer_grid_settings.AddMany(
             [
@@ -1431,7 +1434,7 @@ Tips:
     - 'Align Test' feature allows you to test your alignment settings.
 """
         # st_help = wx.StaticText(self, -1, help_str)
-        st_help = wx.TextCtrl(self, -1, help_str, size=(700, 400),
+        st_help = wx.TextCtrl(self, -1, help_str, size=wx.Size(700, 400),
                               style=wx.TE_MULTILINE|wx.TE_READONLY)
         self.sizer_helpcontent.Add(st_help, 1, wx.EXPAND|wx.CENTER|wx.ALL, 5)
 
@@ -1503,8 +1506,8 @@ class HelpPopup(wx.PopupTransientWindow):
         sizer.Fit(self)
         self.Layout()
 
-    def ProcessLeftDown(self, evt):
-        return wx.PopupTransientWindow.ProcessLeftDown(self, evt)
+    def ProcessLeftDown(self, event):
+        return wx.PopupTransientWindow.ProcessLeftDown(self, event)
 
     def OnDismiss(self):
         self.Destroy()
@@ -1513,7 +1516,7 @@ class HelpPopup(wx.PopupTransientWindow):
         "Return a sentence what the minimum source image size is for best quality."
         senten = ("For the best image quality with current settings your\n"
                   r" wallpapers should be {} or larger.")
-        if self.advanced_on:
+        if self.advanced_on and self.display_sys is not None:
             if self.mainframe.cb_offsets.GetValue():
                 offsets = []
                 for tc in self.mainframe.tc_list_offsets:

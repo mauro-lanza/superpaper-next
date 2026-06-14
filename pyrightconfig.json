@@ -1,0 +1,16 @@
+{
+    "venvPath": ".",
+    "venv": ".venv",
+    "include": [
+        "superpaper"
+    ],
+    "exclude": [
+        "**/__pycache__",
+        "build",
+        "dist",
+        "releases",
+        "release-tooling",
+        ".venv"
+    ],
+    "typeCheckingMode": "standard"
+}

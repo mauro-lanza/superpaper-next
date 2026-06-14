@@ -2,7 +2,6 @@
 # from configuration_dialogs import * # Katso ensin että tuleeko tästä liian pitkä dialogien kanssa.
 
 import os
-import platform
 import subprocess
 import sys
 from threading import Lock
@@ -11,6 +10,7 @@ from superpaper.__version__ import __version__
 import superpaper.sp_logging as sp_logging
 import superpaper.sp_paths as sp_paths
 import superpaper.wallpaper_processing as wpproc
+from superpaper.sp_platform import IS_MACOS, IS_WINDOWS
 from superpaper.gui import ConfigFrame
 from superpaper.configuration_dialogs import SettingsFrame, HelpFrame
 from superpaper.message_dialog import show_message_dialog
@@ -118,7 +118,7 @@ class TaskBarIcon(wx.adv.TaskBarIcon):
                 from system_hotkey import SystemHotkey
                 self.hk = SystemHotkey(check_queue_interval=0.05)
                 self.hk2 = SystemHotkey(
-                    consumer=self.profile_consumer,
+                    consumer=self.profile_consumer,  # pyright: ignore[reportArgumentType]
                     check_queue_interval=0.05)
                 self.seen_binding = set()
                 self.register_hotkeys()
@@ -270,7 +270,7 @@ It is already registered for another action.".format(profile.hk_binding, profile
         if old_hotkey is not None:
             self.hk2.unregister(old_hotkey)
             self.seen_binding.remove(old_hotkey)
-        if new_hotkey is not None:
+        if new_hotkey is not None and profile is not None:
             try:
                 self.hk2.register(new_hotkey, profile, overwrite=False)
                 self.seen_binding.add(new_hotkey)
@@ -330,7 +330,7 @@ Check that it is formatted properly and valid keys.".format(profile.hk_binding)
     def set_icon(self, path):
         """Sets tray icon."""
         icon = wx.Icon(path)
-        self.SetIcon(icon, TRAY_TOOLTIP)
+        self.SetIcon(wx.BitmapBundle(icon), TRAY_TOOLTIP)
 
     def on_left_down(self, *event):
         """Allows binding left click event."""
@@ -344,12 +344,13 @@ Check that it is formatted properly and valid keys.".format(profile.hk_binding)
 
     def open_config(self, event):
         """Opens Superpaper config folder, CONFIG_PATH."""
-        if platform.system() == "Windows":
+        if IS_WINDOWS:
             try:
-                os.startfile(sp_paths.CONFIG_PATH)
+                # os.startfile is Windows-only; the branch is IS_WINDOWS-guarded.
+                os.startfile(sp_paths.CONFIG_PATH)  # pyright: ignore[reportAttributeAccessIssue]
             except BaseException:
                 show_message_dialog("There was an error trying to open the config folder.")
-        elif platform.system() == "Darwin":
+        elif IS_MACOS:
             try:
                 subprocess.check_call(["open", sp_paths.CONFIG_PATH])
             except subprocess.CalledProcessError:

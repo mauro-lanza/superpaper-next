@@ -11,13 +11,13 @@ import configparser
 import json
 import math
 import os
-import platform
 import shutil
 import subprocess
 import sys
 import traceback
 from operator import itemgetter
 from threading import Lock, Thread, Timer
+from typing import Any
 
 from PIL import Image, ImageOps, UnidentifiedImageError
 from screeninfo import get_monitors
@@ -26,6 +26,7 @@ import superpaper.perspective as persp
 import superpaper.sp_logging as sp_logging
 from superpaper.message_dialog import show_message_dialog
 from superpaper.sp_paths import CONFIG_PATH, TEMP_PATH
+from superpaper.sp_platform import IS_LINUX, IS_MACOS, IS_WINDOWS
 
 # Disables PIL.Image.DecompressionBombError.
 Image.MAX_IMAGE_PIXELS = None # 715827880 would be 4x default max.
@@ -42,14 +43,23 @@ def running_kde():
         return True
     return False
 
-if platform.system() == "Windows":
+# Platform-native helpers are imported conditionally below. Declare them up front
+# with safe fallbacks so the names are always bound regardless of platform; the
+# real implementations replace these on the matching OS.
+set_wallpaper_win: Any = None
+dbus: Any = None
+NSScreen: Any = None
+NSWorkspace: Any = None
+NSURL: Any = None
+
+if sys.platform == "win32":
     from superpaper.wallpaper_windows import set_wallpaper_win
-elif platform.system() == "Linux":
+elif sys.platform == "linux":
     # KDE has special needs
     # if os.environ.get("DESKTOP_SESSION") in ["/usr/share/xsessions/plasma", "plasma"]:
     if running_kde():
         import dbus
-elif platform.system() == "Darwin":
+elif sys.platform == "darwin":
     from AppKit import NSScreen, NSWorkspace
     from Foundation import NSURL
 
@@ -62,11 +72,12 @@ RESOLUTION_ARRAY = []
 # list of display offsets (width,height), use tuples.
 DISPLAY_OFFSET_ARRAY = []
 
-G_ACTIVE_DISPLAYSYSTEM = None
+# Lazily initialized in load_system() before any wallpaper processing runs.
+G_ACTIVE_DISPLAYSYSTEM: "DisplaySystem" = None  # pyright: ignore[reportAssignmentType]
 G_ACTIVE_PROFILE = None
 G_WALLPAPER_CHANGE_LOCK = Lock()
 G_SUPPORTED_IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".bmp", ".gif", ".tiff", ".webp")
-G_SET_COMMAND_STRING = ""
+G_SET_COMMAND_STRING: str = ""
 
 # global to take care that failure message is not shown more than once at launch
 USER_TOLD_OF_PHYS_FAIL = False
@@ -101,7 +112,8 @@ class RepeatedTimer(object):
 
     def stop(self):
         """Stops timer."""
-        self._timer.cancel()
+        if self._timer is not None:
+            self._timer.cancel()
         self.is_running = False
 
 
@@ -421,12 +433,14 @@ class DisplaySystem():
 
 
         # Tile columns on to the plane with vertical centering
+        col_sizes = []
         try:
             col_sizes = [self.column_size(col) for col in columns]
         except (ValueError, IndexError):
             sp_logging.G_LOGGER.info("Problem with column sizes. col_sizes: %s",
                                      col_sizes)
         # print("col_sizes", col_sizes)
+        max_col_h = 0
         try:
             max_col_h = max([sz[1] for sz in col_sizes])
         except ValueError:
@@ -589,7 +603,7 @@ class DisplaySystem():
             - rotation angles of displays for perspective correction
         """
         archive_file = os.path.join(CONFIG_PATH, "display_systems.dat")
-        instance_key = hash(self)
+        instance_key = str(hash(self))
 
         # collect data for saving
         ppi_norm_offsets = []
@@ -646,8 +660,8 @@ class DisplaySystem():
         found_match = False
 
         # check if file exists and if the current key exists in it
+        config = configparser.ConfigParser()
         if os.path.exists(archive_file):
-            config = configparser.ConfigParser()
             config.read(archive_file)
             sp_logging.G_LOGGER.info("config.sections: %s", config.sections())
             if instance_key in config:
@@ -665,7 +679,8 @@ class DisplaySystem():
                                            item_len=2)
             bezel_mms = str_to_list(instance_data["bezel_mms"],
                                     item_len=2)
-            bezel_mms = [(round(bez[0], 2), round(bez[1], 2)) for bez in bezel_mms]
+            if bezel_mms:
+                bezel_mms = [(round(bez[0], 2), round(bez[1], 2)) for bez in bezel_mms]
             diagonal_inches = str_to_list(instance_data["user_diagonal_inches"],
                                           item_len=1)
             use_perspective = bool(int(instance_data.get("use_perspective", 0)))
@@ -810,6 +825,7 @@ def str_to_list(joined_list, item_len=1, strings=False):
                 try:
                     val = float(item)
                 except ValueError:
+                    val = item
                     if not strings:
                         sp_logging.G_LOGGER.info(
                             "str_to_list: ValueError: not int or float: %s", item
@@ -829,6 +845,7 @@ def str_to_list(joined_list, item_len=1, strings=False):
                     try:
                         val = float(sub_item)
                     except ValueError:
+                        val = sub_item
                         if not strings:
                             sp_logging.G_LOGGER.info(
                                 "str_to_list: ValueError: not int or float: %s", sub_item
@@ -924,7 +941,7 @@ def compute_ppi_corrected_res_array(res_array, ppi_list_rel_density):
 
 # resize image to fill given rectangle and do a positioned crop to size.
 # Return output image.
-def resize_to_fill(img, res, quality=Image.LANCZOS, zoom=1.0, offset=(0.0, 0.0)):
+def resize_to_fill(img, res, quality: "str | Image.Resampling" = Image.Resampling.LANCZOS, zoom=1.0, offset=(0.0, 0.0)):
     """Resize image to fill given rectangle and do a positioned crop to size.
 
     The image is always scaled so that it fully covers the target rectangle
@@ -935,10 +952,10 @@ def resize_to_fill(img, res, quality=Image.LANCZOS, zoom=1.0, offset=(0.0, 0.0))
     +1.0 aligns to the right/bottom edge. The result always fills ``res``.
     """
     if quality == "fast":
-        quality = Image.HAMMING
+        quality = Image.Resampling.HAMMING
         reducing_gap = 1.5
     else:
-        quality = Image.LANCZOS
+        quality = Image.Resampling.LANCZOS
         reducing_gap = None
 
     if not img.mode == "RGB":
@@ -990,7 +1007,7 @@ def resize_to_fill(img, res, quality=Image.LANCZOS, zoom=1.0, offset=(0.0, 0.0))
         sp_logging.G_LOGGER.info(
             "Error: result image not of correct size. crp:%s, res:%s",
             cropped_res.size, res)
-        return -1
+        return cropped_res
 
 
 def get_center(res):
@@ -1106,8 +1123,7 @@ def alternating_outputfile(prof_name):
     and it is alternating since some OSs don't update their wallpapers if the
     current image file is overwritten.
     """
-    platf = platform.system()
-    if platf == "Windows":
+    if IS_WINDOWS:
         ftype = "jpg"
     else:
         ftype = "png"
@@ -1136,6 +1152,7 @@ def span_single_image_simple(profile, force):
     except UnidentifiedImageError:
         sp_logging.G_LOGGER.info(("Opening image '%s' failed with PIL.UnidentifiedImageError."
                                   "It could be corrupted or is of foreign type."), file)
+        return
     canvas_tuple = tuple(compute_canvas(RESOLUTION_ARRAY, DISPLAY_OFFSET_ARRAY))
     img_resize = resize_to_fill(img, canvas_tuple,
                                 zoom=profile.zoom, offset=profile.offsets)
@@ -1200,6 +1217,7 @@ def span_single_image_advanced(profile, force):
     except UnidentifiedImageError:
         sp_logging.G_LOGGER.info(("Opening image '%s' failed with PIL.UnidentifiedImageError."
                                   "It could be corrupted or is of foreign type."), files)
+        return
 
     # Cropping now sections of the image to be shown, USE EFFECTIVE WORKING
     # SIZES. Also EFFECTIVE SIZE Offsets are now required.
@@ -1247,14 +1265,14 @@ def span_single_image_advanced(profile, force):
                 # containing all displays and the full 'target' working canvas
                 # size canvas_tuple_trgt containing ppi normalized displays.
                 persp_crop = img_workingsize.transform(canvas_tuple_trgt,
-                                                       Image.PERSPECTIVE, coeffs,
-                                                       Image.BICUBIC)
+                                                       Image.Transform.PERSPECTIVE, coeffs,
+                                                       Image.Resampling.BICUBIC)
                 ## persp_crop.save(str(canvas_tuple_trgt)+str(crop_tup), "PNG")
                 # Crop desired region from transformed image which is now in
                 # ppi normalized resolution
                 crop_img = persp_crop.crop(ppin_crop)
                 # Resize correct crop to actual display resolution
-                crop_img = crop_img.resize(res, resample=Image.LANCZOS)
+                crop_img = crop_img.resize(res, resample=Image.Resampling.LANCZOS)
                 # cropped_images.append(crop_img) #old
                 cropped_images[grp[i_res]] = crop_img
         else:
@@ -1274,7 +1292,7 @@ def span_single_image_advanced(profile, force):
                     # cropped_images.append(crop_img)
                     cropped_images[grp[i_res]] = crop_img
                 else:
-                    crop_img = crop_img.resize(res, resample=Image.LANCZOS)
+                    crop_img = crop_img.resize(res, resample=Image.Resampling.LANCZOS)
                     # cropped_images.append(crop_img)
                     cropped_images[grp[i_res]] = crop_img
     # Combine crops to a single canvas of the size of the actual desktop
@@ -1317,6 +1335,7 @@ def set_multi_image_wallpaper(profile, force):
         except UnidentifiedImageError:
             sp_logging.G_LOGGER.info(("Opening image '%s' failed with PIL.UnidentifiedImageError."
                                       "It could be corrupted or is of foreign type."), file)
+            return
         img_resized.append(resize_to_fill(image, res,
                                           zoom=profile.zoom, offset=profile.offsets))
     canvas_tuple = tuple(compute_canvas(RESOLUTION_ARRAY, DISPLAY_OFFSET_ARRAY))
@@ -1347,8 +1366,7 @@ def set_wallpaper(outputfile, force=False, source_files=None):
     is called to communicate with the host system to set the
     desktop background. For Linux hosts there is a separate method.
     """
-    pltform = platform.system()
-    if pltform == "Windows":
+    if IS_WINDOWS:
         set_wallpaper_win(outputfile)
     # Old wallpaper setting code with no transition
 #         spi_setdeskwallpaper = 20
@@ -1371,9 +1389,9 @@ def set_wallpaper(outputfile, force=False, source_files=None):
 #         if spi_success == 0:
 #             sp_logging.G_LOGGER.info("SystemParametersInfo wallpaper set failed with \
 # spi_success: '%s'", spi_success)
-    elif pltform == "Linux":
+    elif IS_LINUX:
         set_wallpaper_linux(outputfile, force)
-    elif pltform == "Darwin":
+    elif IS_MACOS:
         # script = """/usr/bin/osascript<<END
         #             tell application "Finder"
         #             set desktop picture to POSIX file "%s"
@@ -1382,13 +1400,13 @@ def set_wallpaper(outputfile, force=False, source_files=None):
         # subprocess.Popen(script % outputfile, shell=True)
         set_wallpaper_macos(outputfile, image_piece_list=None, force=force)
     else:
-        sp_logging.G_LOGGER.info("Unknown platform.system(): %s", pltform)
+        sp_logging.G_LOGGER.info("Unknown platform: %s", sys.platform)
     script_file = os.path.join(CONFIG_PATH, "run-after-wp-change.py")
     if os.path.isfile(script_file):
         subprocess.run(["python3",
                         script_file,
-                        outputfile,
-                        source_files])
+                        str(outputfile),
+                        str(source_files)])
     return 0
 
 def set_wallpaper_macos(outputfile, image_piece_list = None, force = False):
@@ -1409,7 +1427,7 @@ def set_wallpaper_macos(outputfile, image_piece_list = None, force = False):
     # get screen positions on desktop
     screen_coords = []
     for scrn in screens:
-        frm = scrn.frame
+        frm: Any = scrn.frame
         if callable(frm):
             frm = frm()
         screen_coords.append((int(frm.origin.x), int(frm.origin.y)))
@@ -1428,6 +1446,9 @@ def set_wallpaper_macos(outputfile, image_piece_list = None, force = False):
         if sp_logging.DEBUG:
             sp_logging.G_LOGGER.info("KDE: Using image piece list!")
         img_names = image_piece_list
+    else:
+        sp_logging.G_LOGGER.info("Error! macOS wallpaper setter called without arguments!")
+        return
     img_piece_urls = [NSURL.fileURLWithPath_(imagepath) for imagepath in img_names]
 
     # zip screens and image list and loop over setting the images using the shared workspace
@@ -1547,14 +1568,13 @@ def set_wallpaper_piecewise(image_piece_list):
 
     Currently supported such systems are KDE Plasma and XFCE.
     """
-    pltform = platform.system()
-    if pltform == "Linux":
+    if IS_LINUX:
         if running_kde():
             kdeplasma_actions(None, image_piece_list, profile_name=G_ACTIVE_PROFILE)
         # desk_env = os.environ.get("DESKTOP_SESSION")
         # elif desk_env in ["xfce", "xubuntu", "ubuntustudio"]:
             # xfce_actions(None, image_piece_list)
-    elif pltform == "Darwin":
+    elif IS_MACOS:
         set_wallpaper_macos(None, image_piece_list=image_piece_list)
     else:
         pass
@@ -2089,6 +2109,7 @@ for(var idx = 0; idx < allDesktops.length; idx++) {{
     else:
         if sp_logging.DEBUG:
             sp_logging.G_LOGGER.info("Error! KDE actions called without arguments!")
+        return
 
     filess_img_names = []
     for fname in img_names:
@@ -2133,7 +2154,9 @@ def xfce_actions(outputfile):
                                   "/backdrop",
                                   "-l"],
                                  stdout=subprocess.PIPE)
-    props = read_prop.stdout.read().decode("utf-8").split("\n")
+    props = []
+    if read_prop.stdout is not None:
+        props = read_prop.stdout.read().decode("utf-8").split("\n")
     for prop in props:
         if "workspace0/image-style" in prop:
             os.system(
@@ -2237,7 +2260,7 @@ def quick_profile_job(profile):
                               args=(image_pieces,),
                               daemon=True)
                 thrd.start()
-            elif platform.system() == "Windows":
+            elif IS_WINDOWS:
                 # Skip quick switch on Windows if not using perspective corrections.
                 if profile.spanmode == "advanced" and G_ACTIVE_DISPLAYSYSTEM.use_perspective:
                     if ((profile.perspective == "default" and G_ACTIVE_DISPLAYSYSTEM.default_perspective != None) or
@@ -2263,8 +2286,7 @@ def use_image_pieces():
 
     Systems that use image pieces are: KDE, XFCE.
     """
-    pltform = platform.system()
-    if pltform == "Linux":
+    if IS_LINUX:
         if running_kde():
             return True
         # desk_env = os.environ.get("DESKTOP_SESSION")
@@ -2272,7 +2294,7 @@ def use_image_pieces():
             # return True
         else:
             return False
-    elif pltform == "Darwin":
+    elif IS_MACOS:
         return True
     else:
         return False
