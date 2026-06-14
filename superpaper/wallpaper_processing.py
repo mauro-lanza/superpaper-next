@@ -11,13 +11,13 @@ import configparser
 import json
 import math
 import os
-import platform
 import shutil
 import subprocess
 import sys
 import traceback
 from operator import itemgetter
 from threading import Lock, Thread, Timer
+from typing import Any
 
 from PIL import Image, ImageOps, UnidentifiedImageError
 from screeninfo import get_monitors
@@ -26,6 +26,7 @@ import superpaper.perspective as persp
 import superpaper.sp_logging as sp_logging
 from superpaper.message_dialog import show_message_dialog
 from superpaper.sp_paths import CONFIG_PATH, TEMP_PATH
+from superpaper.sp_platform import IS_LINUX, IS_MACOS, IS_WINDOWS
 
 # Disables PIL.Image.DecompressionBombError.
 Image.MAX_IMAGE_PIXELS = None # 715827880 would be 4x default max.
@@ -42,14 +43,23 @@ def running_kde():
         return True
     return False
 
-if platform.system() == "Windows":
+# Platform-native helpers are imported conditionally below. Declare them up front
+# with safe fallbacks so the names are always bound regardless of platform; the
+# real implementations replace these on the matching OS.
+set_wallpaper_win: Any = None
+dbus: Any = None
+NSScreen: Any = None
+NSWorkspace: Any = None
+NSURL: Any = None
+
+if sys.platform == "win32":
     from superpaper.wallpaper_windows import set_wallpaper_win
-elif platform.system() == "Linux":
+elif sys.platform == "linux":
     # KDE has special needs
     # if os.environ.get("DESKTOP_SESSION") in ["/usr/share/xsessions/plasma", "plasma"]:
     if running_kde():
         import dbus
-elif platform.system() == "Darwin":
+elif sys.platform == "darwin":
     from AppKit import NSScreen, NSWorkspace
     from Foundation import NSURL
 
@@ -1112,8 +1122,7 @@ def alternating_outputfile(prof_name):
     and it is alternating since some OSs don't update their wallpapers if the
     current image file is overwritten.
     """
-    platf = platform.system()
-    if platf == "Windows":
+    if IS_WINDOWS:
         ftype = "jpg"
     else:
         ftype = "png"
@@ -1356,8 +1365,7 @@ def set_wallpaper(outputfile, force=False, source_files=None):
     is called to communicate with the host system to set the
     desktop background. For Linux hosts there is a separate method.
     """
-    pltform = platform.system()
-    if pltform == "Windows":
+    if IS_WINDOWS:
         set_wallpaper_win(outputfile)
     # Old wallpaper setting code with no transition
 #         spi_setdeskwallpaper = 20
@@ -1380,9 +1388,9 @@ def set_wallpaper(outputfile, force=False, source_files=None):
 #         if spi_success == 0:
 #             sp_logging.G_LOGGER.info("SystemParametersInfo wallpaper set failed with \
 # spi_success: '%s'", spi_success)
-    elif pltform == "Linux":
+    elif IS_LINUX:
         set_wallpaper_linux(outputfile, force)
-    elif pltform == "Darwin":
+    elif IS_MACOS:
         # script = """/usr/bin/osascript<<END
         #             tell application "Finder"
         #             set desktop picture to POSIX file "%s"
@@ -1559,14 +1567,13 @@ def set_wallpaper_piecewise(image_piece_list):
 
     Currently supported such systems are KDE Plasma and XFCE.
     """
-    pltform = platform.system()
-    if pltform == "Linux":
+    if IS_LINUX:
         if running_kde():
             kdeplasma_actions(None, image_piece_list, profile_name=G_ACTIVE_PROFILE)
         # desk_env = os.environ.get("DESKTOP_SESSION")
         # elif desk_env in ["xfce", "xubuntu", "ubuntustudio"]:
             # xfce_actions(None, image_piece_list)
-    elif pltform == "Darwin":
+    elif IS_MACOS:
         set_wallpaper_macos(None, image_piece_list=image_piece_list)
     else:
         pass
@@ -2252,7 +2259,7 @@ def quick_profile_job(profile):
                               args=(image_pieces,),
                               daemon=True)
                 thrd.start()
-            elif platform.system() == "Windows":
+            elif IS_WINDOWS:
                 # Skip quick switch on Windows if not using perspective corrections.
                 if profile.spanmode == "advanced" and G_ACTIVE_DISPLAYSYSTEM.use_perspective:
                     if ((profile.perspective == "default" and G_ACTIVE_DISPLAYSYSTEM.default_perspective != None) or
@@ -2278,8 +2285,7 @@ def use_image_pieces():
 
     Systems that use image pieces are: KDE, XFCE.
     """
-    pltform = platform.system()
-    if pltform == "Linux":
+    if IS_LINUX:
         if running_kde():
             return True
         # desk_env = os.environ.get("DESKTOP_SESSION")
@@ -2287,7 +2293,7 @@ def use_image_pieces():
             # return True
         else:
             return False
-    elif pltform == "Darwin":
+    elif IS_MACOS:
         return True
     else:
         return False

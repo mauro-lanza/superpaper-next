@@ -7,13 +7,14 @@ Written by Henri Hänninen.
 import logging
 import math
 import os
-import platform
 import random
 import datetime
 import sys
+from typing import Optional
 
 import superpaper.sp_logging as sp_logging
 from superpaper.message_dialog import show_message_dialog
+from superpaper.sp_platform import IS_MACOS
 import superpaper.wallpaper_processing as wpproc
 import superpaper.sp_paths as sp_paths
 from superpaper.sp_paths import (PATH, CONFIG_PATH, PROFILES_PATH, TEMP_PATH)
@@ -180,7 +181,7 @@ class GeneralSettingsData(object):
             # if file does not exist, create it and write default values.
             general_settings_file = open(fname, "x")
             general_settings_file.write("logging=false\n")
-            if platform.system() == "Darwin":
+            if IS_MACOS:
                 general_settings_file.write("use hotkeys=false\n")
             else:
                 general_settings_file.write("use hotkeys=true\n")

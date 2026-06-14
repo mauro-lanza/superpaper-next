@@ -2,7 +2,6 @@
 # from configuration_dialogs import * # Katso ensin että tuleeko tästä liian pitkä dialogien kanssa.
 
 import os
-import platform
 import subprocess
 import sys
 from threading import Lock
@@ -11,6 +10,7 @@ from superpaper.__version__ import __version__
 import superpaper.sp_logging as sp_logging
 import superpaper.sp_paths as sp_paths
 import superpaper.wallpaper_processing as wpproc
+from superpaper.sp_platform import IS_MACOS, IS_WINDOWS
 from superpaper.gui import ConfigFrame
 from superpaper.configuration_dialogs import SettingsFrame, HelpFrame
 from superpaper.message_dialog import show_message_dialog
@@ -344,12 +344,13 @@ Check that it is formatted properly and valid keys.".format(profile.hk_binding)
 
     def open_config(self, event):
         """Opens Superpaper config folder, CONFIG_PATH."""
-        if platform.system() == "Windows":
+        if IS_WINDOWS:
             try:
-                os.startfile(sp_paths.CONFIG_PATH)
+                # os.startfile is Windows-only; the branch is IS_WINDOWS-guarded.
+                os.startfile(sp_paths.CONFIG_PATH)  # pyright: ignore[reportAttributeAccessIssue]
             except BaseException:
                 show_message_dialog("There was an error trying to open the config folder.")
-        elif platform.system() == "Darwin":
+        elif IS_MACOS:
             try:
                 subprocess.check_call(["open", sp_paths.CONFIG_PATH])
             except subprocess.CalledProcessError:
