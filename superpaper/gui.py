@@ -1146,11 +1146,8 @@ class WallpaperSettingsPanel(wx.Panel):
             saved_profile_name = ProfileData(saved_file).name
             self.parent_tray_obj.reload_profiles(event)
             saved_profile_to_start = self.parent_tray_obj.get_profile_by_name(saved_profile_name)
-            # When slideshow is off, apply the selected wallpaper instead of cycling
-            if not saved_profile_to_start.slideshow:
-                selected_file = self._get_selected_wallpaper_path()
-                if selected_file and os.path.isfile(selected_file):
-                    saved_profile_to_start.set_selected_wallpaper([selected_file])
+            # The chosen wallpaper is persisted in the profile; applying renders
+            # that selection and never cycles on its own.
             wx.Yield()
             thrd = self.parent_tray_obj.start_profile(event, saved_profile_to_start, force_reload=True)
             if thrd:
@@ -1159,8 +1156,6 @@ class WallpaperSettingsPanel(wx.Panel):
                 while thrd.is_alive():
                     wx.YieldIfNeeded()
                     time.sleep(0.05)
-            if not saved_profile_to_start.slideshow:
-                saved_profile_to_start.clear_selected_wallpaper()
         else:
             pass
         del busy
@@ -1225,6 +1220,18 @@ class WallpaperSettingsPanel(wx.Panel):
         tmp_profile.align = (self.sld_offx.GetValue() / 100.0,
                              self.sld_offy.GetValue() / 100.0)
 
+        # wallpaper selection (persistent). For single/advanced span the
+        # focused list item is the chosen image. If the user didn't pick a new
+        # one, preserve any selection already saved in the profile.
+        if tmp_profile.spanmode != "multi":
+            selected_file = self._get_selected_wallpaper_path()
+            if selected_file and os.path.isfile(selected_file):
+                tmp_profile.selected = [selected_file]
+            else:
+                existing = open_profile(tmp_profile.name)
+                if existing and existing.selected:
+                    tmp_profile.selected = existing.selected
+
         # span groups
         groups = None
         if self.cb_spangroups.GetValue():
@@ -1286,18 +1293,15 @@ class WallpaperSettingsPanel(wx.Panel):
             self.update_choiceprofile()
             self.parent_tray_obj.update_hotkey(tmp_profile.name, old_profile_binding, tmp_profile.hk_binding)
             self.choice_profiles.SetSelection(self.choice_profiles.FindString(tmp_profile.name))
-            # Update wallpaper preview from selected profile
+            # Update wallpaper preview from selected profile. The profile's
+            # persistent selection (if any) is what next_wallpaper_files returns.
             saved_profile = ProfileData(saved_file)
             if self.show_advanced_settings:
                 display_data = self.display_sys.get_disp_list(True)
             else:
                 display_data = self.display_sys.get_disp_list(False)
-            # Use the currently selected wallpaper for preview when slideshow is off
-            selected_file = self._get_selected_wallpaper_path()
-            if not saved_profile.slideshow and selected_file and os.path.isfile(selected_file):
-                preview_files = [selected_file]
-            else:
-                preview_files = self.parent_tray_obj.get_profile_by_name(saved_profile.name).next_wallpaper_files(peek=True)
+            preview_files = self.parent_tray_obj.get_profile_by_name(
+                saved_profile.name).next_wallpaper_files(peek=True)
             self.wpprev_pnl.preview_wallpaper(
                 preview_files,
                 self.show_advanced_settings,
