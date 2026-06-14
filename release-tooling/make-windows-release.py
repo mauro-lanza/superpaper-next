@@ -53,7 +53,7 @@ def main():
     if not os.path.isdir(dist_path):
         os.mkdir(dist_path)
         print("Made dir %s" % dist_path)
-    
+
     # run pyinstaller build
     # os.system("python make-pyinstaller-build.py dist")
     try:
@@ -65,7 +65,7 @@ def main():
 
     # copy binary, resources and examples into package structure
     make_portable(dist_path)
-    
+
     print("Portable package build done.")
 
     # run inno installer compilation

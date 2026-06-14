@@ -14,7 +14,7 @@ description: |
 
   Other features include: slideshow, saving wallpaper setting profiles,
   hotkeys, manual wallpaper offsets, alignment testing tool and
-  Windows support. 
+  Windows support.
 
 grade: stable # must be 'stable' to release into candidate/stable channels
 # confinement: strict # use 'strict' once you have the right plugs and slots

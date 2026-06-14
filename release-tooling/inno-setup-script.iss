@@ -62,7 +62,7 @@ Filename: "{app}\superpaper\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#
  var
      mres : integer;
  begin
-    case CurUninstallStep of                   
+    case CurUninstallStep of
       usPostUninstall:
         begin
           mres := MsgBox('Do you want to Remove all settings and profiles?', mbConfirmation, MB_YESNO or MB_DEFBUTTON2)

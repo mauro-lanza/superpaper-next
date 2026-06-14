@@ -1,6 +1,6 @@
 # Development on macOS
 
-Install the following: 
+Install the following:
 
 **Software Requirements**
 - [Python 3.6+](https://www.python.org/downloads/)

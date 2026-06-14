@@ -8,4 +8,3 @@ twine check dist/*
 
 ## Uploading to PyPI
 python3 -m twine upload dist/*
-

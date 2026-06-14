@@ -15,8 +15,8 @@ An example using all corrections to set a single spanned image:
 ```
 superpaper --setimages /path/to/img.png --advanced --perspective default --spangroups 0 12 --offsets 0 0 40 -100 0 0
 ```
-Offsets are given as a pair-wise list of "horizontal_offset vertical_offset" starting from the first monitor on the left, 
-i.e. in the above example the display on the left is given no additional offset (0 0) and the display in 
+Offsets are given as a pair-wise list of "horizontal_offset vertical_offset" starting from the first monitor on the left,
+i.e. in the above example the display on the left is given no additional offset (0 0) and the display in
 the middle is given a horizontal offset to the right by 40px and a vertical offset of 100px up (40 -100).
 
 In the custom command, replace '/path/to/img.jpg' by '{image}', i.e. for example with the Gnome command:
