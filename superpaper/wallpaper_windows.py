@@ -1,9 +1,11 @@
 import ctypes
 from typing import List, Optional
-import pythoncom
-import pywintypes
-import win32gui
-from win32com.shell import shell, shellcon
+# pywin32 ships type stubs but the compiled modules are Windows-only, so the
+# source can't be resolved off-Windows (reportMissingModuleSource).
+import pythoncom  # pyright: ignore[reportMissingModuleSource]
+import pywintypes  # pyright: ignore[reportMissingModuleSource]
+import win32gui  # pyright: ignore[reportMissingModuleSource]
+from win32com.shell import shell, shellcon  # pyright: ignore[reportMissingModuleSource]
 user32 = ctypes.windll.user32  # pyright: ignore[reportAttributeAccessIssue]
 
 
