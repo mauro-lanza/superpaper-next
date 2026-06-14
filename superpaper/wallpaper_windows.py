@@ -36,9 +36,10 @@ def find_window_handles(
             win32gui.EnumChildWindows(parent, cb, handle_list)
         else:
             win32gui.EnumWindows(cb, handle_list)
-        return handle_list
     except pywintypes.error:
         return []
+    else:
+        return handle_list
 
 
 def force_refresh_syspar():
@@ -52,7 +53,8 @@ def enable_activedesktop():
         cryptic_params = (0x52C, 0, 0, 0, 500, None)
         user32.SendMessageTimeoutW(progman, *cryptic_params)
     except IndexError as e:
-        raise OSError("Cannot enable Active Desktop") from e
+        msg = "Cannot enable Active Desktop"
+        raise OSError(msg) from e
 
 
 def set_wallpaper_win(image_path: str, use_activedesktop: bool = True):

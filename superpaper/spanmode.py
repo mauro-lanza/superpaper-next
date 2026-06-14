@@ -52,7 +52,7 @@ def set_spanmode():
                         "spanned",
                     ]
                 )
-            elif desk_env in ["cinnamon"]:
+            elif desk_env == "cinnamon":
                 subprocess.run(
                     [
                         "/usr/bin/gsettings",
@@ -62,7 +62,7 @@ def set_spanmode():
                         "spanned",
                     ]
                 )
-            elif desk_env in ["mate"]:
+            elif desk_env == "mate":
                 subprocess.run(
                     [
                         "/usr/bin/gsettings",

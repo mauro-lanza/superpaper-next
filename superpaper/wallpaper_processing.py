@@ -1491,7 +1491,7 @@ def set_wallpaper_linux(outputfile, force=False):
                 ]
             )
             subprocess.run(["/usr/bin/gsettings", "set", "org.gnome.desktop.background", "picture-uri", file])
-        elif desk_env in ["cinnamon"] or "cinnamon" in desk_env.lower():
+        elif desk_env == "cinnamon" or "cinnamon" in desk_env.lower():
             subprocess.run(
                 [
                     "/usr/bin/gsettings",
@@ -1501,7 +1501,7 @@ def set_wallpaper_linux(outputfile, force=False):
                     file,
                 ]
             )
-        elif desk_env in ["mate"]:
+        elif desk_env == "mate":
             subprocess.run(["/usr/bin/gsettings", "set", "org.mate.background", "picture-filename", outputfile])
         elif desk_env in ["xfce", "xubuntu", "ubuntustudio"]:
             xfce_actions(outputfile)
@@ -1520,7 +1520,7 @@ def set_wallpaper_linux(outputfile, force=False):
         # elif desk_env in ["/usr/share/xsessions/plasma", "plasma"]:
         elif running_kde():
             kdeplasma_actions(outputfile, force=force, profile_name=G_ACTIVE_PROFILE)
-        elif "i3" in desk_env or desk_env in ["/usr/share/xsessions/bspwm"]:
+        elif "i3" in desk_env or desk_env == "/usr/share/xsessions/bspwm":
             subprocess.run(["feh", "--bg-scale", "--no-xinerama", outputfile])
         else:
             if set_command == "":
@@ -1683,10 +1683,11 @@ def get_kde_activity_mapping():
                     activity_map[activity_id] = activity_name
 
         sp_logging.G_LOGGER.info("KDE Activities found: %s", activity_map)
-        return activity_map
     except Exception as e:
         sp_logging.G_LOGGER.error("Failed to get KDE activities: %s", e)
         return {}
+    else:
+        return activity_map
 
 
 def kde_load_desktop_mapping_cache():
@@ -1824,12 +1825,13 @@ print(result.join(';'));
         sp_logging.G_LOGGER.info("Current activity: %s", current_activity_id)
         sp_logging.G_LOGGER.info("Active desktops: %s", active_desktop_ids)
         sp_logging.G_LOGGER.info("Desktop to activity mapping: %s", desktop_to_activity)
-        return desktop_to_activity
 
     except Exception as e:
         sp_logging.G_LOGGER.error("Failed to get desktop-activity mapping: %s", e)
         sp_logging.G_LOGGER.error(traceback.format_exc())
         return {}
+    else:
+        return desktop_to_activity
 
 
 def kde_set_activity_wallpapers(activity_wallpapers_map):

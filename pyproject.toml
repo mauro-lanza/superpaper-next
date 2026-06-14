@@ -25,6 +25,7 @@ extend-exclude = [
     "releases",
     "release-tooling",
     "snap",
+    "example-script",
     ".venv",
     "superpaper.egg-info",
 ]
@@ -45,6 +46,11 @@ select = [
     "RUF",  # ruff-specific rules
     "PIE",  # flake8-pie (misc lints)
     "ISC",  # implicit string concatenation
+    "TRY",  # tryceratops (exception anti-patterns)
+    "EM",   # flake8-errmsg (exception message hygiene)
+    "FURB", # refurb (modernizations)
+    "DTZ",  # flake8-datetimez
+    "INP",  # implicit namespace packages
 ]
 ignore = [
     "E501",    # line length: not enforced as a lint error (formatter handles wrapping)

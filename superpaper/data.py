@@ -406,7 +406,7 @@ class ProfileData:
                     elif words[0] == "selected":
                         sel = line.split("=", 1)[1].strip()
                         sel_files = [p for p in sel.split(";") if p]
-                        self.selected = sel_files if sel_files else None
+                        self.selected = sel_files or None
                     elif words[0].startswith("display"):
                         paths = words[1].strip().split(";")
                         paths = list(filter(None, paths))  # drop empty strings
@@ -414,9 +414,8 @@ class ProfileData:
                     else:
                         sp_logging.G_LOGGER.info("Unknown setting line in config: %s", line)
         except Exception as excep:
-            raise ProfileDataException(
-                "There was an error parsing the profile:", self.name, self.file, excep
-            ) from excep
+            msg = "There was an error parsing the profile:"
+            raise ProfileDataException(msg, self.name, self.file, excep) from excep
 
     def compute_ppis(self, inches):
         """Compute monitor PPIs from user input diagonal inches."""
@@ -646,7 +645,7 @@ Use absolute paths for best reliabilty."
                 if self.sortmode == "shuffle":
                     random.shuffle(self.files)
                 elif self.sortmode == "date_seeded_shuffle":
-                    today = datetime.datetime.now()
+                    today = datetime.datetime.now()  # noqa: DTZ005  # intentional local-time seed
                     random.Random(today.strftime("%Y%m%d%H")).shuffle(self.files)
                 elif self.sortmode == "alphabetical":
                     self.files.sort()
@@ -758,8 +757,10 @@ class TempProfileData:
                     if self.selected:
                         tpfile.write("selected=" + ";".join(self.selected) + "\n")
                     if self.paths_array:
-                        for paths in self.paths_array:
-                            tpfile.write("display" + str(self.paths_array.index(paths)) + "paths=" + paths + "\n")
+                        tpfile.writelines(
+                            "display" + str(self.paths_array.index(paths)) + "paths=" + paths + "\n"
+                            for paths in self.paths_array
+                        )
             except OSError:
                 msg = f"Cannot write to file {fname}"
                 show_message_dialog(msg, "Error")

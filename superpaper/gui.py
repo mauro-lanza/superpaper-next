@@ -2350,7 +2350,7 @@ class WallpaperPreviewPanel(wx.Panel):
             self.RefreshRect(self.drag_shape.GetRect(), True)
             self.Update()
 
-            item = self.drag_shape.text if self.drag_shape.text else self.drag_shape.bmp
+            item = self.drag_shape.text or self.drag_shape.bmp
             self.drag_image = wx.DragImage(item, wx.Cursor(wx.CURSOR_HAND))
 
             hotspot = self.dragStartPos - self.drag_shape.pos

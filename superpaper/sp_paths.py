@@ -111,10 +111,11 @@ def test_full_write_access(path):
         testdir = os.path.join(path, "test_write_access")
         os.mkdir(testdir)
         os.rmdir(testdir)
-        return True
     except PermissionError:
         # There is no access to create folders in path:
         return False
+    else:
+        return True
 
 
 def test_git_path(path):
