@@ -314,9 +314,7 @@ Check that it is formatted properly and valid keys."
     def read_general_settings(self):
         """Refreshes general settings from file and applies hotkey bindings."""
         self.g_settings = GeneralSettingsData()
-        try:
-            self.seen_binding
-        except NameError:
+        if not hasattr(self, "seen_binding"):
             self.seen_binding = set()
         self.register_hotkeys()
         if self.g_settings.logging:
@@ -498,22 +496,22 @@ Check that it is formatted properly and valid keys."
         # http://zetcode.com/wxpython/dialogs/
         description = (
             "Superpaper is an advanced multi monitor wallpaper\n"
-            + "manager for Unix and Windows operating systems.\n"
-            + "Features include setting a single or multiple image\n"
-            + "wallpaper, pixel per inch and bezel corrections,\n"
-            + "manual pixel offsets for tuning, slideshow with\n"
-            + "configurable file order, multiple path support and more."
+            "manager for Unix and Windows operating systems.\n"
+            "Features include setting a single or multiple image\n"
+            "wallpaper, pixel per inch and bezel corrections,\n"
+            "manual pixel offsets for tuning, slideshow with\n"
+            "configurable file order, multiple path support and more."
         )
         licence = (
             "Superpaper is free software; you can redistribute\n"
-            + "it and/or modify it under the terms of the MIT"
-            + " License.\n\n"
-            + "Superpaper is distributed in the hope that it will"
-            + " be useful,\n"
-            + "but WITHOUT ANY WARRANTY; without even the implied"
-            + " warranty of\n"
-            + "MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.\n"
-            + "See the MIT License for more details."
+            "it and/or modify it under the terms of the MIT"
+            " License.\n\n"
+            "Superpaper is distributed in the hope that it will"
+            " be useful,\n"
+            "but WITHOUT ANY WARRANTY; without even the implied"
+            " warranty of\n"
+            "MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.\n"
+            "See the MIT License for more details."
         )
         artists = "Icons kindly provided by Icons8 https://icons8.com"
 
@@ -553,4 +551,3 @@ class App(wx.App):
 
     def InitLocale(self):
         """Override with nothing (or impliment local if actually needed)"""
-        pass

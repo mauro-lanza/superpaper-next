@@ -39,9 +39,7 @@ def running_kde():
         return True
     kde_f_ses = os.environ.get("KDE_FULL_SESSION")
     xdg_ses_dtop = os.environ.get("XDG_SESSION_DESKTOP")
-    if kde_f_ses == "true" or xdg_ses_dtop == "KDE":
-        return True
-    return False
+    return bool(kde_f_ses == "true" or xdg_ses_dtop == "KDE")
 
 
 # Platform-native helpers are imported conditionally below. Declare them up front
@@ -197,14 +195,13 @@ class Display:
             if sp_logging.DEBUG:
                 sp_logging.G_LOGGER.info("Display.compute_ppi: self.phys_size_mm[1] was 0.")
             return None
-        if abs(ppmm_horiz / ppmm_vert - 1) > 0.01:
-            if sp_logging.DEBUG:
-                sp_logging.G_LOGGER.info(
-                    "WARNING: Horizontal and vertical PPI do not match! hor: %s, ver: %s",
-                    ppmm_horiz * 25.4,
-                    ppmm_vert * 25.4,
-                )
-                sp_logging.G_LOGGER.info(str(self))
+        if abs(ppmm_horiz / ppmm_vert - 1) > 0.01 and sp_logging.DEBUG:
+            sp_logging.G_LOGGER.info(
+                "WARNING: Horizontal and vertical PPI do not match! hor: %s, ver: %s",
+                ppmm_horiz * 25.4,
+                ppmm_vert * 25.4,
+            )
+            sp_logging.G_LOGGER.info(str(self))
         return ppmm_horiz * 25.4  # inch has 25.4 times the pixels of a millimeter.
 
     def translate_offset(self, translate_tuple):
@@ -305,10 +302,7 @@ class DisplaySystem:
                 continue
             else:
                 return False
-        if len(self.disp_list) == len(other.disp_list):
-            return True
-        else:
-            return False
+        return len(self.disp_list) == len(other.disp_list)
 
     def __hash__(self):
         return hash(tuple(self.disp_list))
@@ -361,10 +355,7 @@ class DisplaySystem:
         disp_cntr = (disp.digital_offset[0] + disp.digital_offset[0] + disp.resolution[0]) / 2  # (left+right)/2
         col_last_left = col_last_disp.digital_offset[0]
         col_last_right = col_last_disp.digital_offset[0] + col_last_disp.resolution[0]
-        if disp_cntr > col_last_left and disp_cntr < col_last_right:
-            return True
-        else:
-            return False
+        return bool(disp_cntr > col_last_left and disp_cntr < col_last_right)
 
     def column_size(self, col):
         width = max([dsp.ppi_norm_resolution[0] + dsp.ppi_norm_bezels[0] for dsp in col])
@@ -933,7 +924,7 @@ def resize_to_fill(
         quality = Image.Resampling.LANCZOS
         reducing_gap = None
 
-    if not img.mode == "RGB":
+    if img.mode != "RGB":
         img = img.convert("RGB")
 
     # Sanitize positioning parameters.
@@ -1235,7 +1226,7 @@ def span_single_image_advanced(profile, force):
             canvas_tuple_trgt = tuple(compute_working_canvas(grp_crops))
             sp_logging.G_LOGGER.info("Back-projected canvas size: %s", canvas_tuple_proj)
             img_workingsize = resize_to_fill(img, canvas_tuple_proj, zoom=profile.zoom, offset=profile.offsets)
-            for crop_tup, coeffs, ppin_crop, (i_res, res) in zip(
+            for _crop_tup, coeffs, ppin_crop, (i_res, res) in zip(
                 proj_plane_crops, persp_coeffs, grp_crops, enumerate(grp_res_arr)
             ):
                 # Whole image needs to be transformed for each display separately
@@ -1589,8 +1580,7 @@ def special_image_cropper(outputfile):
     img = Image.open(outputfile)
     outputname = os.path.splitext(outputfile)[0]
     img_names = []
-    crop_id = 0
-    for res, offset in zip(RESOLUTION_ARRAY, DISPLAY_OFFSET_ARRAY):
+    for crop_id, (res, offset) in enumerate(zip(RESOLUTION_ARRAY, DISPLAY_OFFSET_ARRAY)):
         left = offset[0]
         top = offset[1]
         right = left + res[0]
@@ -1600,7 +1590,6 @@ def special_image_cropper(outputfile):
         fname = outputname + "-crop-" + str(crop_id) + ".png"
         img_names.append(fname)
         cropped_img.save(fname, "PNG")
-        crop_id += 1
     return img_names
 
 
@@ -2258,8 +2247,7 @@ def quick_profile_job(profile):
         files = [
             i
             for i in os.listdir(TEMP_PATH)
-            if os.path.isfile(os.path.join(TEMP_PATH, i))
-            and (i.startswith(profile.name + "-a") or i.startswith(profile.name + "-b"))
+            if os.path.isfile(os.path.join(TEMP_PATH, i)) and (i.startswith((profile.name + "-a", profile.name + "-b")))
         ]
         if sp_logging.DEBUG:
             sp_logging.G_LOGGER.info("quickswitch file lookup: %s", files)
@@ -2299,14 +2287,8 @@ def use_image_pieces():
     Systems that use image pieces are: KDE, XFCE.
     """
     if IS_LINUX:
-        if running_kde():
-            return True
         # desk_env = os.environ.get("DESKTOP_SESSION")
         # elif desk_env in ["xfce", "xubuntu", "ubuntustudio"]:
-        # return True
-        else:
-            return False
-    elif IS_MACOS:
-        return True
-    else:
-        return False
+        #     return True
+        return running_kde()
+    return bool(IS_MACOS)

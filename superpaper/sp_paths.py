@@ -118,10 +118,7 @@ def test_full_write_access(path):
 
 
 def test_git_path(path):
-    if r"github\superpaper" in path.lower():
-        return True
-    else:
-        return False
+    return r"github\superpaper" in path.lower()
 
 
 # Derivative paths

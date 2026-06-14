@@ -32,7 +32,7 @@ def list_profiles():
         except Exception as exep:  # TODO implement proper error catching for ProfileData init
             msg = (
                 f"There was an error when loading profile '{pfle}'.\n"
-                + "Would you like to delete it? Choosing 'No' will just ignore the profile."
+                "Would you like to delete it? Choosing 'No' will just ignore the profile."
             )
             sp_logging.G_LOGGER.info(msg)
             sp_logging.G_LOGGER.info(exep)
@@ -305,11 +305,7 @@ class ProfileData:
                     self.name = words[1].strip()
                 elif words[0] == "spanmode":
                     wrd1 = words[1].strip().lower()
-                    if wrd1 == "single":
-                        self.spanmode = wrd1
-                    elif wrd1 == "advanced":
-                        self.spanmode = wrd1
-                    elif wrd1 == "multi":
+                    if wrd1 == "single" or wrd1 == "advanced" or wrd1 == "multi":
                         self.spanmode = wrd1
                     else:
                         sp_logging.G_LOGGER.info(
@@ -342,11 +338,7 @@ class ProfileData:
                         self.delay_list.append(float(delstr))
                 elif words[0] == "sortmode":
                     wrd1 = words[1].strip().lower()
-                    if wrd1 == "shuffle":
-                        self.sortmode = wrd1
-                    elif wrd1 == "date_seeded_shuffle":
-                        self.sortmode = wrd1
-                    elif wrd1 == "alphabetical":
+                    if wrd1 == "shuffle" or wrd1 == "date_seeded_shuffle" or wrd1 == "alphabetical":
                         self.sortmode = wrd1
                     else:
                         sp_logging.G_LOGGER.info(
@@ -433,7 +425,9 @@ class ProfileData:
                     sp_logging.G_LOGGER.info("Unknown setting line in config: %s", line)
         except Exception as excep:
             profile_file.close()
-            raise ProfileDataException("There was an error parsing the profile:", self.name, self.file, excep)
+            raise ProfileDataException(
+                "There was an error parsing the profile:", self.name, self.file, excep
+            ) from excep
         finally:
             profile_file.close()
 
@@ -803,18 +797,16 @@ class TempProfileData:
                 msg = f"Cannot write to file {fname}"
                 show_message_dialog(msg, "Error")
                 return False
-            if self.spanmode == "single":
-                if len(self.paths_array) > 1:
-                    msg = "When spanning a single image across all monitors, \
+            if self.spanmode == "single" and len(self.paths_array) > 1:
+                msg = "When spanning a single image across all monitors, \
 only one paths field is needed."
-                    show_message_dialog(msg, "Error")
-                    return False
-            if self.spanmode == "multi":
-                if len(self.paths_array) < 2:
-                    msg = "When setting a different image on every display, \
+                show_message_dialog(msg, "Error")
+                return False
+            if self.spanmode == "multi" and len(self.paths_array) < 2:
+                msg = "When setting a different image on every display, \
 each display needs its own paths field."
-                    show_message_dialog(msg, "Error")
-                    return False
+                show_message_dialog(msg, "Error")
+                return False
             if self.spangroups:
                 list_grps = self.spangroups.split(",")
                 for grp in list_grps:

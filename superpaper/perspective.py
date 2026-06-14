@@ -75,7 +75,7 @@ def get_backprojected_display_system(crops, persp_data, plot=False):
     for quad in projected_quads:
         work_quad = []
         for corner in quad:
-            work_quad.append((int(round(corner[0] - leftmost_corner)), int(round(corner[1] - bottommost_corner))))
+            work_quad.append((round(corner[0] - leftmost_corner), round(corner[1] - bottommost_corner)))
         translated_quads.append(work_quad)
     sp_logging.G_LOGGER.info("translated_quads: %s", translated_quads)
     ordered_quads = [(tquad[2], tquad[3], tquad[1], tquad[0]) for tquad in translated_quads]

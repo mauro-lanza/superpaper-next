@@ -429,7 +429,7 @@ class WallpaperSettingsPanel(wx.Panel):
         # Perspective profile
         self.sizer_setting_persp = wx.BoxSizer(wx.HORIZONTAL)
         st_perspprof = wx.StaticText(self, -1, "Perspective profile:")
-        persp_choices = ["default"] + list(self.display_sys.perspective_dict.keys()) + ["disabled"]
+        persp_choices = ["default", *list(self.display_sys.perspective_dict.keys()), "disabled"]
         self.ch_persp = wx.ComboBox(
             self,
             -1,
@@ -596,9 +596,9 @@ class WallpaperSettingsPanel(wx.Panel):
         self.paths_array_to_listctrl(profile.paths_array)
 
         # Image scaling & position
-        zoom_pct = int(round(profile.zoom * 100))
-        offx_pct = int(round(profile.offsets[0] * 100))
-        offy_pct = int(round(profile.offsets[1] * 100))
+        zoom_pct = round(profile.zoom * 100)
+        offx_pct = round(profile.offsets[0] * 100)
+        offy_pct = round(profile.offsets[1] * 100)
         self.sld_zoom.SetValue(zoom_pct)
         self.sld_offx.SetValue(offx_pct)
         self.sld_offy.SetValue(offy_pct)
@@ -658,7 +658,7 @@ class WallpaperSettingsPanel(wx.Panel):
 
     def list_of_textctrl(self, ctrl_parent, num_disp, fraction=1 / 2):
         tcrtl_list = []
-        for i in range(num_disp):
+        for _i in range(num_disp):
             tcrtl_list.append(
                 wx.TextCtrl(
                     ctrl_parent,
@@ -671,7 +671,7 @@ class WallpaperSettingsPanel(wx.Panel):
 
     def list_of_wxchoice(self, ctrl_parent, num_disp, fraction=1 / 2):
         ch_list = []
-        for i in range(num_disp):
+        for _i in range(num_disp):
             ch_list.append(
                 wx.ComboBox(
                     ctrl_parent,
@@ -688,13 +688,8 @@ class WallpaperSettingsPanel(wx.Panel):
                 self.sizer_toggle_children(child.GetSizer(), bool_state)
             else:
                 widget = child.GetWindow()
-                if (
-                    isinstance(widget, wx.TextCtrl)
-                    or isinstance(widget, wx.StaticText)
-                    or isinstance(widget, (wx.Choice, wx.ComboBox))
-                    or isinstance(widget, wx.Button)
-                    or isinstance(widget, wx.CheckBox)
-                    and toggle_cb
+                if isinstance(widget, (wx.TextCtrl, wx.StaticText, wx.Choice, wx.ComboBox, wx.Button)) or (
+                    isinstance(widget, wx.CheckBox) and toggle_cb
                 ):
                     widget.Enable(bool_state)
 
@@ -1229,7 +1224,7 @@ class WallpaperSettingsPanel(wx.Panel):
             groups = self.read_spangroups()
             flat_groups = []
             if groups is not None:
-                for grp in groups.keys():
+                for grp in groups:
                     ids = "".join([str(i) for i in groups[grp]])
                     flat_groups.append(ids)
             tmp_profile.spangroups = ",".join(flat_groups)
@@ -1416,7 +1411,7 @@ class WallpaperSettingsPanel(wx.Panel):
             old_persp_str = "default"
         else:
             old_persp_str = self.list_of_profiles[open_item].perspective
-        persp_choices = ["default"] + list(self.display_sys.perspective_dict.keys()) + ["disabled"]
+        persp_choices = ["default", *list(self.display_sys.perspective_dict.keys()), "disabled"]
         self.ch_persp.SetItems(persp_choices)
         if old_persp_str in persp_choices:
             self.ch_persp.SetSelection(self.ch_persp.FindString(old_persp_str))

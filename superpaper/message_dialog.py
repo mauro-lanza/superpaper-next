@@ -18,7 +18,4 @@ def show_message_dialog(message, msg_type="Info", parent=None, style="OK"):
     elif style == "YES_NO":
         dial = wx.MessageDialog(parent, message, msg_type, wx.YES_NO | wx.STAY_ON_TOP | wx.CENTRE)
         res = dial.ShowModal()
-        if res == wx.ID_YES:
-            return True
-        else:
-            return False
+        return res == wx.ID_YES

@@ -32,18 +32,30 @@ extend-exclude = [
 [tool.ruff.lint]
 # Gradual/pragmatic starting set. Mostly auto-fixable rules so the first pass
 # can be applied without a wall of manual fixes. Tighten over time by adding
-# rule groups such as "B" (bugbear), "SIM", "RUF", "PTH", etc.
+# rule groups such as "PTH" (pathlib), "RET" (returns), "ARG", "N" (naming).
 select = [
-    "E",   # pycodestyle errors
-    "F",   # pyflakes
-    "W",   # pycodestyle warnings
-    "I",   # isort (import sorting)
-    "UP",  # pyupgrade
-    "C4",  # flake8-comprehensions
+    "E",    # pycodestyle errors
+    "F",    # pyflakes
+    "W",    # pycodestyle warnings
+    "I",    # isort (import sorting)
+    "UP",   # pyupgrade
+    "C4",   # flake8-comprehensions
+    "B",    # flake8-bugbear (likely bugs)
+    "SIM",  # flake8-simplify
+    "RUF",  # ruff-specific rules
+    "PIE",  # flake8-pie (misc lints)
+    "ISC",  # implicit string concatenation
 ]
 ignore = [
-    "E501",  # line length: not enforced as a lint error (formatter handles wrapping)
-    "E741",  # ambiguous variable names (e.g. l) - common in legacy code
+    "E501",    # line length: not enforced as a lint error (formatter handles wrapping)
+    "E741",    # ambiguous variable names (e.g. l) - common in legacy code
+    "ISC001",  # single-line implicit string concat: conflicts with the formatter
+    "SIM108",  # if-else block vs ternary: ternaries often hurt readability here
+    "SIM105",  # contextlib.suppress: slower and less explicit than try/except/pass
+    "RUF059",  # unused unpacked variable: legacy tuple unpacking is intentional
+    "RUF002",  # ambiguous unicode char in docstring: false positives
+    "SIM115",  # open() without context manager: real, but needs careful per-site
+               # refactoring of legacy try/finally I/O - tracked as a follow-up.
 ]
 
 [tool.ruff.lint.isort]

@@ -851,13 +851,7 @@ class PerspectiveConfig(wx.Dialog):
         data = []
 
         for row in self.grid_rows:
-            if column == 0:
-                datum = row[column].GetSelection()
-                try:
-                    data.append(int(datum))
-                except ValueError:
-                    pass
-            elif column == 1:
+            if column == 0 or column == 1:
                 datum = row[column].GetSelection()
                 try:
                     data.append(int(datum))
@@ -971,16 +965,16 @@ class PerspectiveConfig(wx.Dialog):
             if too_large:
                 msg = (
                     "These perspective settings will produce large intermediate images "
-                    + "which might use a large amount of system memory during processing. "
-                    + "Take care not to set the perspective so that you would see arbitrarily "
-                    + "far into the projected image as this will produce unboundedly large "
-                    + "images and will cause problems, even a system crash."
-                    + "\n\n"
-                    + f"Intermediate resolution with these settings is {canvas[0]}x{canvas[1]}"
-                    + "\n\n"
-                    + "Do you want to continue?\n"
-                    + "\n"
-                    + "This warning may be disabled from settings."
+                    "which might use a large amount of system memory during processing. "
+                    "Take care not to set the perspective so that you would see arbitrarily "
+                    "far into the projected image as this will produce unboundedly large "
+                    "images and will cause problems, even a system crash."
+                    "\n\n"
+                    f"Intermediate resolution with these settings is {canvas[0]}x{canvas[1]}"
+                    "\n\n"
+                    "Do you want to continue?\n"
+                    "\n"
+                    "This warning may be disabled from settings."
                 )
                 res = show_message_dialog(msg, "Info", style="YES_NO")
                 if not res:
