@@ -1,6 +1,7 @@
 import os
 import sys
-from setuptools import setup, find_packages
+
+from setuptools import find_packages, setup
 
 
 def read_version():
@@ -8,7 +9,7 @@ def read_version():
         verlines = verfile.readlines()
     for line in verlines:
         if "__version__" in line:
-            ver_str = line.split("=")[1].strip().replace('"',"")
+            ver_str = line.split("=")[1].strip().replace('"', "")
             print(ver_str)
             return ver_str
     print("Version not found, exitting install.")
@@ -19,14 +20,14 @@ def test_import(packaname, humanname):
     try:
         __import__(packaname)
     except ImportError:
-        print("{} import failed; refer to the install instructions.".format(humanname))
+        print(f"{humanname} import failed; refer to the install instructions.")
         sys.exit(1)
+
 
 if __name__ == "__main__":
     # test_import("wx", "wxPython")  # Commented out to avoid circular dependency during pip install
 
-    with open(os.path.join(os.path.abspath(os.path.dirname(__file__)), 'README.md'),
-              encoding='utf-8') as f:
+    with open(os.path.join(os.path.abspath(os.path.dirname(__file__)), "README.md"), encoding="utf-8") as f:
         long_description = f.read()
 
     setup(
@@ -34,12 +35,11 @@ if __name__ == "__main__":
         version=read_version(),
         author="Henri Hänninen",
         description="Cross-platform wallpaper manager that focuses on "
-                    "multi-monitor support. Features include ppi corrections, "
-                    "keyboard shortcuts, slideshow.",
+        "multi-monitor support. Features include ppi corrections, "
+        "keyboard shortcuts, slideshow.",
         long_description=long_description,
         long_description_content_type="text/markdown",
         url="https://github.com/hhannine/superpaper",
-
         classifiers=[
             # "Development Status :: 4 - Beta",
             "Development Status :: 5 - Production/Stable",
@@ -55,7 +55,6 @@ if __name__ == "__main__":
         ],
         keywords="dual-monitor multi-monitor wallpaper background manager",
         license="MIT",
-
         # python_requires="~=3.5",
         install_requires=[
             "Pillow>=7.0.0",
@@ -63,7 +62,7 @@ if __name__ == "__main__":
             "numpy>=1.18.0",
             "system_hotkey310>=1.0.5",
             "xcffib>=0.8.0",
-            "xpybutil>=0.0.5"
+            "xpybutil>=0.0.5",
         ],
         # packages=["superpaper"],
         packages=find_packages(),
@@ -72,17 +71,17 @@ if __name__ == "__main__":
             # "gui_scripts": ["superpaper = superpaper.superpaper:main"]    # for possible future windows install support.
         },
         package_data={
-            "superpaper": ["resources/superpaper.png",
-                           "resources/test.png",
-                           "resources/icons8-merge-vertical-96.png",
-                           "resources/icons8-merge-horizontal-96.png",
-                           "profiles/example.profile",
-                           "profiles/example_multi.profile"
-                          ]
+            "superpaper": [
+                "resources/superpaper.png",
+                "resources/test.png",
+                "resources/icons8-merge-vertical-96.png",
+                "resources/icons8-merge-horizontal-96.png",
+                "profiles/example.profile",
+                "profiles/example_multi.profile",
+            ]
         },
         data_files=[
             ("share/applications", ["superpaper/resources/superpaper.desktop"]),
             ("share/icons/hicolor/256x256/apps", ["superpaper/resources/superpaper.png"]),
-        ]
-
+        ],
     )

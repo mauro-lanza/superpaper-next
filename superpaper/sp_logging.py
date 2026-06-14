@@ -17,11 +17,11 @@ if DEBUG and not LOGGING:
 elif LOGGING:
     DEBUG = True
     G_LOGGER.setLevel(logging.INFO)
-    FILE_HANDLER = logging.FileHandler(os.path.join(TEMP_PATH, "log"),
-                                       mode="w")
+    FILE_HANDLER = logging.FileHandler(os.path.join(TEMP_PATH, "log"), mode="w")
     G_LOGGER.addHandler(FILE_HANDLER)
     CONSOLE_HANDLER = logging.StreamHandler()
     G_LOGGER.addHandler(CONSOLE_HANDLER)
+
 
 def custom_exception_handler(exceptiontype, value, tb_var):
     """Log uncaught exceptions."""

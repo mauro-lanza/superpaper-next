@@ -7,11 +7,12 @@ import sys
 from superpaper.sp_platform import IS_LINUX, IS_WINDOWS
 
 # Set path to binary / script
-if getattr(sys, 'frozen', False):
+if getattr(sys, "frozen", False):
     PATH = os.path.dirname(os.path.dirname(os.path.realpath(sys.executable)))
 else:
     PATH = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 print(PATH)
+
 
 def setup_config_path() -> str:
     """Sets up config path for settings and profiles.
@@ -28,10 +29,7 @@ def setup_config_path() -> str:
         if snap_user_data:
             return snap_user_data
         else:
-            config_path = xdg_path_setup("XDG_CONFIG_HOME",
-                                        os.path.join(os.path.expanduser("~"),
-                                                    ".config")
-                                        )
+            config_path = xdg_path_setup("XDG_CONFIG_HOME", os.path.join(os.path.expanduser("~"), ".config"))
             # if DEBUG: G_LOGGER.info("config path: %s", config_path)
             return config_path
     elif IS_WINDOWS:
@@ -65,10 +63,7 @@ def setup_cache_path() -> str:
             temp_path = os.path.join(snap_user_common, "temp")
             return temp_path
         else:
-            cache_path = xdg_path_setup("XDG_CACHE_HOME",
-                                        os.path.join(os.path.expanduser("~"),
-                                                    ".cache")
-                                        )
+            cache_path = xdg_path_setup("XDG_CACHE_HOME", os.path.join(os.path.expanduser("~"), ".cache"))
             temp_path = os.path.join(cache_path, "temp")
             # if DEBUG: G_LOGGER.info("temp path: %s", temp_path)
             return temp_path
@@ -110,6 +105,7 @@ def xdg_path_setup(xdg_var, fallback_path) -> str:
         os.mkdir(xdg_path)
         return xdg_path
 
+
 def test_full_write_access(path):
     try:
         testdir = os.path.join(path, "test_write_access")
@@ -120,6 +116,7 @@ def test_full_write_access(path):
         # There is no access to create folders in path:
         return False
 
+
 def test_git_path(path):
     if r"github\superpaper" in path.lower():
         return True
@@ -128,9 +125,9 @@ def test_git_path(path):
 
 
 # Derivative paths
-CONFIG_PATH = setup_config_path()   # Save profiles and settings here.
+CONFIG_PATH = setup_config_path()  # Save profiles and settings here.
 print(CONFIG_PATH)
-TEMP_PATH = setup_cache_path()     # Save adjusted wallpapers in here.
+TEMP_PATH = setup_cache_path()  # Save adjusted wallpapers in here.
 if not os.path.isdir(TEMP_PATH):
     os.mkdir(TEMP_PATH)
 PROFILES_PATH = os.path.join(CONFIG_PATH, "profiles")
