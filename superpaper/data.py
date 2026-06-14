@@ -254,7 +254,7 @@ class ProfileData(object):
         if not wpproc.RESOLUTION_ARRAY:
             msg = "Cannot parse profile, monitor resolution data is missing."
             show_message_dialog(msg)
-            sp_logging.G_LOGGER(msg)
+            sp_logging.G_LOGGER.error(msg)
             exit()
 
         self.file = profile_file
@@ -455,7 +455,7 @@ class ProfileData(object):
         if self.ppi_array:
             max_density = max(self.ppi_array)
         else:
-            sp_logging.G_LOGGER("Couldn't compute relative densities: %s, %s", self.name, self.file)
+            sp_logging.G_LOGGER.error("Couldn't compute relative densities: %s, %s", self.name, self.file)
             return 1
         for ppi in self.ppi_array:
             self.ppi_array_relative_density.append((1 / max_density) * float(ppi))
@@ -468,7 +468,7 @@ class ProfileData(object):
         if self.ppi_array:
             max_ppi = max(self.ppi_array)
         else:
-            sp_logging.G_LOGGER("Couldn't compute relative densities: %s, %s", self.name, self.file)
+            sp_logging.G_LOGGER.error("Couldn't compute relative densities: %s, %s", self.name, self.file)
             return 1
 
         bez_px_offs=[0]   # never offset 1st disp, anchor to it.
@@ -631,32 +631,23 @@ Use absolute paths for best reliabilty.".format(path)
             def __iter__(self):
                 return self
 
-            def __next__(self):
+            def _current_image(self):
+                """Return the file at the current position, reshuffling when exhausted."""
                 if not self.files:
                     return None
-                if self.counter < len(self.files):
-                    image = self.files[self.counter]
-                else:
+                if self.counter >= len(self.files):
                     self.counter = 0
                     self.arrange_list()
-                    image = self.files[self.counter]
-                # print(self.counter)
-                # print("next {}".format([self.files[self.counter]]))
-                self.counter += 1
+                return self.files[self.counter]
+
+            def __next__(self):
+                image = self._current_image()
+                if image is not None:
+                    self.counter += 1
                 return image
 
             def __peek__(self):
-                if not self.files:
-                    return None
-                if self.counter < len(self.files):
-                    image = self.files[self.counter]
-                else:
-                    self.counter = 0
-                    self.arrange_list()
-                    image = self.files[self.counter]
-                # print(self.counter)
-                # print("peek {}".format([self.files[self.counter]]))
-                return image
+                return self._current_image()
 
             def arrange_list(self):
                 """Reorders the image list as requested. Mostly for reoccuring shuffling."""
