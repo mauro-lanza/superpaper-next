@@ -19,6 +19,7 @@ from superpaper.data import (
 )
 from superpaper.gui import ConfigFrame
 from superpaper.message_dialog import show_message_dialog
+from superpaper.sni_tray import build_tray, sni_supported
 from superpaper.sp_platform import IS_MACOS, IS_WINDOWS
 from superpaper.wallpaper_processing import (
     change_wallpaper_job,
@@ -55,6 +56,16 @@ def tray_loop(profile=None):
         if profile:
             STARTUP_PROFILE = profile
             sp_logging.G_LOGGER.info(f"Startup profile: {profile}")
+        if sys.platform == "linux":
+            # Route incoming D-Bus calls (native SNI tray) through wxGTK's own
+            # GLib main loop. Must be set as the default main loop before the
+            # first bus connection is created (i.e. before the wx.App).
+            try:
+                from dbus.mainloop.glib import DBusGMainLoop
+
+                DBusGMainLoop(set_as_default=True)
+            except ImportError:
+                pass
         app = App(False)
         app.MainLoop()
     else:
@@ -86,7 +97,12 @@ class TaskBarIcon(wx.adv.TaskBarIcon):
 
         self.frame = frame
         super().__init__()
-        self.set_icon(TRAY_ICON)
+        # On Linux, prefer a native StatusNotifierItem tray (works on Wayland);
+        # the wx TaskBarIcon renders but is non-interactive on KDE Plasma 6.
+        self._sni_tray = None
+        self._use_sni = sys.platform == "linux" and sni_supported()
+        if not self._use_sni:
+            self.set_icon(TRAY_ICON)
         self.Bind(wx.adv.EVT_TASKBAR_LEFT_DOWN, self.on_left_down)
         self.Bind(wx.adv.EVT_TASKBAR_LEFT_DCLICK, self.configure_wallpapers)
         self.Bind(wx.adv.EVT_TASKBAR_RIGHT_DOWN, self.on_right_down)
@@ -144,6 +160,24 @@ hotkeys will not work. Exception: %s",
         if self.g_settings.show_help is True:
             ConfigFrame(self)
             HelpFrame()
+        elif self._use_sni:
+            # Register the native SNI tray now that the profile list and pause
+            # state are initialized (the menu reads them on demand).
+            self._sni_tray = build_tray(
+                self,
+                f"org.kde.StatusNotifierItem-{os.getpid()}-1",
+                TRAY_ICON,
+                TRAY_TOOLTIP,
+                TRAY_TOOLTIP,
+            )
+            if self._sni_tray is None:
+                # Registration failed: fall back to the wx tray icon plus the
+                # KDE auto-open-config workaround (wx clicks don't work).
+                self._use_sni = False
+                self.set_icon(TRAY_ICON)
+                if wpproc.running_kde():
+                    sp_logging.G_LOGGER.info("Native SNI tray unavailable: auto-opening configuration GUI")
+                    wx.CallAfter(self.configure_wallpapers, None)
         elif wpproc.running_kde():
             # KDE Plasma 6 workaround: tray icon clicks don't work with wxPython
             # Automatically open the config GUI on startup
@@ -532,6 +566,11 @@ Check that it is formatted properly and valid keys."
     def on_exit(self, event):
         """Exits Superpaper."""
         self.rt_stop()
+        if self._sni_tray is not None:
+            try:
+                self._sni_tray.remove()
+            except Exception as exc:
+                sp_logging.G_LOGGER.info("SNI tray cleanup failed: %s", exc)
         wx.CallAfter(self.Destroy)
         self.frame.Close()
 
