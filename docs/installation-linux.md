@@ -8,7 +8,7 @@ AppImage packages are available on the [releases page](https://github.com/hhanni
 
 ## The recommended way
 
-This will allow Superpaper to integrate the best with your system theme and icons.  
+This will allow Superpaper to integrate the best with your system theme and icons.
 See the screenshot in the Readme taken on Manjaro KDE.
 
 
@@ -17,7 +17,7 @@ See the screenshot in the Readme taken on Manjaro KDE.
 Because of the differences between Linux distributions, the installation options differ:
 
 - Arch / Manjaro: `sudo pacman -S python-pipx python-wxpython`
-- Debian / Ubuntu and relatives: `sudo apt install pipx wxpython-tools`
+- Debian / Ubuntu and relatives: `sudo apt install pipx wxpython-tools python3-setuptools`
 - Fedora : `sudo dnf install pipx python3-wxpython4`
 - Older distros with no wxPython4 package: [wxpython.org](https://wxpython.org/pages/downloads/)
   - Install the wheel if available for your OS: CentOS, Debian, Fedora and Ubuntu
