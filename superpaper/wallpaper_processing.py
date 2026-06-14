@@ -72,11 +72,12 @@ RESOLUTION_ARRAY = []
 # list of display offsets (width,height), use tuples.
 DISPLAY_OFFSET_ARRAY = []
 
-G_ACTIVE_DISPLAYSYSTEM = None
+# Lazily initialized in load_system() before any wallpaper processing runs.
+G_ACTIVE_DISPLAYSYSTEM: "DisplaySystem" = None  # pyright: ignore[reportAssignmentType]
 G_ACTIVE_PROFILE = None
 G_WALLPAPER_CHANGE_LOCK = Lock()
 G_SUPPORTED_IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".bmp", ".gif", ".tiff", ".webp")
-G_SET_COMMAND_STRING = ""
+G_SET_COMMAND_STRING: str = ""
 
 # global to take care that failure message is not shown more than once at launch
 USER_TOLD_OF_PHYS_FAIL = False
@@ -1426,7 +1427,7 @@ def set_wallpaper_macos(outputfile, image_piece_list = None, force = False):
     # get screen positions on desktop
     screen_coords = []
     for scrn in screens:
-        frm = scrn.frame
+        frm: Any = scrn.frame
         if callable(frm):
             frm = frm()
         screen_coords.append((int(frm.origin.x), int(frm.origin.y)))

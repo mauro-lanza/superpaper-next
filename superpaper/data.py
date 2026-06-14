@@ -722,20 +722,20 @@ class CLIProfileData(ProfileData):
 class TempProfileData(object):
     """Data object to test the validity of user input and for saving said input into profiles."""
     def __init__(self):
-        self.name = None
-        self.spanmode = None
-        self.spangroups = None
-        self.slideshow = None
-        self.delay = None
-        self.sortmode = None
+        self.name: Optional[str] = None
+        self.spanmode: Optional[str] = None
+        self.spangroups: Optional[str] = None
+        self.slideshow: Optional[bool] = None
+        self.delay: Optional[str] = None
+        self.sortmode: Optional[str] = None
         self.inches = None
-        self.manual_offsets = None
+        self.manual_offsets: Optional[str] = None
         self.bezels = None
-        self.hk_binding = None
-        self.perspective = None
-        self.zoom = None
-        self.align = None
-        self.selected = None
+        self.hk_binding: Optional[str] = None
+        self.perspective: Optional[str] = None
+        self.zoom: Optional[float] = None
+        self.align: Optional[tuple] = None
+        self.selected: Optional[list] = None
         self.paths_array = []
 
     def save(self):

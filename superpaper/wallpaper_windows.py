@@ -4,7 +4,7 @@ import pythoncom
 import pywintypes
 import win32gui
 from win32com.shell import shell, shellcon
-user32 = ctypes.windll.user32
+user32 = ctypes.windll.user32  # pyright: ignore[reportAttributeAccessIssue]
 
 
 def _make_filter(class_name: Optional[str], title: Optional[str]):
@@ -57,6 +57,6 @@ def set_wallpaper_win(image_path: str, use_activedesktop: bool = True):
                                      None,
                                      pythoncom.CLSCTX_INPROC_SERVER,
                                      shell.IID_IActiveDesktop)
-    iad.SetWallpaper(str(image_path), 0)
-    iad.ApplyChanges(shellcon.AD_APPLY_ALL)
+    iad.SetWallpaper(str(image_path), 0)  # pyright: ignore[reportAttributeAccessIssue]
+    iad.ApplyChanges(shellcon.AD_APPLY_ALL)  # pyright: ignore[reportAttributeAccessIssue]
     force_refresh_syspar()

@@ -4,6 +4,7 @@ New wallpaper configuration GUI for Superpaper.
 import os
 import time
 from operator import itemgetter
+from typing import Literal, Tuple, overload
 from PIL import Image, ImageEnhance, UnidentifiedImageError
 
 import superpaper.sp_logging as sp_logging
@@ -37,7 +38,7 @@ class ConfigFrame(wx.Frame):
         self.Layout()
         self.Center()
         self.Show()
-        self.SetMinSize((800,600))
+        self.SetMinSize(wx.Size(800,600))
 
 class WallpaperSettingsPanel(wx.Panel):
     """This class defines the wallpaper config dialog UI."""
@@ -147,7 +148,7 @@ class WallpaperSettingsPanel(wx.Panel):
         st_choice_profiles = wx.StaticText(self, -1, "Setting profiles:")
         # name txt ctrl
         st_name = wx.StaticText(self, -1, "Profile name:")
-        self.tc_name = wx.TextCtrl(self, -1, size=(self.tc_width, -1))
+        self.tc_name = wx.TextCtrl(self, -1, size=wx.Size(self.tc_width, -1))
         self.tc_name.SetMaxLength(14)
         # buttons
         self.button_new = wx.Button(self, label="New")
@@ -214,14 +215,14 @@ class WallpaperSettingsPanel(wx.Panel):
         self.cb_hotkey = wx.CheckBox(statbox_parent_hkey, -1, "Bind a hotkey to this profile")
         st_hotkey_bind = wx.StaticText(statbox_parent_hkey, -1, "Hotkey to bind:")
         st_hotkey_bind.Disable()
-        self.tc_hotkey_bind = wx.TextCtrl(statbox_parent_hkey, -1, size=(self.tc_width, -1))
+        self.tc_hotkey_bind = wx.TextCtrl(statbox_parent_hkey, -1, size=wx.Size(self.tc_width, -1))
         self.tc_hotkey_bind.Disable()
         self.tc_hotkey_bind.SetToolTip(wx.ToolTip("Modifiers: control, alt, shift, super.\nExample: control+super+x"))
         self.hotkey_bind_sizer = wx.BoxSizer(wx.HORIZONTAL)
         self.hotkey_bind_sizer.Add(st_hotkey_bind, 0, wx.ALIGN_CENTER_VERTICAL|wx.ALL, 5)
         self.hotkey_bind_sizer.Add(self.tc_hotkey_bind, 0, wx.ALIGN_CENTER_VERTICAL|wx.ALL, 5)
-        help_bmp = wx.ArtProvider.GetBitmap(wx.ART_QUESTION, wx.ART_BUTTON, (20, 20))
-        self.button_help_hotkey = wx.BitmapButton(statbox_parent_hkey, bitmap=help_bmp, name="butt_help_hk")
+        help_bmp = wx.ArtProvider.GetBitmap(wx.ART_QUESTION, wx.ART_BUTTON, wx.Size(20, 20))
+        self.button_help_hotkey = wx.BitmapButton(statbox_parent_hkey, bitmap=wx.BitmapBundle(help_bmp), name="butt_help_hk")
         self.button_help_hotkey.Bind(wx.EVT_BUTTON, self.onHelpHotkey)
         self.button_help_hotkey.Disable()
         self.hotkey_bind_sizer.Add(self.button_help_hotkey, 0, wx.ALIGN_CENTER_VERTICAL|wx.ALL, 5)
@@ -239,19 +240,19 @@ class WallpaperSettingsPanel(wx.Panel):
         self.sld_zoom = wx.Slider(statbox_parent_zoom, -1, 100, 100, 400,
                                   style=wx.SL_HORIZONTAL)
         self.st_zoom_val = wx.StaticText(statbox_parent_zoom, -1, "100%",
-                                         size=(40, -1), style=wx.ALIGN_RIGHT)
+                                         size=wx.Size(40, -1), style=wx.ALIGN_RIGHT)
         # Horizontal position
         st_offx = wx.StaticText(statbox_parent_zoom, -1, "Horizontal:")
         self.sld_offx = wx.Slider(statbox_parent_zoom, -1, 0, -100, 100,
                                   style=wx.SL_HORIZONTAL)
         self.st_offx_val = wx.StaticText(statbox_parent_zoom, -1, "0",
-                                         size=(40, -1), style=wx.ALIGN_RIGHT)
+                                         size=wx.Size(40, -1), style=wx.ALIGN_RIGHT)
         # Vertical position
         st_offy = wx.StaticText(statbox_parent_zoom, -1, "Vertical:")
         self.sld_offy = wx.Slider(statbox_parent_zoom, -1, 0, -100, 100,
                                   style=wx.SL_HORIZONTAL)
         self.st_offy_val = wx.StaticText(statbox_parent_zoom, -1, "0",
-                                         size=(40, -1), style=wx.ALIGN_RIGHT)
+                                         size=wx.Size(40, -1), style=wx.ALIGN_RIGHT)
         self.sld_zoom.SetToolTip(wx.ToolTip(
             "Zoom further into the image. The wallpaper always fills the screen."))
         self.sld_offx.SetToolTip(wx.ToolTip(
@@ -358,8 +359,8 @@ class WallpaperSettingsPanel(wx.Panel):
         self.button_bezels.Bind(wx.EVT_BUTTON, self.onConfigureBezels)
         self.button_bezels_save.Bind(wx.EVT_BUTTON, self.onConfigureBezelsSave)
         self.button_bezels_canc.Bind(wx.EVT_BUTTON, self.onConfigureBezelsCanc)
-        help_bmp = wx.ArtProvider.GetBitmap(wx.ART_QUESTION, wx.ART_BUTTON, (20, 20))
-        self.button_help_bezel = wx.BitmapButton(statbox_parent_bezels, bitmap=help_bmp, name="butt_help_bez")
+        help_bmp = wx.ArtProvider.GetBitmap(wx.ART_QUESTION, wx.ART_BUTTON, wx.Size(20, 20))
+        self.button_help_bezel = wx.BitmapButton(statbox_parent_bezels, bitmap=wx.BitmapBundle(help_bmp), name="butt_help_bez")
         self.button_help_bezel.Bind(wx.EVT_BUTTON, self.onHelpBezels)
 
         self.sizer_bezel_buttons.Add(self.button_bezels, 0, wx.ALIGN_CENTER_VERTICAL|wx.ALL, 10)
@@ -402,7 +403,7 @@ class WallpaperSettingsPanel(wx.Panel):
         sizer_spangroups_cb = wx.BoxSizer(wx.HORIZONTAL)
         self.cb_spangroups = wx.CheckBox(self, -1, "Use multiple span areas")
         self.cb_spangroups.Bind(wx.EVT_CHECKBOX, self.onCheckboxSpanGroups)
-        self.button_help_spang = wx.BitmapButton(self, bitmap=help_bmp, name="butt_help_spang")
+        self.button_help_spang = wx.BitmapButton(self, bitmap=wx.BitmapBundle(help_bmp), name="butt_help_spang")
         self.button_help_spang.Bind(wx.EVT_BUTTON, self.onHelpSpanGroups)
         sizer_spangroups_cb.Add(self.cb_spangroups, 0, wx.ALIGN_LEFT|wx.LEFT, 5)
         sizer_spangroups_cb.AddStretchSpacer()
@@ -430,7 +431,7 @@ class WallpaperSettingsPanel(wx.Panel):
                          + list(self.display_sys.perspective_dict.keys())
                          + ["disabled"])
         self.ch_persp = wx.ComboBox(self, -1, name="PerspChoice",
-                                       size=(165, -1),
+                                       size=wx.Size(165, -1),
                                        choices=persp_choices, style=wx.CB_READONLY)
         self.sizer_setting_persp.Add(st_perspprof, 0, wx.ALIGN_LEFT|wx.ALL|wx.ALIGN_CENTER_VERTICAL, 0)
         self.sizer_setting_persp.Add(self.ch_persp, 0, wx.ALIGN_LEFT|wx.ALL|wx.ALIGN_CENTER_VERTICAL, 5)
@@ -679,7 +680,7 @@ class WallpaperSettingsPanel(wx.Panel):
         for i in range(num_disp):
             tcrtl_list.append(
                 wx.TextCtrl(ctrl_parent, -1,
-                            size=(self.tc_width * fraction, -1),
+                            size=wx.Size(int(self.tc_width * fraction), -1),
                             style=wx.TE_RIGHT
                            )
             )
@@ -690,7 +691,7 @@ class WallpaperSettingsPanel(wx.Panel):
         for i in range(num_disp):
             ch_list.append(
                 wx.ComboBox(ctrl_parent, -1,
-                          size=(self.tc_width * fraction, -1),
+                          size=wx.Size(int(self.tc_width * fraction), -1),
                           style=wx.CB_READONLY
                          )
             )
@@ -987,7 +988,7 @@ class WallpaperSettingsPanel(wx.Panel):
                                      self.use_multi_image, data_row)
 
     def add_to_imagelist(self, path):
-        folder_bmp =  wx.ArtProvider.GetBitmap(wx.ART_FOLDER, wx.ART_TOOLBAR, self.tsize)
+        folder_bmp =  wx.ArtProvider.GetBitmap(wx.ART_FOLDER, wx.ART_TOOLBAR, wx.Size(*self.tsize))
         if os.path.isdir(path):
             img_id = self.image_list.Add(folder_bmp)
         else:
@@ -1012,7 +1013,7 @@ class WallpaperSettingsPanel(wx.Panel):
             round(target_h),
             quality=wx.IMAGE_QUALITY_BOX_AVERAGE
             ).Resize(
-                self.tsize, pos
+                wx.Size(*self.tsize), wx.Point(pos)
             ).ConvertToBitmap()
         return bmp
 
@@ -1474,7 +1475,7 @@ class WallpaperSettingsPanel(wx.Panel):
         btn = evt.GetEventObject()
         pos = btn.ClientToScreen((0, 0))
         sz = btn.GetSize()
-        pop.Position(pos, (0, sz[1]))
+        pop.Position(pos, wx.Size(0, sz[1]))
         pop.Popup()
 
     def onHelpBezels(self, evt):
@@ -1489,7 +1490,7 @@ class WallpaperSettingsPanel(wx.Panel):
         btn = evt.GetEventObject()
         pos = btn.ClientToScreen((0, 0))
         sz = btn.GetSize()
-        pop.Position(pos, (0, sz[1]))
+        pop.Position(pos, wx.Size(0, sz[1]))
         pop.Popup()
 
     def onHelpSpanGroups(self, evt):
@@ -1504,7 +1505,7 @@ class WallpaperSettingsPanel(wx.Panel):
         btn = evt.GetEventObject()
         pos = btn.ClientToScreen((0, 0))
         sz = btn.GetSize()
-        pop.Position(pos, (0, sz[1]))
+        pop.Position(pos, wx.Size(0, sz[1]))
         pop.Popup()
 
 
@@ -1523,7 +1524,7 @@ class WallpaperPreviewPanel(wx.Panel):
     """
     def __init__(self, parent, display_sys, image_list = None, use_ppi_px = False, use_multi_image = False):
         self.preview_size = (1080,400)
-        wx.Panel.__init__(self, parent, size=self.preview_size)
+        wx.Panel.__init__(self, parent, size=wx.Size(*self.preview_size))
         self.frame = parent
 
         # Buttons
@@ -1580,8 +1581,8 @@ class WallpaperPreviewPanel(wx.Panel):
         if not self.preview_img_list:
             # preview StaticBitmaps don't exist yet
             self.bmp_list.append(bmp_canv)
-            self.st_bmp_canvas = wx.StaticBitmap(self, wx.ID_ANY, bmp_canv)
-            self.st_bmp_canvas.SetPosition(self.dtop_canvas_pos)
+            self.st_bmp_canvas = wx.StaticBitmap(self, wx.ID_ANY, wx.BitmapBundle(bmp_canv))
+            self.st_bmp_canvas.SetPosition(wx.Point(self.dtop_canvas_pos))
             self.st_bmp_canvas.Hide()
 
             # draw monitor previews
@@ -1590,7 +1591,7 @@ class WallpaperPreviewPanel(wx.Panel):
                 offs = disp[1]
                 bmp = wx.Bitmap.FromRGBA(size[0], size[1], red=0, green=0, blue=0, alpha=255)
                 self.bmp_list.append(bmp)
-                st_bmp = wx.StaticBitmap(self, wx.ID_ANY, bmp)
+                st_bmp = wx.StaticBitmap(self, wx.ID_ANY, wx.BitmapBundle(bmp))
                 st_bmp.Hide()
                 # st_bmp.SetScaleMode(wx.Scale_AspectFill)  # New in wxpython 4.1
                 st_bmp.SetPosition(offs)
@@ -1599,8 +1600,8 @@ class WallpaperPreviewPanel(wx.Panel):
             # previews exist and should be blanked
             self.current_preview_images = [] # drop chached image list
 
-            self.st_bmp_canvas.SetBitmap(bmp_canv)
-            self.st_bmp_canvas.SetPosition(self.dtop_canvas_pos)
+            self.st_bmp_canvas.SetBitmap(wx.BitmapBundle(bmp_canv))
+            self.st_bmp_canvas.SetPosition(wx.Point(self.dtop_canvas_pos))
             # self.st_bmp_canvas.Hide()
 
             # blank monitor previews
@@ -1682,8 +1683,8 @@ class WallpaperPreviewPanel(wx.Panel):
         if force_refresh or (not self.config_mode or not self.bezel_conifg_mode):
             self.dtop_canvas_px = self.get_canvas(self.display_data, use_ppi_px)
             self.dtop_canvas_relsz, self.dtop_canvas_pos, scaling_fac = self.fit_canvas_wrkarea(self.dtop_canvas_px)
-            self.st_bmp_canvas.SetPosition(self.dtop_canvas_pos)
-            self.st_bmp_canvas.SetSize(self.dtop_canvas_relsz)
+            self.st_bmp_canvas.SetPosition(wx.Point(self.dtop_canvas_pos))
+            self.st_bmp_canvas.SetSize(wx.Size(*self.dtop_canvas_relsz))
 
             if use_ppi_px:
                 (self.display_rel_sizes,
@@ -1785,7 +1786,7 @@ class WallpaperPreviewPanel(wx.Panel):
             # With use_ppi_px any provided bezels will be drawn.
             canv_sz = self.st_bmp_canvas.GetSize()
             bmp_clr, bmp_bw = self.resize_and_bitmap(img, canv_sz, True)
-            self.st_bmp_canvas.SetBitmap(bmp_bw)
+            self.st_bmp_canvas.SetBitmap(wx.BitmapBundle(bmp_bw))
             # self.st_bmp_canvas.Show()
 
             canvas_pos = self.dtop_canvas_pos
@@ -1808,7 +1809,7 @@ class WallpaperPreviewPanel(wx.Panel):
             # and crop pieces to show on monitor previews unaltered.
             canv_sz = self.st_bmp_canvas.GetSize()
             bmp_clr, bmp_bw = self.resize_and_bitmap(img, canv_sz, True)
-            self.st_bmp_canvas.SetBitmap(bmp_bw)
+            self.st_bmp_canvas.SetBitmap(wx.BitmapBundle(bmp_bw))
             # self.st_bmp_canvas.Show()
 
             canvas_pos = self.dtop_canvas_pos
@@ -1834,6 +1835,11 @@ class WallpaperPreviewPanel(wx.Panel):
             self.display_data,
             self._last_spangroups
         )
+
+    @overload
+    def resize_and_bitmap(self, fname, size, enhance_color: Literal[False] = False) -> "wx.Bitmap": ...
+    @overload
+    def resize_and_bitmap(self, fname, size, enhance_color: Literal[True]) -> "Tuple[wx.Bitmap, wx.Bitmap]": ...
 
     def resize_and_bitmap(self, fname, size, enhance_color=False):
         """Take filename of an image and resize and crop it to size."""
@@ -2036,8 +2042,8 @@ class WallpaperPreviewPanel(wx.Panel):
         self.button_reset = wx.Button(self, label="Reset")
         self.button_cancel = wx.Button(self, label="Cancel")
         self.button_entry = wx.Button(self, label="Exact entry")
-        help_bmp = wx.ArtProvider.GetBitmap(wx.ART_QUESTION, wx.ART_BUTTON, (20, 20))
-        self.button_help = wx.BitmapButton(self, bitmap=help_bmp, name="butt_help")
+        help_bmp = wx.ArtProvider.GetBitmap(wx.ART_QUESTION, wx.ART_BUTTON, wx.Size(20, 20))
+        self.button_help = wx.BitmapButton(self, bitmap=wx.BitmapBundle(help_bmp), name="butt_help")
 
 
         self.button_config.Bind(wx.EVT_BUTTON, self.onConfigure)
@@ -2062,37 +2068,37 @@ class WallpaperPreviewPanel(wx.Panel):
         sz_help = self.button_help.GetSize()
         self.butt_gap = 10
         self.button_config.SetPosition(
-            (
+            wx.Point(
                 sz_area[0] - sz_butt[0] - self.butt_gap,
                 sz_area[1] - sz_butt[1] - self.butt_gap
             )
         )
         self.button_save.SetPosition(
-            (
+            wx.Point(
                 sz_area[0] - 2*(sz_butt[0] + self.butt_gap),
                 sz_area[1] - sz_butt[1] - self.butt_gap
             )
         )
         self.button_reset.SetPosition(
-            (
+            wx.Point(
                 sz_area[0] - sz_butt[0] - self.butt_gap,
                 sz_area[1] - 2*(sz_butt[1] + self.butt_gap)
             )
         )
         self.button_entry.SetPosition(
-            (
+            wx.Point(
                 sz_area[0] - sz_butt[0] - self.butt_gap,
                 sz_area[1] - 3*(sz_butt[1] + self.butt_gap)
             )
         )
         self.button_cancel.SetPosition(
-            (
+            wx.Point(
                 sz_area[0] - sz_butt[0] - self.butt_gap,
                 sz_area[1] - sz_butt[1] - self.butt_gap
             )
         )
         self.button_help.SetPosition(
-            (
+            wx.Point(
                 sz_area[0] - sz_help[0] - self.butt_gap,
                 self.butt_gap
             )
@@ -2207,7 +2213,7 @@ class WallpaperPreviewPanel(wx.Panel):
         btn = evt.GetEventObject()
         pos = btn.ClientToScreen((0,0))
         sz =  btn.GetSize()
-        pop.Position(pos, (0, sz[1]))
+        pop.Position(pos, wx.Size(0, sz[1]))
         pop.Popup()
 
 
@@ -2523,8 +2529,8 @@ class WallpaperPreviewPanel(wx.Panel):
         bb_png = os.path.join(RESOURCES_PATH, "icons8-merge-horizontal-96.png")
         rb_img = wx.Image(rb_png, type=wx.BITMAP_TYPE_ANY)
         bb_img = wx.Image(bb_png, type=wx.BITMAP_TYPE_ANY)
-        rb_bmp = rb_img.Scale(20, 20).Resize((20, 20), (0, 0)).ConvertToBitmap()
-        bb_bmp = bb_img.Scale(20, 20).Resize((20, 20), (0, 0)).ConvertToBitmap()
+        rb_bmp = rb_img.Scale(20, 20).Resize(wx.Size(20, 20), wx.Point((0, 0))).ConvertToBitmap()
+        bb_bmp = bb_img.Scale(20, 20).Resize(wx.Size(20, 20), wx.Point((0, 0))).ConvertToBitmap()
 
         # create bitmap buttons
         for st_bmp in self.preview_img_list:
@@ -2536,8 +2542,8 @@ class WallpaperPreviewPanel(wx.Panel):
             butt_bb.SetBackgroundColour(bez_butt_color)
             self.bez_butt_sz = butt_rb.GetSize()
             pos_rb, pos_bb = self.bezel_button_positions(st_bmp)
-            butt_rb.SetPosition((pos_rb[0], pos_rb[1]))
-            butt_bb.SetPosition((pos_bb[0], pos_bb[1]))
+            butt_rb.SetPosition(wx.Point((pos_rb[0], pos_rb[1])))
+            butt_bb.SetPosition(wx.Point((pos_bb[0], pos_bb[1])))
             butt_rb.Bind(wx.EVT_BUTTON, self.onBezelButton)
             butt_bb.Bind(wx.EVT_BUTTON, self.onBezelButton)
             self.bez_buttons.append(
@@ -2658,7 +2664,7 @@ class WallpaperPreviewPanel(wx.Panel):
                             "Enter the size of adjacent bezels and gap\n"
                             "in millimeters:")
             # self.tc_bez = wx.TextCtrl(pnl, -1, size=(100, -1))
-            self.tc_bez = wx.TextCtrl(pnl, -1, size=(60, -1), style=wx.TE_RIGHT|wx.TE_PROCESS_ENTER)
+            self.tc_bez = wx.TextCtrl(pnl, -1, size=wx.Size(60, -1), style=wx.TE_RIGHT|wx.TE_PROCESS_ENTER)
             self.tc_bez.Bind(wx.EVT_TEXT_ENTER, self.OnEnter)
             self.current_bez_val = None
             butt_save = wx.Button(pnl, label="Apply")

@@ -107,7 +107,7 @@ def get_backprojected_display_system(crops, persp_data, plot=False):
         projected_coeffs.append(coeffs)
 
     if plot:
-        import matplotlib.pyplot as plt
+        import matplotlib.pyplot as plt  # pyright: ignore[reportMissingImports]
         data = (ppi_norm_corners[0], ppi_norm_corners[1], ordered_quads[0], ordered_quads[1])
         colors = ("red", "orange", "blue", "cyan")
         # groups = ("orig", "rotated")

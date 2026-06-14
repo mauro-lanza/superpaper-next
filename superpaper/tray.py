@@ -118,7 +118,7 @@ class TaskBarIcon(wx.adv.TaskBarIcon):
                 from system_hotkey import SystemHotkey
                 self.hk = SystemHotkey(check_queue_interval=0.05)
                 self.hk2 = SystemHotkey(
-                    consumer=self.profile_consumer,
+                    consumer=self.profile_consumer,  # pyright: ignore[reportArgumentType]
                     check_queue_interval=0.05)
                 self.seen_binding = set()
                 self.register_hotkeys()
@@ -330,7 +330,7 @@ Check that it is formatted properly and valid keys.".format(profile.hk_binding)
     def set_icon(self, path):
         """Sets tray icon."""
         icon = wx.Icon(path)
-        self.SetIcon(icon, TRAY_TOOLTIP)
+        self.SetIcon(wx.BitmapBundle(icon), TRAY_TOOLTIP)
 
     def on_left_down(self, *event):
         """Allows binding left click event."""
