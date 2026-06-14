@@ -1085,8 +1085,11 @@ class WallpaperSettingsPanel(wx.Panel):
             wx.Yield()
             thrd = self.parent_tray_obj.start_profile(event, saved_profile_to_start, force_reload=True)
             if thrd:
+                # Pump the event loop while waiting so the GUI stays responsive
+                # instead of freezing (otherwise the apply appears stuck).
                 while thrd.is_alive():
-                    time.sleep(0.5)
+                    wx.YieldIfNeeded()
+                    time.sleep(0.05)
             if not saved_profile_to_start.slideshow:
                 saved_profile_to_start.clear_selected_wallpaper()
         else:
