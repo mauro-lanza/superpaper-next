@@ -1,19 +1,36 @@
 """
 New wallpaper configuration GUI for Superpaper.
 """
+
 import os
 import time
 from operator import itemgetter
-from typing import Literal, Tuple, overload
+from typing import Literal, overload
+
 from PIL import Image, ImageEnhance, UnidentifiedImageError
 
 import superpaper.sp_logging as sp_logging
 import superpaper.wallpaper_processing as wpproc
-from superpaper.configuration_dialogs import BrowsePaths, PerspectiveConfig, DisplayPositionEntry, HelpFrame, HelpPopup
-from superpaper.data import GeneralSettingsData, ProfileData, TempProfileData, CLIProfileData, list_profiles, open_profile
+from superpaper.configuration_dialogs import (
+    BrowsePaths,
+    DisplayPositionEntry,
+    HelpFrame,
+    HelpPopup,
+    PerspectiveConfig,
+)
+from superpaper.data import (
+    CLIProfileData,
+    GeneralSettingsData,
+    ProfileData,
+    TempProfileData,
+    open_profile,
+)
 from superpaper.message_dialog import show_message_dialog
-from superpaper.sp_paths import PATH, CONFIG_PATH, PROFILES_PATH
-from superpaper.wallpaper_processing import NUM_DISPLAYS, get_display_data, change_wallpaper_job, resize_to_fill
+from superpaper.sp_paths import PATH, PROFILES_PATH
+from superpaper.wallpaper_processing import (
+    change_wallpaper_job,
+    resize_to_fill,
+)
 
 try:
     import wx
@@ -24,8 +41,10 @@ except ImportError:
 RESOURCES_PATH = os.path.join(PATH, "superpaper/resources")
 TRAY_ICON = os.path.join(RESOURCES_PATH, "superpaper.png")
 
+
 class ConfigFrame(wx.Frame):
     """Wallpaper configuration dialog frame base class."""
+
     def __init__(self, parent_tray_obj):
         wx.Frame.__init__(self, parent=None, title="Superpaper Wallpaper Configuration")
         self.frame_sizer = wx.BoxSizer(wx.VERTICAL)
@@ -38,17 +57,19 @@ class ConfigFrame(wx.Frame):
         self.Layout()
         self.Center()
         self.Show()
-        self.SetMinSize(wx.Size(800,600))
+        self.SetMinSize(wx.Size(800, 600))
+
 
 class WallpaperSettingsPanel(wx.Panel):
     """This class defines the wallpaper config dialog UI."""
+
     def __init__(self, parent, parent_tray_obj):
         wx.Panel.__init__(self, parent)
         self.frame = parent
         self.parent_tray_obj = parent_tray_obj
         self.sizer_main = wx.BoxSizer(wx.VERTICAL)
-        self.sizer_top_half = wx.BoxSizer(wx.HORIZONTAL) # wallpaper/monitor preview
-        self.sizer_bottom_half = wx.BoxSizer(wx.VERTICAL) # settings, buttons etc
+        self.sizer_top_half = wx.BoxSizer(wx.HORIZONTAL)  # wallpaper/monitor preview
+        self.sizer_bottom_half = wx.BoxSizer(wx.VERTICAL)  # settings, buttons etc
         # bottom_half: setting sizers
         self.sizer_profiles = wx.BoxSizer(wx.HORIZONTAL)
         self.sizer_setting_sizers = wx.BoxSizer(wx.HORIZONTAL)
@@ -73,7 +94,7 @@ class WallpaperSettingsPanel(wx.Panel):
         self.display_sys = wpproc.DisplaySystem()
         # self.wpprev_pnl = WallpaperPreviewPanel(self.frame, self.display_sys)
         self.wpprev_pnl = WallpaperPreviewPanel(self, self.display_sys)
-        self.sizer_top_half.Add(self.wpprev_pnl, 1, wx.CENTER|wx.EXPAND, 5)
+        self.sizer_top_half.Add(self.wpprev_pnl, 1, wx.CENTER | wx.EXPAND, 5)
         # self.sizer_top_half.SetMinSize((400,200))
         # self.sizer_top_half.SetMinSize()
         self.wpprev_pnl.Bind(wx.EVT_SIZE, self.onResize)
@@ -95,27 +116,20 @@ class WallpaperSettingsPanel(wx.Panel):
         # bottom button row contents
         self.create_sizer_bottom_buttonrow()
 
-
         # Add sub-sizers to bottom_half
         #    Note: horizontal sizer needs children to have proportion = 1
         #    in order to expand them horizontally instead of vertically.
-        self.sizer_setting_sizers.Add(
-            self.sizer_settings_left, 0, wx.CENTER|wx.EXPAND|wx.TOP|wx.LEFT, 5
-            )
-        self.sizer_setting_sizers.Add(
-            self.sizer_settings_right, 1, wx.CENTER|wx.EXPAND|wx.TOP|wx.LEFT, 0
-            )
-        self.sizer_setting_sizers.Add(
-            self.sizer_setting_adv, 0, wx.CENTER|wx.EXPAND|wx.TOP|wx.RIGHT, 5
-            )
+        self.sizer_setting_sizers.Add(self.sizer_settings_left, 0, wx.CENTER | wx.EXPAND | wx.TOP | wx.LEFT, 5)
+        self.sizer_setting_sizers.Add(self.sizer_settings_right, 1, wx.CENTER | wx.EXPAND | wx.TOP | wx.LEFT, 0)
+        self.sizer_setting_sizers.Add(self.sizer_setting_adv, 0, wx.CENTER | wx.EXPAND | wx.TOP | wx.RIGHT, 5)
 
-        self.sizer_bottom_half.Add(self.sizer_profiles, 0, wx.CENTER|wx.EXPAND|wx.ALL, 0)
-        self.sizer_bottom_half.Add(self.sizer_setting_sizers, 1, wx.CENTER|wx.EXPAND|wx.ALL, 0)
-        self.sizer_bottom_half.Add(self.sizer_bottom_buttonrow, 0, wx.CENTER|wx.EXPAND|wx.ALL, 0)
+        self.sizer_bottom_half.Add(self.sizer_profiles, 0, wx.CENTER | wx.EXPAND | wx.ALL, 0)
+        self.sizer_bottom_half.Add(self.sizer_setting_sizers, 1, wx.CENTER | wx.EXPAND | wx.ALL, 0)
+        self.sizer_bottom_half.Add(self.sizer_bottom_buttonrow, 0, wx.CENTER | wx.EXPAND | wx.ALL, 0)
 
         # Collect items at main sizer
-        self.sizer_main.Add(self.sizer_top_half, 1, wx.CENTER|wx.EXPAND|wx.BOTTOM, 5)
-        self.sizer_main.Add(self.sizer_bottom_half, 0, wx.CENTER|wx.EXPAND|wx.TOP|wx.LEFT|wx.RIGHT, 0)
+        self.sizer_main.Add(self.sizer_top_half, 1, wx.CENTER | wx.EXPAND | wx.BOTTOM, 5)
+        self.sizer_main.Add(self.sizer_bottom_half, 0, wx.CENTER | wx.EXPAND | wx.TOP | wx.LEFT | wx.RIGHT, 0)
 
         self.SetSizer(self.sizer_main)
         self.sizer_main.Fit(self.frame)
@@ -129,8 +143,6 @@ class WallpaperSettingsPanel(wx.Panel):
             self.populate_fields(self.parent_tray_obj.active_profile)
 
         ### End __init__.
-
-
 
     #
     # Sizer creation methods
@@ -159,23 +171,23 @@ class WallpaperSettingsPanel(wx.Panel):
         self.button_delete.Bind(wx.EVT_BUTTON, self.onDeleteProfile)
 
         # Add elements to the sizer
-        self.sizer_profiles.Add(st_choice_profiles, 0, wx.CENTER|wx.ALL, 5)
-        self.sizer_profiles.Add(self.choice_profiles, 0, wx.CENTER|wx.ALL, 5)
-        self.sizer_profiles.Add(st_name, 0, wx.CENTER|wx.ALL, 5)
-        self.sizer_profiles.Add(self.tc_name, 0, wx.CENTER|wx.ALL, 5)
-        self.sizer_profiles.Add(self.button_new, 0, wx.CENTER|wx.ALL, 5)
-        self.sizer_profiles.Add(self.button_save, 0, wx.CENTER|wx.ALL, 5)
-        self.sizer_profiles.Add(self.button_delete, 0, wx.CENTER|wx.ALL, 5)
-
+        self.sizer_profiles.Add(st_choice_profiles, 0, wx.CENTER | wx.ALL, 5)
+        self.sizer_profiles.Add(self.choice_profiles, 0, wx.CENTER | wx.ALL, 5)
+        self.sizer_profiles.Add(st_name, 0, wx.CENTER | wx.ALL, 5)
+        self.sizer_profiles.Add(self.tc_name, 0, wx.CENTER | wx.ALL, 5)
+        self.sizer_profiles.Add(self.button_new, 0, wx.CENTER | wx.ALL, 5)
+        self.sizer_profiles.Add(self.button_save, 0, wx.CENTER | wx.ALL, 5)
+        self.sizer_profiles.Add(self.button_delete, 0, wx.CENTER | wx.ALL, 5)
 
     def create_sizer_settings_left(self):
         # span mode sizer
-        radio_choices_spanmode = ["Simple span", "Advanced span", "Separate image for every display"]
+        radio_choices_spanmode = [
+            "Simple span",
+            "Advanced span",
+            "Separate image for every display",
+        ]
         self.radiobox_spanmode = wx.RadioBox(
-            self, wx.ID_ANY,
-            label="Span mode",
-            choices=radio_choices_spanmode,
-            style=wx.RA_VERTICAL
+            self, wx.ID_ANY, label="Span mode", choices=radio_choices_spanmode, style=wx.RA_VERTICAL
         )
         self.radiobox_spanmode.Bind(wx.EVT_RADIOBOX, self.onSpanRadio)
 
@@ -184,16 +196,22 @@ class WallpaperSettingsPanel(wx.Panel):
         statbox_parent_sshow = self.sizer_setting_slideshow.GetStaticBox()
         sizer_sshow_subsettings = wx.GridSizer(2, 5, 5)
         self.st_sshow_sort = wx.StaticText(statbox_parent_sshow, -1, "Slideshow order:")
-        self.ch_sshow_sort = wx.ComboBox(statbox_parent_sshow, -1, name="SortChoice",
-                                       #  size=(self.tc_width*0.7, -1),
-                                       choices=["Shuffle", "Alphabetical", "Date seeded shuffle"], style=wx.CB_READONLY)
+        self.ch_sshow_sort = wx.ComboBox(
+            statbox_parent_sshow,
+            -1,
+            name="SortChoice",
+            #  size=(self.tc_width*0.7, -1),
+            choices=["Shuffle", "Alphabetical", "Date seeded shuffle"],
+            style=wx.CB_READONLY,
+        )
         # ch_sort_size = self.ch_sshow_sort.GetClientSize()
         self.st_sshow_delay = wx.StaticText(statbox_parent_sshow, -1, "Delay (minutes):")
         self.tc_sshow_delay = wx.TextCtrl(
-            statbox_parent_sshow, -1,
+            statbox_parent_sshow,
+            -1,
             # size=(self.tc_width*0.69, -1),
             # size=ch_sort_size,
-            style=wx.TE_RIGHT
+            style=wx.TE_RIGHT,
         )
         self.cb_slideshow = wx.CheckBox(statbox_parent_sshow, -1, "Slideshow")
         self.st_sshow_sort.Disable()
@@ -201,12 +219,12 @@ class WallpaperSettingsPanel(wx.Panel):
         self.tc_sshow_delay.Disable()
         self.ch_sshow_sort.Disable()
         self.cb_slideshow.Bind(wx.EVT_CHECKBOX, self.onCheckboxSlideshow)
-        self.sizer_setting_slideshow.Add(self.cb_slideshow, 0, wx.ALIGN_LEFT|wx.ALL, 5)
-        sizer_sshow_subsettings.Add(self.st_sshow_delay, 0, wx.ALIGN_CENTER_VERTICAL|wx.LEFT, 0)
-        sizer_sshow_subsettings.Add(self.tc_sshow_delay, 0, wx.ALIGN_CENTER_VERTICAL|wx.LEFT|wx.ALIGN_LEFT, 3)
-        sizer_sshow_subsettings.Add(self.st_sshow_sort, 0, wx.ALIGN_CENTER_VERTICAL|wx.LEFT, 0)
-        sizer_sshow_subsettings.Add(self.ch_sshow_sort, 0, wx.ALIGN_CENTER_VERTICAL|wx.RIGHT|wx.ALIGN_LEFT, 5)
-        self.sizer_setting_slideshow.Add(sizer_sshow_subsettings, 0, wx.ALIGN_LEFT|wx.LEFT|wx.BOTTOM, 10)
+        self.sizer_setting_slideshow.Add(self.cb_slideshow, 0, wx.ALIGN_LEFT | wx.ALL, 5)
+        sizer_sshow_subsettings.Add(self.st_sshow_delay, 0, wx.ALIGN_CENTER_VERTICAL | wx.LEFT, 0)
+        sizer_sshow_subsettings.Add(self.tc_sshow_delay, 0, wx.ALIGN_CENTER_VERTICAL | wx.LEFT | wx.ALIGN_LEFT, 3)
+        sizer_sshow_subsettings.Add(self.st_sshow_sort, 0, wx.ALIGN_CENTER_VERTICAL | wx.LEFT, 0)
+        sizer_sshow_subsettings.Add(self.ch_sshow_sort, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT | wx.ALIGN_LEFT, 5)
+        self.sizer_setting_slideshow.Add(sizer_sshow_subsettings, 0, wx.ALIGN_LEFT | wx.LEFT | wx.BOTTOM, 10)
         # self.sizer_setting_slideshow.AddSpacer(5)
 
         # hotkey sizer
@@ -219,15 +237,17 @@ class WallpaperSettingsPanel(wx.Panel):
         self.tc_hotkey_bind.Disable()
         self.tc_hotkey_bind.SetToolTip(wx.ToolTip("Modifiers: control, alt, shift, super.\nExample: control+super+x"))
         self.hotkey_bind_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        self.hotkey_bind_sizer.Add(st_hotkey_bind, 0, wx.ALIGN_CENTER_VERTICAL|wx.ALL, 5)
-        self.hotkey_bind_sizer.Add(self.tc_hotkey_bind, 0, wx.ALIGN_CENTER_VERTICAL|wx.ALL, 5)
+        self.hotkey_bind_sizer.Add(st_hotkey_bind, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 5)
+        self.hotkey_bind_sizer.Add(self.tc_hotkey_bind, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 5)
         help_bmp = wx.ArtProvider.GetBitmap(wx.ART_QUESTION, wx.ART_BUTTON, wx.Size(20, 20))
-        self.button_help_hotkey = wx.BitmapButton(statbox_parent_hkey, bitmap=wx.BitmapBundle(help_bmp), name="butt_help_hk")
+        self.button_help_hotkey = wx.BitmapButton(
+            statbox_parent_hkey, bitmap=wx.BitmapBundle(help_bmp), name="butt_help_hk"
+        )
         self.button_help_hotkey.Bind(wx.EVT_BUTTON, self.onHelpHotkey)
         self.button_help_hotkey.Disable()
-        self.hotkey_bind_sizer.Add(self.button_help_hotkey, 0, wx.ALIGN_CENTER_VERTICAL|wx.ALL, 5)
-        self.sizer_setting_hotkey.Add(self.cb_hotkey, 0, wx.ALIGN_LEFT|wx.ALL, 5)
-        self.sizer_setting_hotkey.Add(self.hotkey_bind_sizer, 0, wx.CENTER|wx.EXPAND|wx.ALL, 5)
+        self.hotkey_bind_sizer.Add(self.button_help_hotkey, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 5)
+        self.sizer_setting_hotkey.Add(self.cb_hotkey, 0, wx.ALIGN_LEFT | wx.ALL, 5)
+        self.sizer_setting_hotkey.Add(self.hotkey_bind_sizer, 0, wx.CENTER | wx.EXPAND | wx.ALL, 5)
         self.cb_hotkey.Bind(wx.EVT_CHECKBOX, self.onCheckboxHotkey)
 
         # image scaling & position sizer
@@ -237,47 +257,37 @@ class WallpaperSettingsPanel(wx.Panel):
         zoom_grid.AddGrowableCol(1, 1)
         # Zoom
         st_zoom = wx.StaticText(statbox_parent_zoom, -1, "Zoom:")
-        self.sld_zoom = wx.Slider(statbox_parent_zoom, -1, 100, 100, 400,
-                                  style=wx.SL_HORIZONTAL)
-        self.st_zoom_val = wx.StaticText(statbox_parent_zoom, -1, "100%",
-                                         size=wx.Size(40, -1), style=wx.ALIGN_RIGHT)
+        self.sld_zoom = wx.Slider(statbox_parent_zoom, -1, 100, 100, 400, style=wx.SL_HORIZONTAL)
+        self.st_zoom_val = wx.StaticText(statbox_parent_zoom, -1, "100%", size=wx.Size(40, -1), style=wx.ALIGN_RIGHT)
         # Horizontal position
         st_offx = wx.StaticText(statbox_parent_zoom, -1, "Horizontal:")
-        self.sld_offx = wx.Slider(statbox_parent_zoom, -1, 0, -100, 100,
-                                  style=wx.SL_HORIZONTAL)
-        self.st_offx_val = wx.StaticText(statbox_parent_zoom, -1, "0",
-                                         size=wx.Size(40, -1), style=wx.ALIGN_RIGHT)
+        self.sld_offx = wx.Slider(statbox_parent_zoom, -1, 0, -100, 100, style=wx.SL_HORIZONTAL)
+        self.st_offx_val = wx.StaticText(statbox_parent_zoom, -1, "0", size=wx.Size(40, -1), style=wx.ALIGN_RIGHT)
         # Vertical position
         st_offy = wx.StaticText(statbox_parent_zoom, -1, "Vertical:")
-        self.sld_offy = wx.Slider(statbox_parent_zoom, -1, 0, -100, 100,
-                                  style=wx.SL_HORIZONTAL)
-        self.st_offy_val = wx.StaticText(statbox_parent_zoom, -1, "0",
-                                         size=wx.Size(40, -1), style=wx.ALIGN_RIGHT)
-        self.sld_zoom.SetToolTip(wx.ToolTip(
-            "Zoom further into the image. The wallpaper always fills the screen."))
-        self.sld_offx.SetToolTip(wx.ToolTip(
-            "Move the visible area left or right within the image."))
-        self.sld_offy.SetToolTip(wx.ToolTip(
-            "Move the visible area up or down within the image."))
+        self.sld_offy = wx.Slider(statbox_parent_zoom, -1, 0, -100, 100, style=wx.SL_HORIZONTAL)
+        self.st_offy_val = wx.StaticText(statbox_parent_zoom, -1, "0", size=wx.Size(40, -1), style=wx.ALIGN_RIGHT)
+        self.sld_zoom.SetToolTip(wx.ToolTip("Zoom further into the image. The wallpaper always fills the screen."))
+        self.sld_offx.SetToolTip(wx.ToolTip("Move the visible area left or right within the image."))
+        self.sld_offy.SetToolTip(wx.ToolTip("Move the visible area up or down within the image."))
         for sld in (self.sld_zoom, self.sld_offx, self.sld_offy):
             sld.Bind(wx.EVT_SLIDER, self.onZoomOffsetChange)
-        zoom_grid.Add(st_zoom, 0, wx.ALIGN_CENTER_VERTICAL|wx.LEFT, 5)
+        zoom_grid.Add(st_zoom, 0, wx.ALIGN_CENTER_VERTICAL | wx.LEFT, 5)
         zoom_grid.Add(self.sld_zoom, 1, wx.EXPAND)
-        zoom_grid.Add(self.st_zoom_val, 0, wx.ALIGN_CENTER_VERTICAL|wx.RIGHT, 5)
-        zoom_grid.Add(st_offx, 0, wx.ALIGN_CENTER_VERTICAL|wx.LEFT, 5)
+        zoom_grid.Add(self.st_zoom_val, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 5)
+        zoom_grid.Add(st_offx, 0, wx.ALIGN_CENTER_VERTICAL | wx.LEFT, 5)
         zoom_grid.Add(self.sld_offx, 1, wx.EXPAND)
-        zoom_grid.Add(self.st_offx_val, 0, wx.ALIGN_CENTER_VERTICAL|wx.RIGHT, 5)
-        zoom_grid.Add(st_offy, 0, wx.ALIGN_CENTER_VERTICAL|wx.LEFT, 5)
+        zoom_grid.Add(self.st_offx_val, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 5)
+        zoom_grid.Add(st_offy, 0, wx.ALIGN_CENTER_VERTICAL | wx.LEFT, 5)
         zoom_grid.Add(self.sld_offy, 1, wx.EXPAND)
-        zoom_grid.Add(self.st_offy_val, 0, wx.ALIGN_CENTER_VERTICAL|wx.RIGHT, 5)
-        self.sizer_setting_zoom.Add(zoom_grid, 0, wx.EXPAND|wx.ALL, 5)
+        zoom_grid.Add(self.st_offy_val, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 5)
+        self.sizer_setting_zoom.Add(zoom_grid, 0, wx.EXPAND | wx.ALL, 5)
 
         # Add subsizers to the left column sizer
         self.sizer_settings_left.Add(self.radiobox_spanmode, 0, wx.EXPAND, 5)
         self.sizer_settings_left.Add(self.sizer_setting_slideshow, 0, wx.EXPAND, 5)
         self.sizer_settings_left.Add(self.sizer_setting_hotkey, 0, wx.EXPAND, 5)
         self.sizer_settings_left.Add(self.sizer_setting_zoom, 0, wx.EXPAND, 5)
-
 
     def create_sizer_settings_right(self):
         # paths sizer contents
@@ -286,71 +296,66 @@ class WallpaperSettingsPanel(wx.Panel):
     def create_sizer_paths(self):
         self.sizer_setting_paths = wx.StaticBoxSizer(wx.VERTICAL, self, "Wallpaper paths")
         self.statbox_parent_paths = self.sizer_setting_paths.GetStaticBox()
-        st_paths_info = wx.StaticText(self.statbox_parent_paths, -1, "Browse to add your wallpaper files or source folders here:")
+        st_paths_info = wx.StaticText(
+            self.statbox_parent_paths,
+            -1,
+            "Browse to add your wallpaper files or source folders here:",
+        )
         if self.use_multi_image:
-            self.path_listctrl = wx.ListCtrl(self.statbox_parent_paths, -1,
-                                              style=wx.LC_REPORT
-                                              | wx.BORDER_SIMPLE
-                                              | wx.LC_SORT_ASCENDING
-                                             )
-            self.path_listctrl.InsertColumn(0, 'Display', wx.LIST_FORMAT_RIGHT, width = 100)
-            self.path_listctrl.InsertColumn(1, 'Source', width = 400)
+            self.path_listctrl = wx.ListCtrl(
+                self.statbox_parent_paths,
+                -1,
+                style=wx.LC_REPORT | wx.BORDER_SIMPLE | wx.LC_SORT_ASCENDING,
+            )
+            self.path_listctrl.InsertColumn(0, "Display", wx.LIST_FORMAT_RIGHT, width=100)
+            self.path_listctrl.InsertColumn(1, "Source", width=400)
         else:
             # show simpler listing without header if only one wallpaper target
-            self.path_listctrl = wx.ListCtrl(self.statbox_parent_paths, -1,
-                                              style=wx.LC_REPORT
-                                              | wx.BORDER_SIMPLE
-                                              | wx.LC_NO_HEADER
-                                             )
-            self.path_listctrl.InsertColumn(0, 'Source', width = 500)
+            self.path_listctrl = wx.ListCtrl(
+                self.statbox_parent_paths,
+                -1,
+                style=wx.LC_REPORT | wx.BORDER_SIMPLE | wx.LC_NO_HEADER,
+            )
+            self.path_listctrl.InsertColumn(0, "Source", width=500)
         self.path_listctrl.SetImageList(self.image_list, wx.IMAGE_LIST_SMALL)
         self.path_listctrl.Bind(wx.EVT_LIST_ITEM_SELECTED, self.onWallpaperItemSelected)
 
-        self.sizer_setting_paths.Add(st_paths_info, 0, wx.ALIGN_LEFT|wx.ALL, 5)
-        self.sizer_setting_paths.Add(
-            self.path_listctrl, 1, wx.CENTER|wx.EXPAND|wx.TOP|wx.LEFT|wx.RIGHT, 5
-            )
+        self.sizer_setting_paths.Add(st_paths_info, 0, wx.ALIGN_LEFT | wx.ALL, 5)
+        self.sizer_setting_paths.Add(self.path_listctrl, 1, wx.CENTER | wx.EXPAND | wx.TOP | wx.LEFT | wx.RIGHT, 5)
         # Buttons
         self.sizer_setting_paths_buttons = wx.BoxSizer(wx.HORIZONTAL)
         self.button_browse = wx.Button(self.statbox_parent_paths, label="Browse")
         self.button_remove_source = wx.Button(self.statbox_parent_paths, label="Remove selected source")
         self.button_browse.Bind(wx.EVT_BUTTON, self.onBrowsePaths)
         self.button_remove_source.Bind(wx.EVT_BUTTON, self.onRemoveSource)
-        self.sizer_setting_paths_buttons.Add(self.button_browse, 0, wx.CENTER|wx.ALL, 5)
-        self.sizer_setting_paths_buttons.Add(self.button_remove_source, 0, wx.CENTER|wx.ALL, 5)
+        self.sizer_setting_paths_buttons.Add(self.button_browse, 0, wx.CENTER | wx.ALL, 5)
+        self.sizer_setting_paths_buttons.Add(self.button_remove_source, 0, wx.CENTER | wx.ALL, 5)
         # add button sizer to parent paths sizer
-        self.sizer_setting_paths.Add(self.sizer_setting_paths_buttons, 0, wx.CENTER|wx.EXPAND|wx.ALL, 0)
+        self.sizer_setting_paths.Add(self.sizer_setting_paths_buttons, 0, wx.CENTER | wx.EXPAND | wx.ALL, 0)
 
         self.sizer_settings_right.Add(
-            self.sizer_setting_paths, 1, wx.CENTER|wx.EXPAND|wx.TOP|wx.LEFT|wx.RIGHT, 5
+            self.sizer_setting_paths, 1, wx.CENTER | wx.EXPAND | wx.TOP | wx.LEFT | wx.RIGHT, 5
         )
         self.path_listctrl.InvalidateBestSize()
         # self.sizer_setting_paths.SetItemMinSize(self.path_listctrl, (1000, -1))
 
-
-
     def create_sizer_settings_advanced(self):
         """Create sizer for advanced spanning settings."""
-        self.sizer_setting_adv = wx.StaticBoxSizer(wx.VERTICAL, self,
-                                                   "Advanced wallpaper adjustment")
-        statbox_parent_adv = self.sizer_setting_adv.GetStaticBox()
+        self.sizer_setting_adv = wx.StaticBoxSizer(wx.VERTICAL, self, "Advanced wallpaper adjustment")
 
         # Fallback Diagonal Inches
         self.sizer_setting_diaginch = wx.BoxSizer(wx.VERTICAL)
         statbox_parent_diaginch = self
-        st_diaginch_override = wx.StaticText(statbox_parent_diaginch, -1,
-                                             "Display diagonal sizes:")
+        st_diaginch_override = wx.StaticText(statbox_parent_diaginch, -1, "Display diagonal sizes:")
         self.button_override = wx.Button(statbox_parent_diaginch, label="Override detected sizes")
         self.button_override.Bind(wx.EVT_BUTTON, self.onOverrideSizes)
-        self.sizer_setting_diaginch.Add(st_diaginch_override, 0, wx.ALIGN_LEFT|wx.BOTTOM, 5)
-        self.sizer_setting_diaginch.Add(self.button_override, 0,
-                                        wx.ALIGN_LEFT|wx.LEFT, 10)
+        self.sizer_setting_diaginch.Add(st_diaginch_override, 0, wx.ALIGN_LEFT | wx.BOTTOM, 5)
+        self.sizer_setting_diaginch.Add(self.button_override, 0, wx.ALIGN_LEFT | wx.LEFT, 10)
 
         # Bezels
         self.sizer_setting_bezels = wx.BoxSizer(wx.VERTICAL)
         statbox_parent_bezels = self
-        st_bezels = wx.StaticText(statbox_parent_bezels, -1,
-                                  "Adjust bezel sizes:")
+        st_bezels = wx.StaticText(statbox_parent_bezels, -1, "Adjust bezel sizes:")
 
         self.sizer_bezel_buttons = wx.BoxSizer(wx.HORIZONTAL)
         self.button_bezels = wx.Button(statbox_parent_bezels, -1, label="Configure")
@@ -360,13 +365,15 @@ class WallpaperSettingsPanel(wx.Panel):
         self.button_bezels_save.Bind(wx.EVT_BUTTON, self.onConfigureBezelsSave)
         self.button_bezels_canc.Bind(wx.EVT_BUTTON, self.onConfigureBezelsCanc)
         help_bmp = wx.ArtProvider.GetBitmap(wx.ART_QUESTION, wx.ART_BUTTON, wx.Size(20, 20))
-        self.button_help_bezel = wx.BitmapButton(statbox_parent_bezels, bitmap=wx.BitmapBundle(help_bmp), name="butt_help_bez")
+        self.button_help_bezel = wx.BitmapButton(
+            statbox_parent_bezels, bitmap=wx.BitmapBundle(help_bmp), name="butt_help_bez"
+        )
         self.button_help_bezel.Bind(wx.EVT_BUTTON, self.onHelpBezels)
 
-        self.sizer_bezel_buttons.Add(self.button_bezels, 0, wx.ALIGN_CENTER_VERTICAL|wx.ALL, 10)
-        self.sizer_bezel_buttons.Add(self.button_bezels_save, 0, wx.ALIGN_CENTER_VERTICAL|wx.TOP|wx.BOTTOM, 10)
-        self.sizer_bezel_buttons.Add(self.button_bezels_canc, 0, wx.ALIGN_CENTER_VERTICAL|wx.ALL, 10)
-        self.sizer_bezel_buttons.Add(self.button_help_bezel, 0, wx.ALIGN_CENTER_VERTICAL|wx.ALL, 10)
+        self.sizer_bezel_buttons.Add(self.button_bezels, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 10)
+        self.sizer_bezel_buttons.Add(self.button_bezels_save, 0, wx.ALIGN_CENTER_VERTICAL | wx.TOP | wx.BOTTOM, 10)
+        self.sizer_bezel_buttons.Add(self.button_bezels_canc, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 10)
+        self.sizer_bezel_buttons.Add(self.button_help_bezel, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 10)
         self.sizer_setting_bezels.Add(st_bezels, 0, wx.ALL, 0)
         self.sizer_setting_bezels.Add(self.sizer_bezel_buttons, 1, wx.EXPAND, 0)
         self.button_bezels_save.Disable()
@@ -377,26 +384,22 @@ class WallpaperSettingsPanel(wx.Panel):
         statbox_parent_offsets = self
         self.cb_offsets = wx.CheckBox(statbox_parent_offsets, -1, "Apply manual offsets")
         self.cb_offsets.Bind(wx.EVT_CHECKBOX, self.onCheckboxOffsets)
-        st_offsets = wx.StaticText(
-            statbox_parent_offsets, -1,
-            "Manual offsets in pixels (x,y=px,px):"
-        )
+        st_offsets = wx.StaticText(statbox_parent_offsets, -1, "Manual offsets in pixels (x,y=px,px):")
         st_offsets.Disable()
-        self.sizer_setting_offsets.Add(self.cb_offsets, 0, wx.ALIGN_LEFT|wx.BOTTOM, 5)
-        self.sizer_setting_offsets.Add(st_offsets, 0, wx.ALIGN_LEFT|wx.LEFT, 10)
+        self.sizer_setting_offsets.Add(self.cb_offsets, 0, wx.ALIGN_LEFT | wx.BOTTOM, 5)
+        self.sizer_setting_offsets.Add(st_offsets, 0, wx.ALIGN_LEFT | wx.LEFT, 10)
         tc_list_sizer_offs = wx.WrapSizer(wx.HORIZONTAL)
         self.tc_list_offsets = self.list_of_textctrl(statbox_parent_offsets, wpproc.NUM_DISPLAYS)
         for tc in self.tc_list_offsets:
-            st = wx.StaticText(statbox_parent_offsets, -1,
-                               str(self.tc_list_offsets.index(tc))+":")
+            st = wx.StaticText(statbox_parent_offsets, -1, str(self.tc_list_offsets.index(tc)) + ":")
             tc_st_sizer = wx.BoxSizer(wx.HORIZONTAL)
-            tc_st_sizer.Add(st, 0, wx.ALIGN_CENTER_VERTICAL|wx.LEFT|wx.TOP|wx.BOTTOM, 5)
-            tc_st_sizer.Add(tc, 0, wx.ALIGN_LEFT|wx.ALL, 5)
-            tc_list_sizer_offs.Add(tc_st_sizer, 0, wx.ALIGN_LEFT|wx.ALL, 0)
+            tc_st_sizer.Add(st, 0, wx.ALIGN_CENTER_VERTICAL | wx.LEFT | wx.TOP | wx.BOTTOM, 5)
+            tc_st_sizer.Add(tc, 0, wx.ALIGN_LEFT | wx.ALL, 5)
+            tc_list_sizer_offs.Add(tc_st_sizer, 0, wx.ALIGN_LEFT | wx.ALL, 0)
             tc.SetValue("0,0")
             st.Disable()
             tc.Disable()
-        self.sizer_setting_offsets.Add(tc_list_sizer_offs, 0, wx.ALIGN_LEFT|wx.LEFT, 5)
+        self.sizer_setting_offsets.Add(tc_list_sizer_offs, 0, wx.ALIGN_LEFT | wx.LEFT, 5)
 
         # Span groups
         self.sizer_setting_spangroups = wx.BoxSizer(wx.VERTICAL)
@@ -405,45 +408,45 @@ class WallpaperSettingsPanel(wx.Panel):
         self.cb_spangroups.Bind(wx.EVT_CHECKBOX, self.onCheckboxSpanGroups)
         self.button_help_spang = wx.BitmapButton(self, bitmap=wx.BitmapBundle(help_bmp), name="butt_help_spang")
         self.button_help_spang.Bind(wx.EVT_BUTTON, self.onHelpSpanGroups)
-        sizer_spangroups_cb.Add(self.cb_spangroups, 0, wx.ALIGN_LEFT|wx.LEFT, 5)
+        sizer_spangroups_cb.Add(self.cb_spangroups, 0, wx.ALIGN_LEFT | wx.LEFT, 5)
         sizer_spangroups_cb.AddStretchSpacer()
         sizer_spangroups_cb.Add(self.button_help_spang, 0, wx.RIGHT, 5)
         sizer_spangroups_data = wx.WrapSizer(wx.HORIZONTAL)
         self.ch_list_spangroups = self.list_of_wxchoice(self, wpproc.NUM_DISPLAYS, 0.4)
         for ch in self.ch_list_spangroups:
-            st = wx.StaticText(self, -1,
-                               str(self.ch_list_spangroups.index(ch))+":")
+            st = wx.StaticText(self, -1, str(self.ch_list_spangroups.index(ch)) + ":")
             ch_st_sizer = wx.BoxSizer(wx.HORIZONTAL)
-            ch_st_sizer.Add(st, 0, wx.ALIGN_CENTER_VERTICAL|wx.LEFT|wx.TOP|wx.BOTTOM, 5)
-            ch_st_sizer.Add(ch, 0, wx.ALIGN_LEFT|wx.ALL, 5)
-            sizer_spangroups_data.Add(ch_st_sizer, 0, wx.ALIGN_LEFT|wx.ALL, 0)
+            ch_st_sizer.Add(st, 0, wx.ALIGN_CENTER_VERTICAL | wx.LEFT | wx.TOP | wx.BOTTOM, 5)
+            ch_st_sizer.Add(ch, 0, wx.ALIGN_LEFT | wx.ALL, 5)
+            sizer_spangroups_data.Add(ch_st_sizer, 0, wx.ALIGN_LEFT | wx.ALL, 0)
             ch.SetItems([str(idx) for idx in range(self.ch_list_spangroups.index(ch) + 1)])
             ch.SetSelection(0)
             st.Disable()
             ch.Disable()
         self.sizer_setting_spangroups.Add(sizer_spangroups_cb, 1, wx.EXPAND, 5)
-        self.sizer_setting_spangroups.Add(sizer_spangroups_data, 0, wx.ALIGN_LEFT|wx.LEFT, 5)
+        self.sizer_setting_spangroups.Add(sizer_spangroups_data, 0, wx.ALIGN_LEFT | wx.LEFT, 5)
 
-        #Perspective profile
+        # Perspective profile
         self.sizer_setting_persp = wx.BoxSizer(wx.HORIZONTAL)
         st_perspprof = wx.StaticText(self, -1, "Perspective profile:")
-        persp_choices = (["default"]
-                         + list(self.display_sys.perspective_dict.keys())
-                         + ["disabled"])
-        self.ch_persp = wx.ComboBox(self, -1, name="PerspChoice",
-                                       size=wx.Size(165, -1),
-                                       choices=persp_choices, style=wx.CB_READONLY)
-        self.sizer_setting_persp.Add(st_perspprof, 0, wx.ALIGN_LEFT|wx.ALL|wx.ALIGN_CENTER_VERTICAL, 0)
-        self.sizer_setting_persp.Add(self.ch_persp, 0, wx.ALIGN_LEFT|wx.ALL|wx.ALIGN_CENTER_VERTICAL, 5)
-
+        persp_choices = ["default", *list(self.display_sys.perspective_dict.keys()), "disabled"]
+        self.ch_persp = wx.ComboBox(
+            self,
+            -1,
+            name="PerspChoice",
+            size=wx.Size(165, -1),
+            choices=persp_choices,
+            style=wx.CB_READONLY,
+        )
+        self.sizer_setting_persp.Add(st_perspprof, 0, wx.ALIGN_LEFT | wx.ALL | wx.ALIGN_CENTER_VERTICAL, 0)
+        self.sizer_setting_persp.Add(self.ch_persp, 0, wx.ALIGN_LEFT | wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5)
 
         # Add setting subsizers to the adv settings sizer
-        self.sizer_setting_adv.Add(self.sizer_setting_diaginch, 0, wx.CENTER|wx.EXPAND|wx.ALL, 5)
-        self.sizer_setting_adv.Add(self.sizer_setting_bezels, 0, wx.CENTER|wx.EXPAND|wx.ALL, 5)
-        self.sizer_setting_adv.Add(self.sizer_setting_offsets, 0, wx.CENTER|wx.EXPAND|wx.ALL, 5)
-        self.sizer_setting_adv.Add(self.sizer_setting_spangroups, 0, wx.CENTER|wx.EXPAND|wx.ALL, 5)
-        self.sizer_setting_adv.Add(self.sizer_setting_persp, 0, wx.CENTER|wx.EXPAND|wx.ALL, 5)
-
+        self.sizer_setting_adv.Add(self.sizer_setting_diaginch, 0, wx.CENTER | wx.EXPAND | wx.ALL, 5)
+        self.sizer_setting_adv.Add(self.sizer_setting_bezels, 0, wx.CENTER | wx.EXPAND | wx.ALL, 5)
+        self.sizer_setting_adv.Add(self.sizer_setting_offsets, 0, wx.CENTER | wx.EXPAND | wx.ALL, 5)
+        self.sizer_setting_adv.Add(self.sizer_setting_spangroups, 0, wx.CENTER | wx.EXPAND | wx.ALL, 5)
+        self.sizer_setting_adv.Add(self.sizer_setting_persp, 0, wx.CENTER | wx.EXPAND | wx.ALL, 5)
 
     def create_sizer_diaginch_override(self):
         self.sizer_setting_diaginch.Clear(True)
@@ -451,27 +454,24 @@ class WallpaperSettingsPanel(wx.Panel):
         statbox_parent_diaginch = self
         self.cb_diaginch = wx.CheckBox(statbox_parent_diaginch, -1, "Input display sizes manually")
         self.cb_diaginch.Bind(wx.EVT_CHECKBOX, self.onCheckboxDiaginch)
-        st_diaginch = wx.StaticText(
-            statbox_parent_diaginch, -1,
-            "Display diagonal sizes (inches):"
-        )
+        st_diaginch = wx.StaticText(statbox_parent_diaginch, -1, "Display diagonal sizes (inches):")
         st_diaginch.Disable()
-        self.sizer_setting_diaginch.Add(self.cb_diaginch, 0, wx.ALIGN_LEFT|wx.LEFT, 0)
-        self.sizer_setting_diaginch.Add(st_diaginch, 0, wx.ALIGN_LEFT|wx.LEFT, 10)
+        self.sizer_setting_diaginch.Add(self.cb_diaginch, 0, wx.ALIGN_LEFT | wx.LEFT, 0)
+        self.sizer_setting_diaginch.Add(st_diaginch, 0, wx.ALIGN_LEFT | wx.LEFT, 10)
         # diag size data for fields
         diags = [str(dsp.diagonal_size()[1]) for dsp in self.display_sys.disp_list]
         # sizer for textctrls
         tc_list_sizer_diag = wx.WrapSizer(wx.HORIZONTAL)
-        self.tc_list_diaginch = self.list_of_textctrl(statbox_parent_diaginch, wpproc.NUM_DISPLAYS, fraction=2/5)
+        self.tc_list_diaginch = self.list_of_textctrl(statbox_parent_diaginch, wpproc.NUM_DISPLAYS, fraction=2 / 5)
         for tc, diag in zip(self.tc_list_diaginch, diags):
-            tc_list_sizer_diag.Add(tc, 0, wx.ALIGN_LEFT|wx.ALL, 5)
+            tc_list_sizer_diag.Add(tc, 0, wx.ALIGN_LEFT | wx.ALL, 5)
             tc.ChangeValue(diag)
             tc.Disable()
         self.button_diaginch_save = wx.Button(statbox_parent_diaginch, label="Save")
         self.button_diaginch_save.Bind(wx.EVT_BUTTON, self.onSaveDiagInch)
         tc_list_sizer_diag.Add(self.button_diaginch_save, 0, wx.ALL, 5)
         self.button_diaginch_save.Disable()
-        self.sizer_setting_diaginch.Add(tc_list_sizer_diag, 0, wx.ALIGN_LEFT|wx.LEFT, 5)
+        self.sizer_setting_diaginch.Add(tc_list_sizer_diag, 0, wx.ALIGN_LEFT | wx.LEFT, 5)
         self.sizer_setting_adv.Layout()
         self.sizer_main.Layout()
         self.sizer_main.Fit(self.frame)
@@ -493,17 +493,15 @@ class WallpaperSettingsPanel(wx.Panel):
         self.button_help.Bind(wx.EVT_BUTTON, self.onHelp)
         self.button_close.Bind(wx.EVT_BUTTON, self.onClose)
 
-        self.sizer_bottom_buttonrow.Add(self.button_help, 0, wx.ALIGN_LEFT|wx.ALL, 5)
-        self.sizer_bottom_buttonrow.Add(self.button_align_test, 0, wx.ALIGN_LEFT|wx.ALL, 5)
+        self.sizer_bottom_buttonrow.Add(self.button_help, 0, wx.ALIGN_LEFT | wx.ALL, 5)
+        self.sizer_bottom_buttonrow.Add(self.button_align_test, 0, wx.ALIGN_LEFT | wx.ALL, 5)
         self.sizer_bottom_buttonrow.Hide(self.button_align_test)
-        self.sizer_bottom_buttonrow.Add(self.button_perspectives, 0, wx.ALIGN_LEFT|wx.ALL, 5)
+        self.sizer_bottom_buttonrow.Add(self.button_perspectives, 0, wx.ALIGN_LEFT | wx.ALL, 5)
         self.sizer_bottom_buttonrow.Hide(self.button_perspectives)
         self.sizer_bottom_buttonrow.Layout()
         self.sizer_bottom_buttonrow.AddStretchSpacer()
         self.sizer_bottom_buttonrow.Add(self.button_apply, 0, wx.ALL, 5)
         self.sizer_bottom_buttonrow.Add(self.button_close, 0, wx.ALL, 5)
-
-
 
     #
     # Profile loading and display methods
@@ -515,19 +513,14 @@ class WallpaperSettingsPanel(wx.Panel):
         self.show_advanced_settings = False
         self.use_multi_image = False
         legacy_advanced = bool(
-            profile.spanmode == "single" and
-            bool(
-                profile.ppimode or
-                profile.bezels or
-                profile.manual_offsets_useronly
-            )
+            profile.spanmode == "single" and bool(profile.ppimode or profile.bezels or profile.manual_offsets_useronly)
         )
 
         # Basic settings
-        if (profile.spanmode == "single" and not legacy_advanced):
+        if profile.spanmode == "single" and not legacy_advanced:
             self.radiobox_spanmode.SetSelection(0)
             self.use_multi_image = False
-        elif (profile.spanmode == "advanced" or legacy_advanced):
+        elif profile.spanmode == "advanced" or legacy_advanced:
             self.show_advanced_settings = True
             self.use_multi_image = False
             self.radiobox_spanmode.SetSelection(1)
@@ -541,7 +534,7 @@ class WallpaperSettingsPanel(wx.Panel):
         if profile.slideshow:
             self.cb_slideshow.SetValue(True)
             wx.PostEvent(self.cb_slideshow, wx.CommandEvent(commandEventType=wx.EVT_CHECKBOX.typeId))
-            self.tc_sshow_delay.ChangeValue(str(profile.delay_list[0]/60))
+            self.tc_sshow_delay.ChangeValue(str(profile.delay_list[0] / 60))
             if profile.sortmode == "shuffle":
                 self.ch_sshow_sort.SetSelection(0)
             elif profile.sortmode == "alphabetical":
@@ -564,7 +557,6 @@ class WallpaperSettingsPanel(wx.Panel):
             self.tc_hotkey_bind.Clear()
         wx.PostEvent(self.cb_hotkey, wx.CommandEvent(commandEventType=wx.EVT_CHECKBOX.typeId))
 
-
         # Advanced settings
         self.show_adv_setting_sizer(self.show_advanced_settings)
         # profile.inches: not stored in profile anymore
@@ -572,15 +564,13 @@ class WallpaperSettingsPanel(wx.Panel):
         if profile.manual_offsets_useronly:
             self.cb_offsets.SetValue(True)
             for tc, off in zip(self.tc_list_offsets, profile.manual_offsets_useronly):
-                offstr = "{},{}".format(off[0], off[1])
+                offstr = f"{off[0]},{off[1]}"
                 tc.SetValue(offstr)
         else:
             self.cb_offsets.SetValue(False)
         wx.PostEvent(self.cb_offsets, wx.CommandEvent(commandEventType=wx.EVT_CHECKBOX.typeId))
         if profile.perspective:
-            self.ch_persp.SetSelection(
-                self.ch_persp.FindString(profile.perspective, False)
-            )
+            self.ch_persp.SetSelection(self.ch_persp.FindString(profile.perspective, False))
         else:
             self.ch_persp.SetSelection(0)
         if profile.spangroups:
@@ -602,18 +592,17 @@ class WallpaperSettingsPanel(wx.Panel):
             for ch in self.ch_list_spangroups:
                 ch.SetSelection(0)
 
-
         # Paths displays: get number to show from profile.
         self.paths_array_to_listctrl(profile.paths_array)
 
         # Image scaling & position
-        zoom_pct = int(round(profile.zoom * 100))
-        offx_pct = int(round(profile.offsets[0] * 100))
-        offy_pct = int(round(profile.offsets[1] * 100))
+        zoom_pct = round(profile.zoom * 100)
+        offx_pct = round(profile.offsets[0] * 100)
+        offy_pct = round(profile.offsets[1] * 100)
         self.sld_zoom.SetValue(zoom_pct)
         self.sld_offx.SetValue(offx_pct)
         self.sld_offy.SetValue(offy_pct)
-        self.st_zoom_val.SetLabel("{}%".format(zoom_pct))
+        self.st_zoom_val.SetLabel(f"{zoom_pct}%")
         self.st_offx_val.SetLabel(str(offx_pct))
         self.st_offy_val.SetLabel(str(offy_pct))
         self.wpprev_pnl.zoom = profile.zoom
@@ -630,14 +619,9 @@ class WallpaperSettingsPanel(wx.Panel):
             self.show_advanced_settings,
             self.use_multi_image,
             display_data,
-            self.read_spangroups(True)
+            self.read_spangroups(True),
         )
-        self.wpprev_pnl.toggle_buttons(
-            show_config = self.show_advanced_settings,
-            in_config = False
-        )
-
-
+        self.wpprev_pnl.toggle_buttons(show_config=self.show_advanced_settings, in_config=False)
 
     def paths_array_to_listctrl(self, paths_array):
         multi_img = self.use_multi_image or self.use_spangroups()
@@ -645,9 +629,7 @@ class WallpaperSettingsPanel(wx.Panel):
         if multi_img:
             for plist, idx in zip(paths_array, range(len(paths_array))):
                 for pth in plist:
-                    self.append_to_listctrl(
-                        [str(idx), pth]
-                    )
+                    self.append_to_listctrl([str(idx), pth])
         else:
             for plist in paths_array:
                 for pth in plist:
@@ -660,7 +642,6 @@ class WallpaperSettingsPanel(wx.Panel):
             return hkstring
         else:
             return ""
-
 
     #
     # Helper methods
@@ -675,25 +656,29 @@ class WallpaperSettingsPanel(wx.Panel):
         self.profnames.append("Create a new profile")
         self.choice_profiles.SetItems(self.profnames)
 
-    def list_of_textctrl(self, ctrl_parent, num_disp, fraction = 1/2):
+    def list_of_textctrl(self, ctrl_parent, num_disp, fraction=1 / 2):
         tcrtl_list = []
-        for i in range(num_disp):
+        for _i in range(num_disp):
             tcrtl_list.append(
-                wx.TextCtrl(ctrl_parent, -1,
-                            size=wx.Size(int(self.tc_width * fraction), -1),
-                            style=wx.TE_RIGHT
-                           )
+                wx.TextCtrl(
+                    ctrl_parent,
+                    -1,
+                    size=wx.Size(int(self.tc_width * fraction), -1),
+                    style=wx.TE_RIGHT,
+                )
             )
         return tcrtl_list
 
-    def list_of_wxchoice(self, ctrl_parent, num_disp, fraction=1/2):
+    def list_of_wxchoice(self, ctrl_parent, num_disp, fraction=1 / 2):
         ch_list = []
-        for i in range(num_disp):
+        for _i in range(num_disp):
             ch_list.append(
-                wx.ComboBox(ctrl_parent, -1,
-                          size=wx.Size(int(self.tc_width * fraction), -1),
-                          style=wx.CB_READONLY
-                         )
+                wx.ComboBox(
+                    ctrl_parent,
+                    -1,
+                    size=wx.Size(int(self.tc_width * fraction), -1),
+                    style=wx.CB_READONLY,
+                )
             )
         return ch_list
 
@@ -703,11 +688,7 @@ class WallpaperSettingsPanel(wx.Panel):
                 self.sizer_toggle_children(child.GetSizer(), bool_state)
             else:
                 widget = child.GetWindow()
-                if (
-                    isinstance(widget, wx.TextCtrl) or
-                    isinstance(widget, wx.StaticText) or
-                    isinstance(widget, (wx.Choice, wx.ComboBox)) or
-                    isinstance(widget, wx.Button) or
+                if isinstance(widget, (wx.TextCtrl, wx.StaticText, wx.Choice, wx.ComboBox, wx.Button)) or (
                     isinstance(widget, wx.CheckBox) and toggle_cb
                 ):
                     widget.Enable(bool_state)
@@ -739,7 +720,7 @@ class WallpaperSettingsPanel(wx.Panel):
         self.sizer_bottom_buttonrow.Show(self.button_perspectives, show=show_bool)
         self.sizer_bottom_buttonrow.Layout()
 
-    def toggle_bezel_buttons(self, bezel_mode = False, enable_config_butt = True):
+    def toggle_bezel_buttons(self, bezel_mode=False, enable_config_butt=True):
         """Show/Hide bezel config buttons.
 
         If not in bezel mode show config button, and if in it hide config and show
@@ -761,10 +742,12 @@ class WallpaperSettingsPanel(wx.Panel):
         else:
             if migrate_paths and self.path_listctrl.GetItemCount():
                 # warn that paths can't be migrated
-                msg = ("Wallpaper sources cannot be migrated between single span,"
-                       " span groups, or multi image, continue?"
-                       "\n"
-                       "Saved sources are not affected until you overwrite.")
+                msg = (
+                    "Wallpaper sources cannot be migrated between single span,"
+                    " span groups, or multi image, continue?"
+                    "\n"
+                    "Saved sources are not affected until you overwrite."
+                )
                 res = show_message_dialog(msg, style="YES_NO")
                 if not res:
                     # user canceled
@@ -773,29 +756,28 @@ class WallpaperSettingsPanel(wx.Panel):
             self.image_list.RemoveAll()
             if use_multi_image:
                 self.multi_column_listc = True
-                self.path_listctrl = wx.ListCtrl(self.statbox_parent_paths, -1,
-                                                 style=wx.LC_REPORT
-                                                 | wx.BORDER_SIMPLE
-                                                 | wx.LC_SORT_ASCENDING
-                                                )
-                col0_str = 'Display'
+                self.path_listctrl = wx.ListCtrl(
+                    self.statbox_parent_paths,
+                    -1,
+                    style=wx.LC_REPORT | wx.BORDER_SIMPLE | wx.LC_SORT_ASCENDING,
+                )
+                col0_str = "Display"
                 if self.use_spangroups():
-                    col0_str = 'Group'
+                    col0_str = "Group"
                 self.path_listctrl.InsertColumn(0, col0_str, wx.LIST_FORMAT_RIGHT, width=100)
-                self.path_listctrl.InsertColumn(1, 'Source', width=400)
+                self.path_listctrl.InsertColumn(1, "Source", width=400)
             else:
                 self.multi_column_listc = False
                 # show simpler listing without header if only one wallpaper target
-                self.path_listctrl = wx.ListCtrl(self.statbox_parent_paths, -1,
-                                                 style=wx.LC_REPORT
-                                                 | wx.BORDER_SIMPLE
-                                                 | wx.LC_NO_HEADER
-                                                )
-                self.path_listctrl.InsertColumn(0, 'Source', width=500)
+                self.path_listctrl = wx.ListCtrl(
+                    self.statbox_parent_paths,
+                    -1,
+                    style=wx.LC_REPORT | wx.BORDER_SIMPLE | wx.LC_NO_HEADER,
+                )
+                self.path_listctrl.InsertColumn(0, "Source", width=500)
             self.path_listctrl.SetImageList(self.image_list, wx.IMAGE_LIST_SMALL)
             self.path_listctrl.Bind(wx.EVT_LIST_ITEM_SELECTED, self.onWallpaperItemSelected)
-            self.sizer_setting_paths.Insert(1, self.path_listctrl, 1,
-                                            wx.CENTER | wx.EXPAND | wx.ALL, 5)
+            self.sizer_setting_paths.Insert(1, self.path_listctrl, 1, wx.CENTER | wx.EXPAND | wx.ALL, 5)
             self.path_listctrl.InvalidateBestSize()
             # self.sizer_setting_paths.SetItemMinSize(self.path_listctrl, (1000, -1))
             self.sizer_main.Layout()
@@ -845,13 +827,10 @@ class WallpaperSettingsPanel(wx.Panel):
         zoom_pct = self.sld_zoom.GetValue()
         offx_pct = self.sld_offx.GetValue()
         offy_pct = self.sld_offy.GetValue()
-        self.st_zoom_val.SetLabel("{}%".format(zoom_pct))
+        self.st_zoom_val.SetLabel(f"{zoom_pct}%")
         self.st_offx_val.SetLabel(str(offx_pct))
         self.st_offy_val.SetLabel(str(offy_pct))
-        self.wpprev_pnl.update_zoom_offset(
-            zoom_pct / 100.0,
-            (offx_pct / 100.0, offy_pct / 100.0)
-        )
+        self.wpprev_pnl.update_zoom_offset(zoom_pct / 100.0, (offx_pct / 100.0, offy_pct / 100.0))
 
     def onResize(self, event):
         self.resized = True
@@ -861,14 +840,15 @@ class WallpaperSettingsPanel(wx.Panel):
         leftdown = wx.GetMouseState().LeftIsDown()
         update = bool(self.resized and not leftdown)
         if update:
-            self.wpprev_pnl.full_refresh_preview(update,
-                                                 self.show_advanced_settings,
-                                                 self.use_multi_image,
-                                                 spangroups=self.read_spangroups(True))
+            self.wpprev_pnl.full_refresh_preview(
+                update,
+                self.show_advanced_settings,
+                self.use_multi_image,
+                spangroups=self.read_spangroups(True),
+            )
             self.resized = False
         else:
             event.Skip()
-
 
     def onSpanRadio(self, event):
         old_adv_set = self.show_advanced_settings
@@ -900,16 +880,9 @@ class WallpaperSettingsPanel(wx.Panel):
         if self.cb_spangroups.GetValue():
             spangroups = self.read_spangroups(True)
         self.wpprev_pnl.update_display_data(
-            display_data,
-            self.show_advanced_settings,
-            self.use_multi_image,
-            spangroups=spangroups
+            display_data, self.show_advanced_settings, self.use_multi_image, spangroups=spangroups
         )
-        self.wpprev_pnl.toggle_buttons(
-            show_config = self.show_advanced_settings,
-            in_config = False
-        )
-
+        self.wpprev_pnl.toggle_buttons(show_config=self.show_advanced_settings, in_config=False)
 
     def onCheckboxSlideshow(self, event):
         cb_state = self.cb_slideshow.GetValue()
@@ -957,7 +930,7 @@ class WallpaperSettingsPanel(wx.Panel):
         cb_state = self.cb_diaginch.GetValue()
         sizer = self.sizer_setting_diaginch
         self.sizer_toggle_children(sizer, cb_state)
-        if cb_state == False:
+        if not cb_state:
             # revert to automatic detection and save
             self.display_sys.update_display_diags("auto")
             self.display_sys.save_system()
@@ -965,30 +938,25 @@ class WallpaperSettingsPanel(wx.Panel):
             for tc, diag in zip(self.tc_list_diaginch, diags):
                 tc.ChangeValue(diag)
             display_data = self.display_sys.get_disp_list(self.show_advanced_settings)
-            self.wpprev_pnl.update_display_data(
-                display_data,
-                self.show_advanced_settings,
-                self.use_multi_image
-            )
+            self.wpprev_pnl.update_display_data(display_data, self.show_advanced_settings, self.use_multi_image)
 
     #
     # ListCtrl methods
     #
 
     def append_to_listctrl(self, data_row):
-        if ((self.use_multi_image or self.use_spangroups()) and len(data_row) == 2):
+        if (self.use_multi_image or self.use_spangroups()) and len(data_row) == 2:
             img_id = self.add_to_imagelist(data_row[1])
             index = self.path_listctrl.InsertItem(self.path_listctrl.GetItemCount(), data_row[0], img_id)
             self.path_listctrl.SetItem(index, 1, data_row[1])
-        elif (not self.use_multi_image and len(data_row) == 1):
+        elif not self.use_multi_image and len(data_row) == 1:
             img_id = self.add_to_imagelist(data_row[0])
             index = self.path_listctrl.InsertItem(self.path_listctrl.GetItemCount(), data_row[0], img_id)
         else:
-            sp_logging.G_LOGGER.info("UseMultImg: %s. Bad data_row: %s",
-                                     self.use_multi_image, data_row)
+            sp_logging.G_LOGGER.info("UseMultImg: %s. Bad data_row: %s", self.use_multi_image, data_row)
 
     def add_to_imagelist(self, path):
-        folder_bmp =  wx.ArtProvider.GetBitmap(wx.ART_FOLDER, wx.ART_TOOLBAR, wx.Size(*self.tsize))
+        folder_bmp = wx.ArtProvider.GetBitmap(wx.ART_FOLDER, wx.ART_TOOLBAR, wx.Size(*self.tsize))
         if os.path.isdir(path):
             img_id = self.image_list.Add(folder_bmp)
         else:
@@ -999,22 +967,20 @@ class WallpaperSettingsPanel(wx.Panel):
     def create_thumb_bmp(self, filename):
         wximg = wx.Image(filename, type=wx.BITMAP_TYPE_ANY)
         imgsize = wximg.GetSize()
-        w2h_ratio = imgsize[0]/imgsize[1]
+        w2h_ratio = imgsize[0] / imgsize[1]
         if w2h_ratio > 1:
             target_w = self.tsize[0]
-            target_h = target_w/w2h_ratio
-            pos = (0, round((target_w - target_h)/2))
+            target_h = target_w / w2h_ratio
+            pos = (0, round((target_w - target_h) / 2))
         else:
             target_h = self.tsize[1]
-            target_w = target_h*w2h_ratio
-            pos = (round((target_h - target_w)/2), 0)
-        bmp = wximg.Scale(
-            round(target_w),
-            round(target_h),
-            quality=wx.IMAGE_QUALITY_BOX_AVERAGE
-            ).Resize(
-                wx.Size(*self.tsize), wx.Point(pos)
-            ).ConvertToBitmap()
+            target_w = target_h * w2h_ratio
+            pos = (round((target_h - target_w) / 2), 0)
+        bmp = (
+            wximg.Scale(round(target_w), round(target_h), quality=wx.IMAGE_QUALITY_BOX_AVERAGE)
+            .Resize(wx.Size(*self.tsize), wx.Point(pos))
+            .ConvertToBitmap()
+        )
         return bmp
 
     def populate_lc_browse(self, pathslist, imglist):
@@ -1058,7 +1024,7 @@ class WallpaperSettingsPanel(wx.Panel):
             self.show_advanced_settings,
             self.use_multi_image,
             display_data,
-            self.read_spangroups(True)
+            self.read_spangroups(True),
         )
 
     def onOverrideSizes(self, event):
@@ -1074,20 +1040,15 @@ class WallpaperSettingsPanel(wx.Panel):
                 inches.append(user_inch)
             else:
                 # error msg
-                msg = ("Display size must be a positive number, "
-                       "'{}' was entered.".format(tc_val))
+                msg = f"Display size must be a positive number, '{tc_val}' was entered."
                 sp_logging.G_LOGGER.info(msg)
-                dial = wx.MessageDialog(self, msg, "Error", wx.OK|wx.STAY_ON_TOP|wx.CENTRE)
+                dial = wx.MessageDialog(self, msg, "Error", wx.OK | wx.STAY_ON_TOP | wx.CENTRE)
                 dial.ShowModal()
                 return -1
         self.display_sys.update_display_diags(inches)
         self.display_sys.save_system()
         display_data = self.display_sys.get_disp_list(self.show_advanced_settings)
-        self.wpprev_pnl.update_display_data(
-            display_data,
-            self.show_advanced_settings,
-            self.use_multi_image
-        )
+        self.wpprev_pnl.update_display_data(display_data, self.show_advanced_settings, self.use_multi_image)
 
     def onConfigureBezels(self, event):
         """Start bezel size config mode."""
@@ -1200,8 +1161,12 @@ class WallpaperSettingsPanel(wx.Panel):
         tmp_profile.name = self.tc_name.GetLineText(0)
         tmp_profile.slideshow = self.cb_slideshow.GetValue()
         if tmp_profile.slideshow:
-            tmp_profile.delay = str(60*float(self.tc_sshow_delay.GetLineText(0))) # save delay as seconds for compatibility!
-            tmp_profile.sortmode = self.ch_sshow_sort.GetString(self.ch_sshow_sort.GetSelection()).lower().replace(" ", "_")
+            tmp_profile.delay = str(
+                60 * float(self.tc_sshow_delay.GetLineText(0))
+            )  # save delay as seconds for compatibility!
+            tmp_profile.sortmode = (
+                self.ch_sshow_sort.GetString(self.ch_sshow_sort.GetSelection()).lower().replace(" ", "_")
+            )
         if self.cb_hotkey.GetValue():
             tmp_profile.hk_binding = self.tc_hotkey_bind.GetLineText(0)
 
@@ -1239,8 +1204,7 @@ class WallpaperSettingsPanel(wx.Panel):
             tmp_profile.align = (0.0, 0.0)
         else:
             tmp_profile.zoom = self.sld_zoom.GetValue() / 100.0
-            tmp_profile.align = (self.sld_offx.GetValue() / 100.0,
-                                 self.sld_offy.GetValue() / 100.0)
+            tmp_profile.align = (self.sld_offx.GetValue() / 100.0, self.sld_offy.GetValue() / 100.0)
 
         # wallpaper selection (persistent). For single/advanced span the
         # focused list item is the chosen image. If the user didn't pick a new
@@ -1260,10 +1224,10 @@ class WallpaperSettingsPanel(wx.Panel):
             groups = self.read_spangroups()
             flat_groups = []
             if groups is not None:
-                for grp in groups.keys():
-                    ids = ''.join([str(i) for i in groups[grp]])
+                for grp in groups:
+                    ids = "".join([str(i) for i in groups[grp]])
                     flat_groups.append(ids)
-            tmp_profile.spangroups = ','.join(flat_groups)
+            tmp_profile.spangroups = ",".join(flat_groups)
 
         # Paths
         # extract data from path_listctrl
@@ -1276,7 +1240,6 @@ class WallpaperSettingsPanel(wx.Panel):
             path_lc_contents.append(item_dat)
 
         # format paths
-        paths_array = []
         if columns == 1:
             flat_contents = [path for row in path_lc_contents for path in row]
             semicol_sep_paths = ";".join(flat_contents)
@@ -1323,14 +1286,13 @@ class WallpaperSettingsPanel(wx.Panel):
                 display_data = self.display_sys.get_disp_list(True)
             else:
                 display_data = self.display_sys.get_disp_list(False)
-            preview_files = self.parent_tray_obj.get_profile_by_name(
-                saved_profile.name).next_wallpaper_files(peek=True)
+            preview_files = self.parent_tray_obj.get_profile_by_name(saved_profile.name).next_wallpaper_files(peek=True)
             self.wpprev_pnl.preview_wallpaper(
                 preview_files,
                 self.show_advanced_settings,
                 self.use_multi_image,
                 display_data,
-                groups
+                groups,
             )
             del busy
             return saved_file
@@ -1339,12 +1301,9 @@ class WallpaperSettingsPanel(wx.Panel):
             del busy
             return None
 
-
     def onCreateNewProfile(self, event):
         """Empties the wallpaper profile config fields."""
-        self.choice_profiles.SetSelection(
-            self.choice_profiles.FindString("Create a new profile")
-            )
+        self.choice_profiles.SetSelection(self.choice_profiles.FindString("Create a new profile"))
 
         self.tc_name.ChangeValue("")
 
@@ -1372,7 +1331,6 @@ class WallpaperSettingsPanel(wx.Panel):
         self.Refresh()
         self.Update()
 
-
     def onDeleteProfile(self, event):
         """Deletes the currently selected profile after getting confirmation."""
         profname = self.tc_name.GetLineText(0)
@@ -1383,10 +1341,12 @@ class WallpaperSettingsPanel(wx.Panel):
             show_message_dialog(msg, "Error")
             return
         # Open confirmation dialog
-        dlg = wx.MessageDialog(None,
-                               "Do you want to delete profile: {}?".format(profname),
-                               'Confirm Delete',
-                               wx.YES_NO | wx.ICON_QUESTION)
+        dlg = wx.MessageDialog(
+            None,
+            f"Do you want to delete profile: {profname}?",
+            "Confirm Delete",
+            wx.YES_NO | wx.ICON_QUESTION,
+        )
         result = dlg.ShowModal()
         if result == wx.ID_YES and file_exists:
             os.remove(fname)
@@ -1400,10 +1360,8 @@ class WallpaperSettingsPanel(wx.Panel):
         # Use the settings currently written out in the fields!
         testimage = [os.path.join(PATH, "superpaper/resources/test.png")]
         if not os.path.isfile(testimage[0]):
-            msg = "Test image not found in {}.".format(testimage)
+            msg = f"Test image not found in {testimage}."
             show_message_dialog(msg, "Error")
-
-        inches = [dsp.diagonal_size()[1] for dsp in self.display_sys.disp_list]
 
         offsets = []
         for off_tc in self.tc_list_offsets:
@@ -1412,9 +1370,8 @@ class WallpaperSettingsPanel(wx.Panel):
                 offsets.append([int(off[0]), int(off[1])])
             except (IndexError, ValueError):
                 show_message_dialog(
-                    "Offsets must be integer pairs separated with a comma!\n"
-                    "Problematic offset is {}".format(off)
-                    )
+                    f"Offsets must be integer pairs separated with a comma!\nProblematic offset is {off}"
+                )
                 return -1
         flat_offsets = []
         for off in offsets:
@@ -1431,8 +1388,9 @@ class WallpaperSettingsPanel(wx.Panel):
 
         # Use the simplified CLI profile class
         wpproc.refresh_display_data()
-        profile = CLIProfileData(testimage, advanced=True,
-            perspective=perspective, spangroups=None, offsets=flat_offsets)
+        profile = CLIProfileData(
+            testimage, advanced=True, perspective=perspective, spangroups=None, offsets=flat_offsets
+        )
         thrd = change_wallpaper_job(profile, force=True)
         while thrd is not None and thrd.is_alive():
             time.sleep(0.5)
@@ -1441,20 +1399,19 @@ class WallpaperSettingsPanel(wx.Panel):
     def onPerspectives(self, event):
         """Open perspective configuration dialog."""
         dlg = PerspectiveConfig(self)
-        res = dlg.ShowModal()
+        dlg.ShowModal()
         # if res == wx.ID_OK:
-            # pass
+        # pass
         dlg.Destroy()
         # Update perspective profile choices
         open_item = self.choice_profiles.GetSelection()
-        if (self.choice_profiles.GetString(open_item) == "Create a new profile"
-            or not self.choice_profiles.GetString(open_item)):
+        if self.choice_profiles.GetString(open_item) == "Create a new profile" or not self.choice_profiles.GetString(
+            open_item
+        ):
             old_persp_str = "default"
         else:
             old_persp_str = self.list_of_profiles[open_item].perspective
-        persp_choices = (["default"]
-                         + list(self.display_sys.perspective_dict.keys())
-                         + ["disabled"])
+        persp_choices = ["default", *list(self.display_sys.perspective_dict.keys()), "disabled"]
         self.ch_persp.SetItems(persp_choices)
         if old_persp_str in persp_choices:
             self.ch_persp.SetSelection(self.ch_persp.FindString(old_persp_str))
@@ -1464,13 +1421,15 @@ class WallpaperSettingsPanel(wx.Panel):
 
     def onHelp(self, event):
         """Open help dialog."""
-        help_frame = HelpFrame(self)
+        HelpFrame(self)
 
     def onHelpHotkey(self, evt):
         """Popup hotkey help."""
-        text = ("Bind a hotkey to start this profile. Choose max 3\n"
-                "modfiers out of: control, alt, shift, super(=win).\n"
-                "Example: control+super+x")
+        text = (
+            "Bind a hotkey to start this profile. Choose max 3\n"
+            "modfiers out of: control, alt, shift, super(=win).\n"
+            "Example: control+super+x"
+        )
         pop = HelpPopup(self, text)
         btn = evt.GetEventObject()
         pos = btn.ClientToScreen((0, 0))
@@ -1480,12 +1439,14 @@ class WallpaperSettingsPanel(wx.Panel):
 
     def onHelpBezels(self, evt):
         """Popup bezel config help."""
-        text = ("Configure your bezels in the wallpaper preview\n"
-                "panel with the buttons placed at the right and\n"
-                "bottom edges of displays. Bezels between displays\n"
-                "are meaningful. Adjacent bezel pair thicknesses are\n"
-                "grouped together with the gap in between to a single\n"
-                "number.")
+        text = (
+            "Configure your bezels in the wallpaper preview\n"
+            "panel with the buttons placed at the right and\n"
+            "bottom edges of displays. Bezels between displays\n"
+            "are meaningful. Adjacent bezel pair thicknesses are\n"
+            "grouped together with the gap in between to a single\n"
+            "number."
+        )
         pop = HelpPopup(self, text)
         btn = evt.GetEventObject()
         pos = btn.ClientToScreen((0, 0))
@@ -1495,21 +1456,20 @@ class WallpaperSettingsPanel(wx.Panel):
 
     def onHelpSpanGroups(self, evt):
         """Popup span group config help."""
-        text = ("You can span wallpapers on groups of displays.\n"
-                "To configure this, select a group number for\n"
-                "each display. By default each display belongs\n"
-                "to the first group, group 0.\n"
-                "Once you have selected your groups, add at least\n"
-                "one wallpaper source for each group.")
+        text = (
+            "You can span wallpapers on groups of displays.\n"
+            "To configure this, select a group number for\n"
+            "each display. By default each display belongs\n"
+            "to the first group, group 0.\n"
+            "Once you have selected your groups, add at least\n"
+            "one wallpaper source for each group."
+        )
         pop = HelpPopup(self, text)
         btn = evt.GetEventObject()
         pos = btn.ClientToScreen((0, 0))
         sz = btn.GetSize()
         pop.Position(pos, wx.Size(0, sz[1]))
         pop.Popup()
-
-
-
 
 
 class WallpaperPreviewPanel(wx.Panel):
@@ -1522,8 +1482,9 @@ class WallpaperPreviewPanel(wx.Panel):
     configuration. Method looks up saved setups to see if one
     exists that matches the given resolutions, offsets and sizes.
     """
-    def __init__(self, parent, display_sys, image_list = None, use_ppi_px = False, use_multi_image = False):
-        self.preview_size = (1080,400)
+
+    def __init__(self, parent, display_sys, image_list=None, use_ppi_px=False, use_multi_image=False):
+        self.preview_size = (1080, 400)
         wx.Panel.__init__(self, parent, size=wx.Size(*self.preview_size))
         self.frame = parent
 
@@ -1568,16 +1529,14 @@ class WallpaperPreviewPanel(wx.Panel):
         self.positions_dragged = False
         self.Bind(wx.EVT_PAINT, self.OnPaint)
 
-
-
     #
     # UI drawing methods
     #
-    def draw_displays(self, use_ppi_px = False, use_multi_image = False):
-        work_sz = self.GetSize()
-
+    def draw_displays(self, use_ppi_px=False, use_multi_image=False):
         # draw canvas
-        bmp_canv = wx.Bitmap.FromRGBA(self.dtop_canvas_relsz[0], self.dtop_canvas_relsz[1], red=0, green=0, blue=0, alpha=255)
+        bmp_canv = wx.Bitmap.FromRGBA(
+            self.dtop_canvas_relsz[0], self.dtop_canvas_relsz[1], red=0, green=0, blue=0, alpha=255
+        )
         if not self.preview_img_list:
             # preview StaticBitmaps don't exist yet
             self.bmp_list.append(bmp_canv)
@@ -1598,7 +1557,7 @@ class WallpaperPreviewPanel(wx.Panel):
                 self.preview_img_list.append(st_bmp)
         else:
             # previews exist and should be blanked
-            self.current_preview_images = [] # drop chached image list
+            self.current_preview_images = []  # drop chached image list
 
             self.st_bmp_canvas.SetBitmap(wx.BitmapBundle(bmp_canv))
             self.st_bmp_canvas.SetPosition(wx.Point(self.dtop_canvas_pos))
@@ -1617,13 +1576,9 @@ class WallpaperPreviewPanel(wx.Panel):
 
     def resize_displays(self, use_ppi_px):
         if use_ppi_px:
-            for (disp,
-                 img_sz,
-                 bez_szs,
-                 st_bmp) in zip(self.display_rel_sizes,
-                                self.img_rel_sizes,
-                                self.bz_rel_sizes,
-                                self.preview_img_list):
+            for disp, img_sz, bez_szs, st_bmp in zip(
+                self.display_rel_sizes, self.img_rel_sizes, self.bz_rel_sizes, self.preview_img_list
+            ):
                 size, offs = disp
                 bmp = wx.Bitmap.FromRGBA(img_sz[0], img_sz[1], red=0, green=0, blue=0, alpha=255)
                 bmp_w_bez = self.bezels_to_bitmap(bmp, size, bez_szs)
@@ -1661,9 +1616,7 @@ class WallpaperPreviewPanel(wx.Panel):
         font = wx.Font(24, wx.FONTFAMILY_SWISS, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_LIGHT)
         font_clr = wx.Colour(60, 60, 60, alpha=wx.ALPHA_OPAQUE)
 
-        for st_bmp, img_sz, dsp in zip(self.preview_img_list,
-                                       self.img_rel_sizes,
-                                       self.display_sys.disp_list):
+        for st_bmp, img_sz, dsp in zip(self.preview_img_list, self.img_rel_sizes, self.display_sys.disp_list):
             bmp = st_bmp.GetBitmap()
             dc = wx.MemoryDC(bmp)
             text = str(dsp.diagonal_size()[1]) + '"'
@@ -1678,7 +1631,6 @@ class WallpaperPreviewPanel(wx.Panel):
             del dc
             st_bmp.SetBitmap(bmp)
 
-
     def refresh_preview(self, use_ppi_px=False, force_refresh=False):
         if force_refresh or (not self.config_mode or not self.bezel_conifg_mode):
             self.dtop_canvas_px = self.get_canvas(self.display_data, use_ppi_px)
@@ -1687,23 +1639,18 @@ class WallpaperPreviewPanel(wx.Panel):
             self.st_bmp_canvas.SetSize(wx.Size(*self.dtop_canvas_relsz))
 
             if use_ppi_px:
-                (self.display_rel_sizes,
-                    self.img_rel_sizes,
-                    self.bz_rel_sizes) = self.displays_on_canvas(
-                        self.display_data, self.dtop_canvas_pos,
-                        scaling_fac, use_ppi_px
-                    )
-            else:
-                self.display_rel_sizes = self.displays_on_canvas(
-                    self.display_data, self.dtop_canvas_pos, scaling_fac
+                (self.display_rel_sizes, self.img_rel_sizes, self.bz_rel_sizes) = self.displays_on_canvas(
+                    self.display_data, self.dtop_canvas_pos, scaling_fac, use_ppi_px
                 )
+            else:
+                self.display_rel_sizes = self.displays_on_canvas(self.display_data, self.dtop_canvas_pos, scaling_fac)
             for disp, st_bmp in zip(self.display_rel_sizes, self.preview_img_list):
                 size = disp[0]
                 offs = disp[1]
                 st_bmp.SetPosition(offs)
                 st_bmp.SetSize(size)
         # if self.bezel_conifg_mode:
-            # pass
+        # pass
         # self.st_bmp_canvas.Hide()
 
         self.move_buttons()
@@ -1714,7 +1661,7 @@ class WallpaperPreviewPanel(wx.Panel):
         if is_resized and not self.config_mode:
             dtop_canvas_relsz, dtop_canvas_pos, scaling_fac = self.fit_canvas_wrkarea(self.dtop_canvas_px)
             # if (self.current_preview_images and dtop_canvas_relsz is not self.dtop_canvas_relsz):
-            if (self.current_preview_images):
+            if self.current_preview_images:
                 self.preview_wallpaper(self.current_preview_images, use_ppi_px, use_multi_image, spangroups=spangroups)
                 self.move_bezel_buttons()
                 # self.st_bmp_canvas.Hide()
@@ -1725,12 +1672,14 @@ class WallpaperPreviewPanel(wx.Panel):
                 self.Refresh()
                 # self.st_bmp_canvas.Hide()
 
-
-    def preview_wallpaper(self, image_list,
-                          use_ppi_px=False,
-                          use_multi_image=False,
-                          display_data=None,
-                          spangroups=None):
+    def preview_wallpaper(
+        self,
+        image_list,
+        use_ppi_px=False,
+        use_multi_image=False,
+        display_data=None,
+        spangroups=None,
+    ):
         self.use_multi_image = use_multi_image
         if display_data:
             self.display_data = display_data
@@ -1754,7 +1703,7 @@ class WallpaperPreviewPanel(wx.Panel):
                 prev_sz = st_bmp.GetSize()
                 st_bmp.SetBitmap(self.resize_and_bitmap(img_nm, prev_sz))
         elif use_ppi_px and spangroups:
-            self.use_multi_image = True # disables canvas drawing
+            self.use_multi_image = True  # disables canvas drawing
             # for each group of displays, run span wallpaper preview
             for grp_id, img_nm in zip(spangroups, image_list):
                 grp = spangroups[grp_id]
@@ -1766,13 +1715,9 @@ class WallpaperPreviewPanel(wx.Panel):
                 canv_sz, canvas_pos = self.canvas_display_group(display_rel_sizes, (0, 0))
                 # print(canv_sz, canvas_pos)
                 bmp_clr, bmp_bw = self.resize_and_bitmap(img_nm, canv_sz, True)
-                for (disp,
-                     img_sz,
-                     bez_szs,
-                     st_bmp) in zip(display_rel_sizes,
-                                    img_rel_sizes,
-                                    bz_rel_sizes,
-                                    preview_img_list):
+                for disp, img_sz, bez_szs, st_bmp in zip(
+                    display_rel_sizes, img_rel_sizes, bz_rel_sizes, preview_img_list
+                ):
                     sz = disp[0]
                     pos = (disp[1][0] - canvas_pos[0], disp[1][1] - canvas_pos[1])
                     # print("pos", pos, "img_sz", img_sz)
@@ -1790,13 +1735,9 @@ class WallpaperPreviewPanel(wx.Panel):
             # self.st_bmp_canvas.Show()
 
             canvas_pos = self.dtop_canvas_pos
-            for (disp,
-                 img_sz,
-                 bez_szs,
-                 st_bmp) in zip(self.display_rel_sizes,
-                                self.img_rel_sizes,
-                                self.bz_rel_sizes,
-                                self.preview_img_list):
+            for disp, img_sz, bez_szs, st_bmp in zip(
+                self.display_rel_sizes, self.img_rel_sizes, self.bz_rel_sizes, self.preview_img_list
+            ):
                 sz = disp[0]
                 pos = (disp[1][0] - canvas_pos[0], disp[1][1] - canvas_pos[1])
                 crop = safe_sub_bitmap(bmp_clr, wx.Rect(pos, img_sz))
@@ -1833,22 +1774,23 @@ class WallpaperPreviewPanel(wx.Panel):
             self._last_use_ppi,
             self._last_use_multi,
             self.display_data,
-            self._last_spangroups
+            self._last_spangroups,
         )
 
     @overload
     def resize_and_bitmap(self, fname, size, enhance_color: Literal[False] = False) -> "wx.Bitmap": ...
     @overload
-    def resize_and_bitmap(self, fname, size, enhance_color: Literal[True]) -> "Tuple[wx.Bitmap, wx.Bitmap]": ...
+    def resize_and_bitmap(self, fname, size, enhance_color: Literal[True]) -> "tuple[wx.Bitmap, wx.Bitmap]": ...
 
     def resize_and_bitmap(self, fname, size, enhance_color=False):
         """Take filename of an image and resize and crop it to size."""
         try:
-            pil = resize_to_fill(Image.open(fname), size, quality="fast",
-                                 zoom=self.zoom, offset=self.offset)
+            pil = resize_to_fill(Image.open(fname), size, quality="fast", zoom=self.zoom, offset=self.offset)
         except UnidentifiedImageError:
-            msg = ("Opening image '%s' failed with PIL.UnidentifiedImageError."
-                   "It could be corrupted or is of foreign type.") % fname
+            msg = (
+                f"Opening image '{fname}' failed with PIL.UnidentifiedImageError."
+                "It could be corrupted or is of foreign type."
+            )
             sp_logging.G_LOGGER.info(msg)
             # show_message_dialog(msg)
             black_bmp = wx.Bitmap.FromRGBA(size[0], size[1], red=0, green=0, blue=0, alpha=255)
@@ -1871,7 +1813,7 @@ class WallpaperPreviewPanel(wx.Panel):
         """Add bezel rectangles ( right_bez , bottom_bez ) to given bitmap."""
         # sp_logging.G_LOGGER.info("bezels_to_bitmap: bez_rects: %s", bez_rects)
         right_bez, bottom_bez = bez_rects
-        if (right_bez == (0, 0) and bottom_bez == (0, 0)):
+        if right_bez == (0, 0) and bottom_bez == (0, 0):
             return bmp
         # bmp into wx.Image and new output
         img = bmp.ConvertToImage()
@@ -1882,32 +1824,28 @@ class WallpaperPreviewPanel(wx.Panel):
         # Add bezels sequentially to the Image
         # bottom bez
         if bottom_bez != (0, 0):
-            b_bez_bmp = wx.Bitmap.FromRGBA(bottom_bez[0], bottom_bez[1],
-                                           red=5, green=5, blue=5, alpha=100)
+            b_bez_bmp = wx.Bitmap.FromRGBA(bottom_bez[0], bottom_bez[1], red=5, green=5, blue=5, alpha=100)
             b_bez_img = b_bez_bmp.ConvertToImage()
             img_out.Paste(b_bez_img, 0, img_sz[1])
 
         # right bez: is longer if bottom bez is present
         if right_bez != (0, 0):
-            r_bez_bmp = wx.Bitmap.FromRGBA(right_bez[0], right_bez[1],
-                                           red=5, green=5, blue=5, alpha=100)
+            r_bez_bmp = wx.Bitmap.FromRGBA(right_bez[0], right_bez[1], red=5, green=5, blue=5, alpha=100)
             r_bez_img = r_bez_bmp.ConvertToImage()
             img_out.Paste(r_bez_img, img_sz[0], 0)
 
         # Convert Image back to wx.Bitmap
         return img_out.ConvertToBitmap()
 
-
     def update_display_data(self, display_data, use_ppi_px, use_multi_image, spangroups=None):
         self.display_data = display_data
         self.refresh_preview()
         self.full_refresh_preview(True, use_ppi_px, use_multi_image, spangroups=spangroups)
 
-
     #
     # Data analysis methods
     #
-    def get_canvas(self, disp_data, use_ppi_px = False):
+    def get_canvas(self, disp_data, use_ppi_px=False):
         """Returns a size tuple for the desktop are in pixels or millimeters."""
         if use_ppi_px:
             rightmost_edge = max(
@@ -1917,12 +1855,8 @@ class WallpaperPreviewPanel(wx.Panel):
                 [disp.resolution[1] + disp.digital_offset[1] + disp.ppi_norm_bezels[1] for disp in disp_data]
             )
         else:
-            rightmost_edge = max(
-                [disp.resolution[0] + disp.digital_offset[0] for disp in disp_data]
-            )
-            bottommost_edge = max(
-                [disp.resolution[1] + disp.digital_offset[1] for disp in disp_data]
-            )
+            rightmost_edge = max([disp.resolution[0] + disp.digital_offset[0] for disp in disp_data])
+            bottommost_edge = max([disp.resolution[1] + disp.digital_offset[1] for disp in disp_data])
         return (rightmost_edge, bottommost_edge)
 
     def fit_canvas_wrkarea(self, canvas_px):
@@ -1934,24 +1868,24 @@ class WallpaperPreviewPanel(wx.Panel):
         Input is either canvas size in true pixels or in PPI normalized
         pixels."""
         rel_factor = 0.9
-        rel_achor_gap = (1-rel_factor)/2
+        rel_achor_gap = (1 - rel_factor) / 2
         work_sz = self.GetSize()
-        w2h_ratio_worksz = work_sz[0]/work_sz[1]
-        w2h_ratio = canvas_px[0]/canvas_px[1]
+        w2h_ratio_worksz = work_sz[0] / work_sz[1]
+        w2h_ratio = canvas_px[0] / canvas_px[1]
         if w2h_ratio > w2h_ratio_worksz:
             # canvas is wider than working area
             # limit width to 90% of working area
             new_width = rel_factor * work_sz[0]
-            scaling_fac = new_width/canvas_px[0]
+            scaling_fac = new_width / canvas_px[0]
             new_height = scaling_fac * canvas_px[1]
             anchor_left = rel_achor_gap * work_sz[0]
             anchor_top = (work_sz[1] - new_height) / 2
         else:
             # canvas is taller than working area
             new_height = rel_factor * work_sz[1]
-            scaling_fac = new_height/canvas_px[1]
+            scaling_fac = new_height / canvas_px[1]
             new_width = scaling_fac * canvas_px[0]
-            anchor_left = (work_sz[0] - new_width)/2
+            anchor_left = (work_sz[0] - new_width) / 2
             anchor_top = rel_achor_gap * work_sz[1]
         canvas_rel = (round(new_width), round(new_height))
         canvas_rel_pos = (round(anchor_left), round(anchor_top))
@@ -1978,33 +1912,28 @@ class WallpaperPreviewPanel(wx.Panel):
                         # tuple 1: size = res + bez
                         (
                             round(scaling_fac * (res[0] + bez[0])),
-                            round(scaling_fac * (res[1] + bez[1]))
+                            round(scaling_fac * (res[1] + bez[1])),
                         ),
                         # tuple 2: pos
                         (
-                           round(scaling_fac * doff[0]) + off[0],
-                           round(scaling_fac * doff[1]) + off[1]
-                        )
+                            round(scaling_fac * doff[0]) + off[0],
+                            round(scaling_fac * doff[1]) + off[1],
+                        ),
                     )
                 )
-                image_szs.append(
-                    (
-                        round(scaling_fac * res[0]),
-                        round(scaling_fac * res[1])
-                    )
-                )
+                image_szs.append((round(scaling_fac * res[0]), round(scaling_fac * res[1])))
                 if bez[0] != 0:
-                    right_bez = (round(scaling_fac * bez[0]),
-                                 round(scaling_fac * (res[1] + bez[1])))
+                    right_bez = (
+                        round(scaling_fac * bez[0]),
+                        round(scaling_fac * (res[1] + bez[1])),
+                    )
                 else:
                     right_bez = (0, 0)
                 if bez[1] != 0:
                     bottom_bez = (round(scaling_fac * res[0]), round(scaling_fac * bez[1]))
                 else:
                     bottom_bez = (0, 0)
-                bz_szs.append(
-                    (right_bez, bottom_bez)
-                )
+                bz_szs.append((right_bez, bottom_bez))
             return [display_szs_pos, image_szs, bz_szs]
         else:
             display_szs_pos = []
@@ -2013,8 +1942,11 @@ class WallpaperPreviewPanel(wx.Panel):
                 off = canvas_pos
                 display_szs_pos.append(
                     (
-                        tuple([round(px*scaling_fac) for px in disp.resolution]),
-                        tuple([round(doff[0]*scaling_fac) + off[0], round(doff[1]*scaling_fac) + off[1]])
+                        tuple([round(px * scaling_fac) for px in disp.resolution]),
+                        (
+                            round(doff[0] * scaling_fac) + off[0],
+                            round(doff[1] * scaling_fac) + off[1],
+                        ),
                     )
                 )
             return display_szs_pos
@@ -2023,11 +1955,11 @@ class WallpaperPreviewPanel(wx.Panel):
         """Compute canvas size and positions for a subset of displays."""
         canv_pos = (
             round(min([sz_pos[1][0] for sz_pos in disp_szs_pos]) + major_canv_pos[0]),
-            round(min([sz_pos[1][1] for sz_pos in disp_szs_pos]) + major_canv_pos[1])
+            round(min([sz_pos[1][1] for sz_pos in disp_szs_pos]) + major_canv_pos[1]),
         )
         canv_sz = (
             round(max([sz_pos[0][0] + sz_pos[1][0] for sz_pos in disp_szs_pos]) - canv_pos[0]),
-            round(max([sz_pos[0][1] + sz_pos[1][1] for sz_pos in disp_szs_pos]) - canv_pos[1])
+            round(max([sz_pos[0][1] + sz_pos[1][1] for sz_pos in disp_szs_pos]) - canv_pos[1]),
         )
         return (canv_sz, canv_pos)
 
@@ -2044,7 +1976,6 @@ class WallpaperPreviewPanel(wx.Panel):
         self.button_entry = wx.Button(self, label="Exact entry")
         help_bmp = wx.ArtProvider.GetBitmap(wx.ART_QUESTION, wx.ART_BUTTON, wx.Size(20, 20))
         self.button_help = wx.BitmapButton(self, bitmap=wx.BitmapBundle(help_bmp), name="butt_help")
-
 
         self.button_config.Bind(wx.EVT_BUTTON, self.onConfigure)
         self.button_save.Bind(wx.EVT_BUTTON, self.onSave)
@@ -2068,41 +1999,30 @@ class WallpaperPreviewPanel(wx.Panel):
         sz_help = self.button_help.GetSize()
         self.butt_gap = 10
         self.button_config.SetPosition(
-            wx.Point(
-                sz_area[0] - sz_butt[0] - self.butt_gap,
-                sz_area[1] - sz_butt[1] - self.butt_gap
-            )
+            wx.Point(sz_area[0] - sz_butt[0] - self.butt_gap, sz_area[1] - sz_butt[1] - self.butt_gap)
         )
         self.button_save.SetPosition(
             wx.Point(
-                sz_area[0] - 2*(sz_butt[0] + self.butt_gap),
-                sz_area[1] - sz_butt[1] - self.butt_gap
+                sz_area[0] - 2 * (sz_butt[0] + self.butt_gap),
+                sz_area[1] - sz_butt[1] - self.butt_gap,
             )
         )
         self.button_reset.SetPosition(
             wx.Point(
                 sz_area[0] - sz_butt[0] - self.butt_gap,
-                sz_area[1] - 2*(sz_butt[1] + self.butt_gap)
+                sz_area[1] - 2 * (sz_butt[1] + self.butt_gap),
             )
         )
         self.button_entry.SetPosition(
             wx.Point(
                 sz_area[0] - sz_butt[0] - self.butt_gap,
-                sz_area[1] - 3*(sz_butt[1] + self.butt_gap)
+                sz_area[1] - 3 * (sz_butt[1] + self.butt_gap),
             )
         )
         self.button_cancel.SetPosition(
-            wx.Point(
-                sz_area[0] - sz_butt[0] - self.butt_gap,
-                sz_area[1] - sz_butt[1] - self.butt_gap
-            )
+            wx.Point(sz_area[0] - sz_butt[0] - self.butt_gap, sz_area[1] - sz_butt[1] - self.butt_gap)
         )
-        self.button_help.SetPosition(
-            wx.Point(
-                sz_area[0] - sz_help[0] - self.butt_gap,
-                self.butt_gap
-            )
-        )
+        self.button_help.SetPosition(wx.Point(sz_area[0] - sz_help[0] - self.butt_gap, self.butt_gap))
 
     def toggle_buttons(self, show_config, in_config):
         """Toggle visibility of display positioning config buttons."""
@@ -2129,14 +2049,13 @@ class WallpaperPreviewPanel(wx.Panel):
         self.bind_movement_binds(False)
         self.toggle_buttons(True, False)
         # Export and save offsets to DisplaySystem
-        if self.positions_dragged: # only export drag positions if actually dragged
+        if self.positions_dragged:  # only export drag positions if actually dragged
             self.export_offsets(self.display_sys)
         self.display_sys.save_system()
         display_data = self.display_sys.get_disp_list(use_ppi_norm=True)
         # Full redraw of preview with new offset data
         if self.current_preview_images:
-            self.preview_wallpaper(self.current_preview_images, True, False,
-                                   display_data=display_data)
+            self.preview_wallpaper(self.current_preview_images, True, False, display_data=display_data)
         else:
             self.display_data = display_data
             self.refresh_preview(True)
@@ -2154,15 +2073,12 @@ class WallpaperPreviewPanel(wx.Panel):
         ppinorm_offs = self.display_sys.get_ppinorm_offsets()
         # Compute and get reset offsets
         self.display_sys.compute_initial_preview_offsets()
-        display_data = self.display_sys.get_disp_list(use_ppi_norm = True)
+        display_data = self.display_sys.get_disp_list(use_ppi_norm=True)
         dtop_canvas_px = self.get_canvas(display_data, True)
         dtop_canvas_relsz, dtop_canvas_pos, scaling_fac = self.fit_canvas_wrkarea(dtop_canvas_px)
-        (display_rel_sizes,
-            img_rel_sizes,
-            bz_rel_sizes) = self.displays_on_canvas(
-                display_data, dtop_canvas_pos,
-                scaling_fac, True
-            )
+        (display_rel_sizes, img_rel_sizes, bz_rel_sizes) = self.displays_on_canvas(
+            display_data, dtop_canvas_pos, scaling_fac, True
+        )
         # Move display preview draggable_shapes
         for shp, off in zip(self.draggable_shapes, display_rel_sizes):
             shp.pos = off[1]
@@ -2173,7 +2089,7 @@ class WallpaperPreviewPanel(wx.Panel):
 
     def onEntry(self, evt):
         """Opens display positions accurate entry dialog."""
-        dlg = DisplayPositionEntry(self, dragged_positions=self.positions_dragged)
+        DisplayPositionEntry(self, dragged_positions=self.positions_dragged)
 
     def onCancel(self, evt):
         """Cancel out of diplay position config mode."""
@@ -2194,11 +2110,12 @@ class WallpaperPreviewPanel(wx.Panel):
 
     def onHelp(self, evt):
         """Popup a help dialog."""
-        text = ("Preview of your wallpaper settings.\n"
-                "In 'advanced span' mode you need use the 'Positions'\n"
-                "tool to move the display previews by dragging to\n"
-                "as accurately as possible represent the actual\n"
-                "positions of you displays on your desk."
+        text = (
+            "Preview of your wallpaper settings.\n"
+            "In 'advanced span' mode you need use the 'Positions'\n"
+            "tool to move the display previews by dragging to\n"
+            "as accurately as possible represent the actual\n"
+            "positions of you displays on your desk."
         )
         use_per = self.display_sys.use_perspective
         persp_sel = self.frame.ch_persp.GetSelection()
@@ -2206,17 +2123,12 @@ class WallpaperPreviewPanel(wx.Panel):
             persname = self.frame.ch_persp.GetString(persp_sel)
         else:
             persname = "default"
-        pop = HelpPopup(self, text,
-                        show_image_quality=True,
-                        use_perspective=use_per,
-                        persp_name=persname)
+        pop = HelpPopup(self, text, show_image_quality=True, use_perspective=use_per, persp_name=persname)
         btn = evt.GetEventObject()
-        pos = btn.ClientToScreen((0,0))
-        sz =  btn.GetSize()
+        pos = btn.ClientToScreen((0, 0))
+        sz = btn.GetSize()
         pop.Position(pos, wx.Size(0, sz[1]))
         pop.Popup()
-
-
 
     def show_staticbmps(self, show):
         """Show/Hide StaticBitmaps."""
@@ -2237,12 +2149,7 @@ class WallpaperPreviewPanel(wx.Panel):
         sanitzed_offs = self.sanitize_shape_offs()
         ppi_norm_offsets = []
         for off in sanitzed_offs:
-            ppi_norm_offsets.append(
-                (
-                    off[0]*scaling,
-                    off[1]*scaling
-                )
-            )
+            ppi_norm_offsets.append((off[0] * scaling, off[1] * scaling))
         display_sys.update_ppinorm_offsets(ppi_norm_offsets, bezels_included=False)
 
     def sanitize_shape_offs(self):
@@ -2251,12 +2158,7 @@ class WallpaperPreviewPanel(wx.Panel):
         leftmost_offset = min([shape.pos[0] for shape in self.draggable_shapes])
         topmost_offset = min([shape.pos[1] for shape in self.draggable_shapes])
         for shape in self.draggable_shapes:
-            sanitized_offs.append(
-                (
-                    shape.pos[0] - leftmost_offset,
-                    shape.pos[1] - topmost_offset
-                )
-            )
+            sanitized_offs.append((shape.pos[0] - leftmost_offset, shape.pos[1] - topmost_offset))
         return sanitized_offs
 
     #
@@ -2266,7 +2168,7 @@ class WallpaperPreviewPanel(wx.Panel):
     class DragShape:
         def __init__(self, bmp):
             self.bmp = bmp
-            self.pos = (0,0)
+            self.pos = (0, 0)
             self.shown = True
             self.text = None
             self.fullscreen = False
@@ -2276,23 +2178,28 @@ class WallpaperPreviewPanel(wx.Panel):
             return rect.Contains(pt)
 
         def GetRect(self):
-            return wx.Rect(self.pos[0], self.pos[1],
-                        self.bmp.GetWidth(), self.bmp.GetHeight())
+            return wx.Rect(self.pos[0], self.pos[1], self.bmp.GetWidth(), self.bmp.GetHeight())
 
-        def Draw(self, dc, op = wx.COPY):
+        def Draw(self, dc, op=wx.COPY):
             if self.bmp.IsOk():
                 memDC = wx.MemoryDC()
                 memDC.SelectObject(self.bmp)
 
-                dc.Blit(self.pos[0], self.pos[1],
-                        self.bmp.GetWidth(), self.bmp.GetHeight(),
-                        memDC, 0, 0, op, True)
+                dc.Blit(
+                    self.pos[0],
+                    self.pos[1],
+                    self.bmp.GetWidth(),
+                    self.bmp.GetHeight(),
+                    memDC,
+                    0,
+                    0,
+                    op,
+                    True,
+                )
 
                 return True
             else:
                 return False
-
-
 
     def create_shapes(self, enable_movement=True):
         """Create draggable objects from display previews."""
@@ -2322,7 +2229,6 @@ class WallpaperPreviewPanel(wx.Panel):
             self.Unbind(wx.EVT_MOTION)
             self.Unbind(wx.EVT_LEAVE_WINDOW)
 
-
     def draw_shapes(self, dc):
         for shape in self.draggable_shapes:
             if shape.shown:
@@ -2341,9 +2247,7 @@ class WallpaperPreviewPanel(wx.Panel):
                 # memDC.SelectObject(wx.NullBitmap)
                 memDC.SelectObject(bmp)
 
-                dc.Blit(pos[0], pos[1],
-                        bmp_sz[0], bmp_sz[1],
-                        memDC, 0, 0, op, True)
+                dc.Blit(pos[0], pos[1], bmp_sz[0], bmp_sz[1], memDC, 0, 0, op, True)
 
                 return True
             else:
@@ -2362,9 +2266,7 @@ class WallpaperPreviewPanel(wx.Panel):
             memDC = wx.MemoryDC()
             memDC.SelectObject(bmp)
 
-            dc.Blit(pos[0], pos[1],
-                    bmp_sz[0], bmp_sz[1],
-                    memDC, 0, 0, op, True)
+            dc.Blit(pos[0], pos[1], bmp_sz[0], bmp_sz[1], memDC, 0, 0, op, True)
             return True
         else:
             return False
@@ -2379,12 +2281,10 @@ class WallpaperPreviewPanel(wx.Panel):
         dc = wx.PaintDC(self)
         # Hiding bitmap widgets, probably unnecessary
         # for st_bmp in self.preview_img_list:
-            # st_bmp.Hide()
+        # st_bmp.Hide()
 
         # Canvas drawing
-        if (not self.config_mode
-            and not self.use_multi_image
-            and self.current_preview_images):
+        if not self.config_mode and not self.use_multi_image and self.current_preview_images:
             # print("Drawing canvas: ", self.config_mode, not self.use_multi_image, self.current_preview_images)
             self.draw_canvas(dc)
         else:
@@ -2421,14 +2321,13 @@ class WallpaperPreviewPanel(wx.Panel):
 
         self.drag_shape.pos = (
             self.drag_shape.pos[0] + evt.GetPosition()[0] - self.dragStartPos[0],
-            self.drag_shape.pos[1] + evt.GetPosition()[1] - self.dragStartPos[1]
-            )
+            self.drag_shape.pos[1] + evt.GetPosition()[1] - self.dragStartPos[1],
+        )
 
         self.drag_shape.shown = True
         self.RefreshRect(self.drag_shape.GetRect())
         self.drag_shape = None
         self.positions_dragged = True
-
 
     def OnMotion(self, evt):
         # Ignore mouse movement if we're not dragging.
@@ -2437,7 +2336,6 @@ class WallpaperPreviewPanel(wx.Panel):
 
         # if we have a shape, but haven't started dragging yet
         if self.drag_shape and not self.drag_image:
-
             # only start the drag after having moved a couple pixels
             tolerance = 2
             pt = evt.GetPosition()
@@ -2452,9 +2350,8 @@ class WallpaperPreviewPanel(wx.Panel):
             self.RefreshRect(self.drag_shape.GetRect(), True)
             self.Update()
 
-            item = self.drag_shape.text if self.drag_shape.text else self.drag_shape.bmp
-            self.drag_image = wx.DragImage(item,
-                                         wx.Cursor(wx.CURSOR_HAND))
+            item = self.drag_shape.text or self.drag_shape.bmp
+            self.drag_image = wx.DragImage(item, wx.Cursor(wx.CURSOR_HAND))
 
             hotspot = self.dragStartPos - self.drag_shape.pos
             self.drag_image.BeginDrag(hotspot, self, self.drag_shape.fullscreen)
@@ -2467,11 +2364,9 @@ class WallpaperPreviewPanel(wx.Panel):
             # now move it and show it again if needed
             self.drag_image.Move(evt.GetPosition())
 
-
     def OnLeaveWindow(self, evt):
         """On leavewindow event drop dragged image by simulating a left up event."""
         self.OnLeftUp(evt)
-
 
     #
     # Bezel Configuration mode
@@ -2534,7 +2429,6 @@ class WallpaperPreviewPanel(wx.Panel):
 
         # create bitmap buttons
         for st_bmp in self.preview_img_list:
-            butts = []
             butt_rb = wx.BitmapButton(self, bitmap=rb_bmp, name="butt_bez_r", style=wx.BORDER_NONE)
             butt_bb = wx.BitmapButton(self, bitmap=bb_bmp, name="butt_bez_b", style=wx.BORDER_NONE)
             bez_butt_color = wx.Colour(41, 47, 52)
@@ -2546,12 +2440,7 @@ class WallpaperPreviewPanel(wx.Panel):
             butt_bb.SetPosition(wx.Point((pos_bb[0], pos_bb[1])))
             butt_rb.Bind(wx.EVT_BUTTON, self.onBezelButton)
             butt_bb.Bind(wx.EVT_BUTTON, self.onBezelButton)
-            self.bez_buttons.append(
-                (
-                    butt_rb,
-                    butt_bb
-                )
-            )
+            self.bez_buttons.append((butt_rb, butt_bb))
         self.show_bezel_buttons(False)
         self.create_bezel_popups()
 
@@ -2563,18 +2452,13 @@ class WallpaperPreviewPanel(wx.Panel):
             pop_rb.set_bezel_value(bez_mm[0])
             pop_bb = self.popup_at_button(butts[1])
             pop_bb.set_bezel_value(bez_mm[1])
-            self.bezel_popups.append(
-                (
-                    pop_rb,
-                    pop_bb
-                )
-            )
+            self.bezel_popups.append((pop_rb, pop_bb))
 
     def popup_at_button(self, button):
         """Initialize a popup at button position."""
         try:
             # print("primary bezel pop")
-            pop = self.BezelEntryPopup(self, wx.SIMPLE_BORDER|wx.PU_CONTAINS_CONTROLS)
+            pop = self.BezelEntryPopup(self, wx.SIMPLE_BORDER | wx.PU_CONTAINS_CONTROLS)
         except AttributeError:
             # print("fallback bezel pop")
             pop = self.BezelEntryPopup(self, wx.SIMPLE_BORDER)
@@ -2583,17 +2467,17 @@ class WallpaperPreviewPanel(wx.Panel):
     def move_popup_to_button(self, pop, button):
         """Move pop next to its associated button."""
         butt_name = button.GetName()
-        pos = button.ClientToScreen( (0, 0) )
+        pos = button.ClientToScreen((0, 0))
         butt_sz = button.GetSize()
         pop_sz = pop.GetSize()
         if butt_name == "butt_bez_r":
             # Center pop vertically to button
-            y_cntr = (- pop_sz[1] + butt_sz[1])/2
-            pop.Position(pos, (- pop_sz[0], y_cntr))
+            y_cntr = (-pop_sz[1] + butt_sz[1]) / 2
+            pop.Position(pos, (-pop_sz[0], y_cntr))
         else:
             # Center pop horizontally to button
-            x_cntr = (- pop_sz[0] + butt_sz[0])/2
-            pop.Position(pos, (x_cntr, - pop_sz[1]))
+            x_cntr = (-pop_sz[0] + butt_sz[0]) / 2
+            pop.Position(pos, (x_cntr, -pop_sz[1]))
 
     def show_bezel_buttons(self, show):
         """Show/Hide the bezel buttons."""
@@ -2607,8 +2491,8 @@ class WallpaperPreviewPanel(wx.Panel):
         sz = st_bmp.GetSize()
         pos = st_bmp.GetPosition()
         bsz = self.bez_butt_sz
-        pos_rb = (round(sz[0] + pos[0] - bsz[0]/2), round(sz[1]/2 + pos[1] - bsz[1]/2))
-        pos_bb = (round(sz[0]/2 + pos[0] - bsz[0]/2), round(sz[1] + pos[1] - bsz[1]/2))
+        pos_rb = (round(sz[0] + pos[0] - bsz[0] / 2), round(sz[1] / 2 + pos[1] - bsz[1] / 2))
+        pos_bb = (round(sz[0] / 2 + pos[0] - bsz[0] / 2), round(sz[1] + pos[1] - bsz[1] / 2))
         return [pos_rb, pos_bb]
 
     def move_bezel_buttons(self):
@@ -2624,13 +2508,12 @@ class WallpaperPreviewPanel(wx.Panel):
             self.move_popup_to_button(pops[0], butts[0])
             self.move_popup_to_button(pops[1], butts[1])
 
-
     def onBezelButton(self, event):
         for pop in self.bezel_popups:
             pop[0].Hide()
             pop[1].Hide()
         self.move_bezel_popups()
-        #Get button instance and find it in list
+        # Get button instance and find it in list
         button = event.GetEventObject()
         button_pos = None
         for butt_pair in self.bez_buttons:
@@ -2645,14 +2528,14 @@ class WallpaperPreviewPanel(wx.Panel):
         # pop.Popup()
         pop.Show()
 
-
     #
     # Bezel entry pop-up
     #
 
     class BezelEntryPopup(wx.PopupTransientWindow):
-    # class BezelEntryPopup(wx.PopupWindow):
+        # class BezelEntryPopup(wx.PopupWindow):
         """Popup that is shown when a bezel button is pressed in bezel config."""
+
         def __init__(self, parent, style):
             # wx.PopupTransientWindow.__init__(self, parent, style)
             wx.PopupWindow.__init__(self, parent, style)
@@ -2660,11 +2543,9 @@ class WallpaperPreviewPanel(wx.Panel):
             pnl = wx.Panel(self)
             # pnl.SetBackgroundColour("CADET BLUE")
 
-            st = wx.StaticText(pnl, -1,
-                            "Enter the size of adjacent bezels and gap\n"
-                            "in millimeters:")
+            st = wx.StaticText(pnl, -1, "Enter the size of adjacent bezels and gap\nin millimeters:")
             # self.tc_bez = wx.TextCtrl(pnl, -1, size=(100, -1))
-            self.tc_bez = wx.TextCtrl(pnl, -1, size=wx.Size(60, -1), style=wx.TE_RIGHT|wx.TE_PROCESS_ENTER)
+            self.tc_bez = wx.TextCtrl(pnl, -1, size=wx.Size(60, -1), style=wx.TE_RIGHT | wx.TE_PROCESS_ENTER)
             self.tc_bez.Bind(wx.EVT_TEXT_ENTER, self.OnEnter)
             self.current_bez_val = None
             butt_save = wx.Button(pnl, label="Apply")
@@ -2680,7 +2561,7 @@ class WallpaperPreviewPanel(wx.Panel):
             sizer = wx.BoxSizer(wx.VERTICAL)
             sizer.Add(st, 0, wx.ALL, 5)
             # sizer.Add(self.tc_bez, 0, wx.ALL, 5)
-            sizer.Add(butt_sizer, 0, wx.ALL|wx.EXPAND, 0)
+            sizer.Add(butt_sizer, 0, wx.ALL | wx.EXPAND, 0)
             pnl.SetSizer(sizer)
 
             sizer.Fit(pnl)
@@ -2703,25 +2584,18 @@ class WallpaperPreviewPanel(wx.Panel):
             if entered_val is False:
                 # Abort applying and alert user but don't
                 # Dismiss popup to fascilitate fixing.
-                msg = ("Bezel thickness must be a non-negative number, "
-                       "'{}' was entered.".format(self.tc_bez.GetValue()))
+                msg = f"Bezel thickness must be a non-negative number, '{self.tc_bez.GetValue()}' was entered."
                 sp_logging.G_LOGGER.info(msg)
                 self.Hide()
-                dial = wx.MessageDialog(self, msg, "Error", wx.OK|wx.STAY_ON_TOP|wx.CENTRE)
+                dial = wx.MessageDialog(self, msg, "Error", wx.OK | wx.STAY_ON_TOP | wx.CENTRE)
                 dial.ShowModal()
                 self.Show()
                 return -1
             self.current_bez_val = entered_val
-            display_sys = self.preview.display_sys
             pops = self.preview.bezel_popups
             bezel_mms = []
             for pop_pair in pops:
-                bezel_mms.append(
-                    (
-                        pop_pair[0].bezel_value(),
-                        pop_pair[1].bezel_value()
-                    )
-                )
+                bezel_mms.append((pop_pair[0].bezel_value(), pop_pair[1].bezel_value()))
             # self.Dismiss()
             self.Hide()
             # propagate values and refresh preview

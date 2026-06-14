@@ -29,7 +29,7 @@ from superpaper.sp_paths import CONFIG_PATH, TEMP_PATH
 from superpaper.sp_platform import IS_LINUX, IS_MACOS, IS_WINDOWS
 
 # Disables PIL.Image.DecompressionBombError.
-Image.MAX_IMAGE_PIXELS = None # 715827880 would be 4x default max.
+Image.MAX_IMAGE_PIXELS = None  # 715827880 would be 4x default max.
 
 
 def running_kde():
@@ -39,9 +39,8 @@ def running_kde():
         return True
     kde_f_ses = os.environ.get("KDE_FULL_SESSION")
     xdg_ses_dtop = os.environ.get("XDG_SESSION_DESKTOP")
-    if kde_f_ses == "true" or xdg_ses_dtop == "KDE":
-        return True
-    return False
+    return bool(kde_f_ses == "true" or xdg_ses_dtop == "KDE")
+
 
 # Platform-native helpers are imported conditionally below. Declare them up front
 # with safe fallbacks so the names are always bound regardless of platform; the
@@ -73,7 +72,7 @@ RESOLUTION_ARRAY = []
 DISPLAY_OFFSET_ARRAY = []
 
 # Lazily initialized in load_system() before any wallpaper processing runs.
-G_ACTIVE_DISPLAYSYSTEM: "DisplaySystem" = None  # pyright: ignore[reportAssignmentType]
+G_ACTIVE_DISPLAYSYSTEM: "DisplaySystem" = None  # pyright: ignore[reportAssignmentType]  # ty:ignore[invalid-assignment]
 G_ACTIVE_PROFILE = None
 G_WALLPAPER_CHANGE_LOCK = Lock()
 G_SUPPORTED_IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".bmp", ".gif", ".tiff", ".webp")
@@ -83,9 +82,9 @@ G_SET_COMMAND_STRING: str = ""
 USER_TOLD_OF_PHYS_FAIL = False
 
 
-
-class RepeatedTimer(object):
+class RepeatedTimer:
     """Threaded timer used for slideshow."""
+
     # Credit:
     # https://stackoverflow.com/questions/3393612/run-certain-code-every-n-seconds/13151299#13151299
     def __init__(self, interval, function, *args, **kwargs):
@@ -117,12 +116,13 @@ class RepeatedTimer(object):
         self.is_running = False
 
 
-class Display():
+class Display:
     """
     Stores refined data of a display.
 
     Computes PPI if data is available. Stores non-negative translated offsets.
     """
+
     def __init__(self, monitor):
         self.resolution = (monitor.width, monitor.height)
         self.digital_offset = (monitor.x, monitor.y)
@@ -130,19 +130,16 @@ class Display():
             self.phys_size_mm = tuple(
                 sorted(
                     [monitor.width_mm, monitor.height_mm],
-                    reverse=bool(self.resolution[0]>self.resolution[1])
+                    reverse=bool(self.resolution[0] > self.resolution[1]),
                 )
-            )   # Take care that physical rotation matches resolution.
+            )  # Take care that physical rotation matches resolution.
             self.phys_size_failed = False
         else:
             # if physical size detection has failed, assume display is 23" diagonal
             # to have it stand out
             self.phys_size_mm = tuple(
-                sorted(
-                    [509, 286],
-                    reverse=bool(self.resolution[0]>self.resolution[1])
-                )
-            )   # Take care that physical rotation matches resolution.
+                sorted([509, 286], reverse=bool(self.resolution[0] > self.resolution[1]))
+            )  # Take care that physical rotation matches resolution.
             self.phys_size_failed = True
         self.detected_phys_size_mm = self.phys_size_mm
         self.ppi = None
@@ -172,43 +169,39 @@ class Display():
 
     def __eq__(self, other):
         return bool(
-            self.resolution == other.resolution and
-            self.digital_offset == other.digital_offset and
-            self.detected_phys_size_mm == other.detected_phys_size_mm
+            self.resolution == other.resolution
+            and self.digital_offset == other.digital_offset
+            and self.detected_phys_size_mm == other.detected_phys_size_mm
         )
 
     def __hash__(self):
         return hash((self.resolution, self.digital_offset, self.detected_phys_size_mm))
 
     def diagonal_size(self):
-        diag_mm = math.sqrt( self.phys_size_mm[0]**2 + self.phys_size_mm[1]**2 )
+        diag_mm = math.sqrt(self.phys_size_mm[0] ** 2 + self.phys_size_mm[1] ** 2)
         diag_in = round(diag_mm / 25.4, 1)
         return (round(diag_mm), diag_in)
 
     def compute_ppi(self):
         if self.phys_size_mm[0]:
-            ppmm_horiz = self.resolution[0]/self.phys_size_mm[0]
+            ppmm_horiz = self.resolution[0] / self.phys_size_mm[0]
         else:
             if sp_logging.DEBUG:
-                sp_logging.G_LOGGER.info(
-                    "Display.compute_ppi: self.phys_size_mm[0] was 0."
-                )
+                sp_logging.G_LOGGER.info("Display.compute_ppi: self.phys_size_mm[0] was 0.")
             return None
         if self.phys_size_mm[1]:
-            ppmm_vert = self.resolution[1]/self.phys_size_mm[1]
+            ppmm_vert = self.resolution[1] / self.phys_size_mm[1]
         else:
             if sp_logging.DEBUG:
-                sp_logging.G_LOGGER.info(
-                    "Display.compute_ppi: self.phys_size_mm[1] was 0."
-                )
+                sp_logging.G_LOGGER.info("Display.compute_ppi: self.phys_size_mm[1] was 0.")
             return None
-        if abs(ppmm_horiz/ppmm_vert - 1) > 0.01:
-            if sp_logging.DEBUG:
-                sp_logging.G_LOGGER.info(
-                    "WARNING: Horizontal and vertical PPI do not match! hor: %s, ver: %s",
-                    ppmm_horiz * 25.4, ppmm_vert * 25.4
-                )
-                sp_logging.G_LOGGER.info(str(self))
+        if abs(ppmm_horiz / ppmm_vert - 1) > 0.01 and sp_logging.DEBUG:
+            sp_logging.G_LOGGER.info(
+                "WARNING: Horizontal and vertical PPI do not match! hor: %s, ver: %s",
+                ppmm_horiz * 25.4,
+                ppmm_vert * 25.4,
+            )
+            sp_logging.G_LOGGER.info(str(self))
         return ppmm_horiz * 25.4  # inch has 25.4 times the pixels of a millimeter.
 
     def translate_offset(self, translate_tuple):
@@ -220,7 +213,7 @@ class Display():
         old_offsets = self.digital_offset
         self.digital_offset = (
             old_offsets[0] - translate_tuple[0],
-            old_offsets[1] - translate_tuple[1]
+            old_offsets[1] - translate_tuple[1],
         )
 
     def ppi_and_physsize_from_diagonal_inch(self, diag_inch):
@@ -229,7 +222,7 @@ class Display():
         asking the user to enter the diagonal dimension of the monitor
         in inches.
         """
-        height_to_width_ratio = self.resolution[1]/self.resolution[0]
+        height_to_width_ratio = self.resolution[1] / self.resolution[0]
         phys_width_inch = diag_inch / math.sqrt(1 + height_to_width_ratio**2)
         phys_height_inch = height_to_width_ratio * phys_width_inch
 
@@ -241,14 +234,14 @@ class Display():
                 "Updated PPI = %s and phys_size_mm = %s based on diagonal size: %s inches",
                 self.ppi,
                 self.phys_size_mm,
-                diag_inch
+                diag_inch,
             )
-            sp_logging.G_LOGGER.info(
-                str(self)
-            )
+            sp_logging.G_LOGGER.info(str(self))
 
-class DisplayLight():
+
+class DisplayLight:
     """Small class to store resolution and position data a kin to full Display."""
+
     def __init__(self, res, off, bez):
         self.resolution = res
         self.digital_offset = off
@@ -267,7 +260,7 @@ class DisplayLight():
         )
 
 
-class DisplaySystem():
+class DisplaySystem:
     """
     Handle the display system as a whole, applying user data such as
     bezel corrections, offsets, physical layout, and produces
@@ -293,10 +286,12 @@ class DisplaySystem():
         if not self.use_user_diags:
             for dsp in self.disp_list:
                 if dsp.phys_size_failed and not USER_TOLD_OF_PHYS_FAIL:
-                    msg = ("Detection of the diagonal size of a display has failed. "
-                           "It will show up as a 23 inch display in advanced mode. "
-                           "Enter the correct diagonal size with the Override Detected "
-                           "Sizes tool.")
+                    msg = (
+                        "Detection of the diagonal size of a display has failed. "
+                        "It will show up as a 23 inch display in advanced mode. "
+                        "Enter the correct diagonal size with the Override Detected "
+                        "Sizes tool."
+                    )
                     show_message_dialog(msg)
                     USER_TOLD_OF_PHYS_FAIL = True
 
@@ -307,10 +302,7 @@ class DisplaySystem():
                 continue
             else:
                 return False
-        if len(self.disp_list) == len(other.disp_list):
-            return True
-        else:
-            return False
+        return len(self.disp_list) == len(other.disp_list)
 
     def __hash__(self):
         return hash(tuple(self.disp_list))
@@ -322,7 +314,7 @@ class DisplaySystem():
     def get_normalized_ppis(self):
         """Return list of PPI values normalized to the max_ppi."""
         max_ppi = self.max_ppi()
-        return [disp.ppi/max_ppi for disp in self.disp_list]
+        return [disp.ppi / max_ppi for disp in self.disp_list]
 
     def compute_ppinorm_resolutions(self):
         """Update disp_list PPI density normalized sizes of the real resolutions."""
@@ -330,7 +322,7 @@ class DisplaySystem():
         for r_ppi, dsp in zip(rel_ppis, self.disp_list):
             dsp.ppi_norm_resolution = (
                 round(dsp.resolution[0] / r_ppi),
-                round(dsp.resolution[1] / r_ppi)
+                round(dsp.resolution[1] / r_ppi),
             )
 
     def get_ppi_norm_crops(self, manual_offsets):
@@ -346,7 +338,7 @@ class DisplaySystem():
                 off = (0, 0)
             left_top = (
                 round(dsp.ppi_norm_offset[0] + off[0]),
-                round(dsp.ppi_norm_offset[1] + off[1])
+                round(dsp.ppi_norm_offset[1] + off[1]),
             )
             right_btm = (
                 round(dsp.ppi_norm_resolution[0]) + left_top[0],
@@ -360,19 +352,15 @@ class DisplaySystem():
     def fits_in_column(self, disp, col):
         """Test if IN DEKSTOP RES the horiz center of disp is below the last disp in the col."""
         col_last_disp = col[-1]
-        disp_cntr = (disp.digital_offset[0] + disp.digital_offset[0] + disp.resolution[0])/2 #(left+right)/2
+        disp_cntr = (disp.digital_offset[0] + disp.digital_offset[0] + disp.resolution[0]) / 2  # (left+right)/2
         col_last_left = col_last_disp.digital_offset[0]
         col_last_right = col_last_disp.digital_offset[0] + col_last_disp.resolution[0]
-        if (disp_cntr > col_last_left and disp_cntr < col_last_right):
-            return True
-        else:
-            return False
+        return bool(disp_cntr > col_last_left and disp_cntr < col_last_right)
 
     def column_size(self, col):
         width = max([dsp.ppi_norm_resolution[0] + dsp.ppi_norm_bezels[0] for dsp in col])
         height = sum([dsp.ppi_norm_resolution[1] + dsp.ppi_norm_bezels[1] for dsp in col])
         return (width, height)
-
 
     def compute_initial_preview_offsets(self):
         """
@@ -408,8 +396,8 @@ class DisplaySystem():
             # print("work_col", work_col)
         # print("columns done", columns)
         # for col in columns:
-            # for dsp in col:
-                # print(str(dsp))
+        # for dsp in col:
+        # print(str(dsp))
 
         col_ids = [list(range(len(col))) for col in columns]
         # sort columns in place vertically in digital offset
@@ -424,37 +412,28 @@ class DisplaySystem():
 
         # print("columns sorted", columns, "sorted_ids", sorted_ids)
         # for col in columns:
-            # for dsp in col:
-                # print(str(dsp))
+        # for dsp in col:
+        # print(str(dsp))
         if columns == []:
-            sp_logging.G_LOGGER.info(
-                "DisplaySystem column recostruction has failed completely. Trigger fallback.")
+            sp_logging.G_LOGGER.info("DisplaySystem column recostruction has failed completely. Trigger fallback.")
             columns = [[dsp] for dsp in self.disp_list]
-
 
         # Tile columns on to the plane with vertical centering
         col_sizes = []
         try:
             col_sizes = [self.column_size(col) for col in columns]
         except (ValueError, IndexError):
-            sp_logging.G_LOGGER.info("Problem with column sizes. col_sizes: %s",
-                                     col_sizes)
+            sp_logging.G_LOGGER.info("Problem with column sizes. col_sizes: %s", col_sizes)
         # print("col_sizes", col_sizes)
         max_col_h = 0
         try:
             max_col_h = max([sz[1] for sz in col_sizes])
         except ValueError:
-            sp_logging.G_LOGGER.info("There are no column sizes? col_sizes: %s",
-                                     col_sizes)
+            sp_logging.G_LOGGER.info("There are no column sizes? col_sizes: %s", col_sizes)
         col_left_tops = []
         current_left = 0
         for sz in col_sizes:
-            col_left_tops.append(
-                (
-                    current_left,
-                    round((max_col_h - sz[1])/2)
-                )
-            )
+            col_left_tops.append((current_left, round((max_col_h - sz[1]) / 2)))
             current_left += sz[0]
         # print("col_left_tops", col_left_tops)
 
@@ -466,9 +445,8 @@ class DisplaySystem():
             for dsp in col:
                 dsp_w = dsp.ppi_norm_resolution[0] + dsp.ppi_norm_bezels[0]
                 dsp.ppi_norm_offset = (
-                    col_anchor[0]
-                    + round((max_dsp_w - dsp_w)/2),
-                    col_anchor[1] + current_top
+                    col_anchor[0] + round((max_dsp_w - dsp_w) / 2),
+                    col_anchor[1] + current_top,
                 )
                 # print(dsp.ppi_norm_offset)
                 current_top += dsp.ppi_norm_resolution[1] + dsp.ppi_norm_bezels[1]
@@ -487,17 +465,11 @@ class DisplaySystem():
         # print([(dsp.ppi_norm_resolution, dsp.ppi_norm_offset) for dsp in self.disp_list])
         # sys.exit()
 
-    def get_disp_list(self, use_ppi_norm = False):
+    def get_disp_list(self, use_ppi_norm=False):
         if use_ppi_norm:
             disp_l = []
             for dsp in self.disp_list:
-                disp_l.append(
-                    DisplayLight(
-                        dsp.ppi_norm_resolution,
-                        dsp.ppi_norm_offset,
-                        dsp.ppi_norm_bezels
-                    )
-                )
+                disp_l.append(DisplayLight(dsp.ppi_norm_resolution, dsp.ppi_norm_offset, dsp.ppi_norm_bezels))
             return disp_l
         else:
             disp_l = self.disp_list
@@ -507,9 +479,7 @@ class DisplaySystem():
         """Return ppi norm offsets."""
         pnoffs = []
         for dsp in self.disp_list:
-            pnoffs.append(
-                dsp.ppi_norm_offset
-            )
+            pnoffs.append(dsp.ppi_norm_offset)
         return pnoffs
 
     def get_persp_data(self, persp_name):
@@ -534,8 +504,7 @@ class DisplaySystem():
         for bez_pair in bezels_mm:
             for bez in bez_pair:
                 if bez < 0:
-                    msg = ("Bezel thickness must be a "
-                           "non-negative number, {} was entered.").format(bez)
+                    msg = f"Bezel thickness must be a non-negative number, {bez} was entered."
                     sp_logging.G_LOGGER.info(msg)
                     show_message_dialog(msg, "Error")
                     return 0
@@ -556,7 +525,7 @@ class DisplaySystem():
             bezels_mm.append(
                 (
                     round(dsp.ppi_norm_bezels[0] / max_ppmm, 2),
-                    round(dsp.ppi_norm_bezels[1] / max_ppmm, 2)
+                    round(dsp.ppi_norm_bezels[1] / max_ppmm, 2),
                 )
             )
         return bezels_mm
@@ -565,12 +534,7 @@ class DisplaySystem():
         """Return list of bezel thicknesses in ppi norm px."""
         bezels = []
         for dsp in self.disp_list:
-            bezels.append(
-                (
-                    dsp.ppi_norm_bezels[0],
-                    dsp.ppi_norm_bezels[1]
-                )
-            )
+            bezels.append((dsp.ppi_norm_bezels[0], dsp.ppi_norm_bezels[1]))
         return bezels
 
     def update_display_diags(self, diag_inches, reset_offsets=True):
@@ -589,7 +553,6 @@ class DisplaySystem():
             self.compute_ppinorm_resolutions()
             if reset_offsets:
                 self.compute_initial_preview_offsets()
-
 
     def save_system(self):
         """Save the current DisplaySystem instance user given data
@@ -628,7 +591,7 @@ class DisplaySystem():
             "bezel_mms": list_to_str(bezel_mms, item_len=2),
             "user_diagonal_inches": list_to_str(diagonal_inches, item_len=1),
             "use_perspective": str(int(use_perspective)),
-            "def_perspective": def_perspective
+            "def_perspective": def_perspective,
         }
 
         sp_logging.G_LOGGER.info(
@@ -640,16 +603,15 @@ class DisplaySystem():
             bezel_mms,
             diagonal_inches,
             use_perspective,
-            def_perspective
+            def_perspective,
         )
 
         # write config to file
-        with open(archive_file, 'w') as configfile:
+        with open(archive_file, "w") as configfile:
             config.write(configfile)
 
         # Once profile is saved make it available for wallpaper setter
         refresh_display_data()
-
 
     def load_system(self):
         """Try to load system data from database based on initialization data,
@@ -675,14 +637,11 @@ class DisplaySystem():
             # read values
             # and push them into self.disp_list
             instance_data = config[instance_key]
-            ppi_norm_offsets = str_to_list(instance_data["ppi_norm_offsets"],
-                                           item_len=2)
-            bezel_mms = str_to_list(instance_data["bezel_mms"],
-                                    item_len=2)
+            ppi_norm_offsets = str_to_list(instance_data["ppi_norm_offsets"], item_len=2)
+            bezel_mms = str_to_list(instance_data["bezel_mms"], item_len=2)
             if bezel_mms:
                 bezel_mms = [(round(bez[0], 2), round(bez[1], 2)) for bez in bezel_mms]
-            diagonal_inches = str_to_list(instance_data["user_diagonal_inches"],
-                                          item_len=1)
+            diagonal_inches = str_to_list(instance_data["user_diagonal_inches"], item_len=1)
             use_perspective = bool(int(instance_data.get("use_perspective", 0)))
             def_perspective = instance_data.get("def_perspective", "None")
             sp_logging.G_LOGGER.info(
@@ -691,11 +650,14 @@ class DisplaySystem():
                 "user_diagonal_inches: %s, "
                 "use_perspective: %s, "
                 "def_perspective: %s",
-                ppi_norm_offsets, bezel_mms, diagonal_inches,
-                use_perspective, def_perspective
+                ppi_norm_offsets,
+                bezel_mms,
+                diagonal_inches,
+                use_perspective,
+                def_perspective,
             )
             self.update_bezels(bezel_mms)
-            self.update_ppinorm_offsets(ppi_norm_offsets) # Bezels & user diagonals always included.
+            self.update_ppinorm_offsets(ppi_norm_offsets)  # Bezels & user diagonals always included.
             if diagonal_inches:
                 sp_logging.G_LOGGER.info("Updating diagonal_inches")
                 self.update_display_diags(diagonal_inches, reset_offsets=False)
@@ -707,7 +669,6 @@ class DisplaySystem():
         else:
             # Continue without data
             self.compute_initial_preview_offsets()
-
 
     def update_perspectives(self, persp_name, use_persp_master, is_ds_def, viewer_data, swivels, tilts):
         """Update perspective data.
@@ -748,7 +709,6 @@ class DisplaySystem():
             self.perspective_dict[persp_name]["tilts"] = tilts
         # trigger save afterwards (not here)
 
-
     def save_perspectives(self):
         """Save perspective data dict to file."""
         instance_key = str(hash(self))
@@ -757,22 +717,21 @@ class DisplaySystem():
         # load previous configs if file is found
         config = configparser.ConfigParser()
         # if os.path.exists(persp_file):
-            # config.read(persp_file)
+        # config.read(persp_file)
 
         for sect in self.perspective_dict:
             config[sect] = {
                 "central_disp": str(self.perspective_dict[sect]["central_disp"]),
                 "viewer_pos": list_to_str(self.perspective_dict[sect]["viewer_pos"], item_len=1),
                 "swivels": list_to_str(self.perspective_dict[sect]["swivels"], item_len=4),
-                "tilts": list_to_str(self.perspective_dict[sect]["tilts"], item_len=3)
+                "tilts": list_to_str(self.perspective_dict[sect]["tilts"], item_len=3),
             }
 
         sp_logging.G_LOGGER.info("Saving perspective profs: %s", config.sections())
 
         # write config to file
-        with open(persp_file, 'w') as configfile:
+        with open(persp_file, "w") as configfile:
             config.write(configfile)
-
 
     def load_perspectives(self):
         """Load perspective data dict from file."""
@@ -790,7 +749,7 @@ class DisplaySystem():
                     "central_disp": int(config[sect]["central_disp"]),
                     "viewer_pos": str_to_list(config[sect]["viewer_pos"], item_len=1),
                     "swivels": str_to_list(config[sect]["swivels"], item_len=4, strings=True),
-                    "tilts": str_to_list(config[sect]["tilts"], item_len=3)
+                    "tilts": str_to_list(config[sect]["tilts"], item_len=3),
                 }
         else:
             pass
@@ -811,6 +770,7 @@ def list_to_str(lst, item_len=1):
             joined_items.append(",".join(str(sub_itm) for sub_itm in sub_lst))
         return ";".join(joined_items)
 
+
 def str_to_list(joined_list, item_len=1, strings=False):
     """Extract list from joined_list."""
     if item_len == 1:
@@ -827,9 +787,7 @@ def str_to_list(joined_list, item_len=1, strings=False):
                 except ValueError:
                     val = item
                     if not strings:
-                        sp_logging.G_LOGGER.info(
-                            "str_to_list: ValueError: not int or float: %s", item
-                        )
+                        sp_logging.G_LOGGER.info("str_to_list: ValueError: not int or float: %s", item)
             conv_list.append(val)
         return conv_list
     else:
@@ -847,12 +805,11 @@ def str_to_list(joined_list, item_len=1, strings=False):
                     except ValueError:
                         val = sub_item
                         if not strings:
-                            sp_logging.G_LOGGER.info(
-                                "str_to_list: ValueError: not int or float: %s", sub_item
-                            )
+                            sp_logging.G_LOGGER.info("str_to_list: ValueError: not int or float: %s", sub_item)
                 conv_item.append(val)
             conv_list.append(tuple(conv_item))
         return conv_list
+
 
 def extract_global_vars(disp_list):
     res_arr = []
@@ -861,6 +818,7 @@ def extract_global_vars(disp_list):
         res_arr.append(disp.resolution)
         off_arr.append(disp.digital_offset)
     return [res_arr, off_arr]
+
 
 def get_display_data():
     """
@@ -898,15 +856,17 @@ def get_display_data():
             "get_display_data output: NUM_DISPLAYS = %s, RES_ARR = %s, OFF_ARR = %s",
             NUM_DISPLAYS,
             RESOLUTION_ARRAY,
-            DISPLAY_OFFSET_ARRAY
+            DISPLAY_OFFSET_ARRAY,
         )
         for disp in display_list:
             sp_logging.G_LOGGER.info(str(disp))
     return display_list
 
+
 def refresh_display_data():
     global G_ACTIVE_DISPLAYSYSTEM
     G_ACTIVE_DISPLAYSYSTEM = DisplaySystem()
+
 
 def compute_canvas(res_array, offset_array):
     """Computes the size of the total desktop area from monitor resolutions and offsets."""
@@ -917,8 +877,8 @@ def compute_canvas(res_array, offset_array):
     right_edges = []
     bottom_edges = []
     for res, off in zip(res_array, offset_array):
-        right_edges.append(off[0]+res[0])
-        bottom_edges.append(off[1]+res[1])
+        right_edges.append(off[0] + res[0])
+        bottom_edges.append(off[1] + res[1])
     # Right-most edge.
     rightmost = max(right_edges)
     # Bottom-most edge.
@@ -941,7 +901,13 @@ def compute_ppi_corrected_res_array(res_array, ppi_list_rel_density):
 
 # resize image to fill given rectangle and do a positioned crop to size.
 # Return output image.
-def resize_to_fill(img, res, quality: "str | Image.Resampling" = Image.Resampling.LANCZOS, zoom=1.0, offset=(0.0, 0.0)):
+def resize_to_fill(
+    img,
+    res,
+    quality: "str | Image.Resampling" = Image.Resampling.LANCZOS,
+    zoom=1.0,
+    offset=(0.0, 0.0),
+):
     """Resize image to fill given rectangle and do a positioned crop to size.
 
     The image is always scaled so that it fully covers the target rectangle
@@ -958,7 +924,7 @@ def resize_to_fill(img, res, quality: "str | Image.Resampling" = Image.Resamplin
         quality = Image.Resampling.LANCZOS
         reducing_gap = None
 
-    if not img.mode == "RGB":
+    if img.mode != "RGB":
         img = img.convert("RGB")
 
     # Sanitize positioning parameters.
@@ -988,7 +954,8 @@ def resize_to_fill(img, res, quality: "str | Image.Resampling" = Image.Resamplin
     # edge despite rounding, so the final crop always yields exactly res.
     new_size = (
         max(round(resize_multiplier * image_size[0]), res[0]),
-        max(round(resize_multiplier * image_size[1]), res[1]))
+        max(round(resize_multiplier * image_size[1]), res[1]),
+    )
     img = img.resize(new_size, resample=quality, reducing_gap=reducing_gap)
 
     extra_width = new_size[0] - res[0]
@@ -1004,9 +971,7 @@ def resize_to_fill(img, res, quality: "str | Image.Resampling" = Image.Resamplin
     if cropped_res.size == res:
         return cropped_res
     else:
-        sp_logging.G_LOGGER.info(
-            "Error: result image not of correct size. crp:%s, res:%s",
-            cropped_res.size, res)
+        sp_logging.G_LOGGER.info("Error: result image not of correct size. crp:%s, res:%s", cropped_res.size, res)
         return cropped_res
 
 
@@ -1023,10 +988,12 @@ def get_all_centers(resarr_eff, manual_offsets):
     # from the top.
     center_standard_height = get_center(resarr_eff[0])[1]
     if len(manual_offsets) < len(resarr_eff):
-        sp_logging.G_LOGGER.info("get_all_centers: Not enough manual offsets: \
+        sp_logging.G_LOGGER.info(
+            "get_all_centers: Not enough manual offsets: \
                                  %s for displays: %s",
-                                 len(manual_offsets),
-                                 len(resarr_eff))
+            len(manual_offsets),
+            len(resarr_eff),
+        )
     else:
         for i in range(len(resarr_eff)):
             horiz_radius = get_horizontal_radius(resarr_eff[i])
@@ -1034,7 +1001,8 @@ def get_all_centers(resarr_eff, manual_offsets):
             # unless modified with the manual offset
             center_pos_from_anchor_left_top = (
                 sum_widths + manual_offsets[i][0] + horiz_radius,
-                center_standard_height + manual_offsets[i][1])
+                center_standard_height + manual_offsets[i][1],
+            )
             centers.append(center_pos_from_anchor_left_top)
             sum_widths += resarr_eff[i][0]
     if sp_logging.DEBUG:
@@ -1084,8 +1052,7 @@ def compute_crop_tuples(resolution_array_ppinormalized, manual_offsets):
             sp_logging.G_LOGGER.info("crop_tuples: %s", crop_tuples)
         return crop_tuples  # [(left, up, right, bottom),...]
     else:
-        crop_tuples_translated = translate_crops(
-            crop_tuples, (leftmost, topmost))
+        crop_tuples_translated = translate_crops(crop_tuples, (leftmost, topmost))
         if sp_logging.DEBUG:
             sp_logging.G_LOGGER.info("crop_tuples_translated: %s", crop_tuples_translated)
         return crop_tuples_translated  # [(left, up, right, bottom),...]
@@ -1096,10 +1063,13 @@ def translate_crops(crop_tuples, translate_tuple):
     crop_tuples_translated = []
     for crop_tuple in crop_tuples:
         crop_tuples_translated.append(
-            (crop_tuple[0] - translate_tuple[0],
-             crop_tuple[1] - translate_tuple[1],
-             crop_tuple[2] - translate_tuple[0],
-             crop_tuple[3] - translate_tuple[1]))
+            (
+                crop_tuple[0] - translate_tuple[0],
+                crop_tuple[1] - translate_tuple[1],
+                crop_tuple[2] - translate_tuple[0],
+                crop_tuple[3] - translate_tuple[1],
+            )
+        )
     return crop_tuples_translated
 
 
@@ -1115,6 +1085,7 @@ def compute_working_canvas(crop_tuples):
     bottommost = max(crop_tuples, key=itemgetter(3))[3]
     canvas_size = [rightmost - leftmost, bottommost - topmost]
     return canvas_size
+
 
 def alternating_outputfile(prof_name):
     """Return alternating output filename and old filename.
@@ -1135,6 +1106,7 @@ def alternating_outputfile(prof_name):
         outputfile_old = os.path.join(TEMP_PATH, prof_name + "-b." + ftype)
     return (outputfile, outputfile_old)
 
+
 def span_single_image_simple(profile, force):
     """
     Spans a single image across all monitors. No corrections.
@@ -1150,20 +1122,22 @@ def span_single_image_simple(profile, force):
         img = Image.open(file)
         img = ImageOps.exif_transpose(img)
     except UnidentifiedImageError:
-        sp_logging.G_LOGGER.info(("Opening image '%s' failed with PIL.UnidentifiedImageError."
-                                  "It could be corrupted or is of foreign type."), file)
+        sp_logging.G_LOGGER.info(
+            ("Opening image '%s' failed with PIL.UnidentifiedImageError.It could be corrupted or is of foreign type."),
+            file,
+        )
         return
     canvas_tuple = tuple(compute_canvas(RESOLUTION_ARRAY, DISPLAY_OFFSET_ARRAY))
-    img_resize = resize_to_fill(img, canvas_tuple,
-                                zoom=profile.zoom, offset=profile.offsets)
+    img_resize = resize_to_fill(img, canvas_tuple, zoom=profile.zoom, offset=profile.offsets)
 
     outputfile, outputfile_old = alternating_outputfile(profile.name)
-    img_resize.save(outputfile, quality=95) # set quality if jpg is used, png unaffected
+    img_resize.save(outputfile, quality=95)  # set quality if jpg is used, png unaffected
     if profile.name == G_ACTIVE_PROFILE or force:
         set_wallpaper(outputfile, force, [file])
     if os.path.exists(outputfile_old):
         os.remove(outputfile_old)
     return 0
+
 
 def group_persp_data(persp_dat, groups):
     """Rerturn list of grouped perspective data objects."""
@@ -1175,10 +1149,11 @@ def group_persp_data(persp_dat, groups):
             "central_disp": persp_dat["central_disp"],
             "viewer_pos": persp_dat["viewer_pos"],
             "swivels": [persp_dat["swivels"][index] for index in grp],
-            "tilts": [persp_dat["tilts"][index] for index in grp]
+            "tilts": [persp_dat["tilts"][index] for index in grp],
         }
         group_persp_data_list.append(group_data)
     return group_persp_data_list
+
 
 def translate_to_group_coordinates(group_crop_list):
     """Translates lists of group crops into groups internal coordinates."""
@@ -1191,14 +1166,10 @@ def translate_to_group_coordinates(group_crop_list):
             top_anch = min([crp[1] for crp in grp_crops])
             transl_crops = []
             for crp in grp_crops:
-                transl_crops.append(
-                    (crp[0] - left_anch,
-                     crp[1] - top_anch,
-                     crp[2] - left_anch,
-                     crp[3] - top_anch)
-                )
+                transl_crops.append((crp[0] - left_anch, crp[1] - top_anch, crp[2] - left_anch, crp[3] - top_anch))
             group_crop_list_transl.append(transl_crops)
         return group_crop_list_transl
+
 
 # Take pixel densities of displays into account to have the image match
 # physically between displays.
@@ -1215,8 +1186,10 @@ def span_single_image_advanced(profile, force):
         img_list = [Image.open(fil) for fil in files]
         img_list = [ImageOps.exif_transpose(img) for img in img_list]
     except UnidentifiedImageError:
-        sp_logging.G_LOGGER.info(("Opening image '%s' failed with PIL.UnidentifiedImageError."
-                                  "It could be corrupted or is of foreign type."), files)
+        sp_logging.G_LOGGER.info(
+            ("Opening image '%s' failed with PIL.UnidentifiedImageError.It could be corrupted or is of foreign type."),
+            files,
+        )
         return
 
     # Cropping now sections of the image to be shown, USE EFFECTIVE WORKING
@@ -1224,9 +1197,11 @@ def span_single_image_advanced(profile, force):
     manual_offsets = profile.manual_offsets
     cropped_images = {}
     crop_tuples = G_ACTIVE_DISPLAYSYSTEM.get_ppi_norm_crops(manual_offsets)
-    sp_logging.G_LOGGER.info("G_A_DSYS.use_perspective: %s, prof.perspective: %s",
-                             G_ACTIVE_DISPLAYSYSTEM.use_perspective,
-                             profile.perspective)
+    sp_logging.G_LOGGER.info(
+        "G_A_DSYS.use_perspective: %s, prof.perspective: %s",
+        G_ACTIVE_DISPLAYSYSTEM.use_perspective,
+        profile.perspective,
+    )
     persp_dat = None
     if G_ACTIVE_DISPLAYSYSTEM.use_perspective:
         persp_dat = G_ACTIVE_DISPLAYSYSTEM.get_persp_data(profile.perspective)
@@ -1236,37 +1211,31 @@ def span_single_image_advanced(profile, force):
     else:
         spangroups = [list(range(NUM_DISPLAYS))]
 
-    grp_crop_tuples = translate_to_group_coordinates(
-        [[crop_tuples[index] for index in grp] for grp in spangroups])
+    grp_crop_tuples = translate_to_group_coordinates([[crop_tuples[index] for index in grp] for grp in spangroups])
     grp_res_array = [[RESOLUTION_ARRAY[index] for index in grp] for grp in spangroups]
     grp_persp_dat = group_persp_data(persp_dat, spangroups)
 
-    for img, grp, grp_p_dat, grp_crops, grp_res_arr in zip(img_list,
-                                                           spangroups,
-                                                           grp_persp_dat,
-                                                           grp_crop_tuples,
-                                                           grp_res_array):
+    for img, grp, grp_p_dat, grp_crops, grp_res_arr in zip(
+        img_list, spangroups, grp_persp_dat, grp_crop_tuples, grp_res_array
+    ):
         if persp_dat:
-            proj_plane_crops, persp_coeffs = persp.get_backprojected_display_system(grp_crops,
-                                                                                    grp_p_dat)
+            proj_plane_crops, persp_coeffs = persp.get_backprojected_display_system(grp_crops, grp_p_dat)
             # Canvas containing back-projected displays
             canvas_tuple_proj = tuple(compute_working_canvas(proj_plane_crops))
             # Canvas containing ppi normalized displays
             canvas_tuple_trgt = tuple(compute_working_canvas(grp_crops))
             sp_logging.G_LOGGER.info("Back-projected canvas size: %s", canvas_tuple_proj)
-            img_workingsize = resize_to_fill(img, canvas_tuple_proj,
-                                             zoom=profile.zoom, offset=profile.offsets)
-            for crop_tup, coeffs, ppin_crop, (i_res, res) in zip(proj_plane_crops,
-                                                                 persp_coeffs,
-                                                                 grp_crops,
-                                                                 enumerate(grp_res_arr)):
+            img_workingsize = resize_to_fill(img, canvas_tuple_proj, zoom=profile.zoom, offset=profile.offsets)
+            for _crop_tup, coeffs, ppin_crop, (i_res, res) in zip(
+                proj_plane_crops, persp_coeffs, grp_crops, enumerate(grp_res_arr)
+            ):
                 # Whole image needs to be transformed for each display separately
                 # since the coeffs live between the full back-projected plane
                 # containing all displays and the full 'target' working canvas
                 # size canvas_tuple_trgt containing ppi normalized displays.
-                persp_crop = img_workingsize.transform(canvas_tuple_trgt,
-                                                       Image.Transform.PERSPECTIVE, coeffs,
-                                                       Image.Resampling.BICUBIC)
+                persp_crop = img_workingsize.transform(
+                    canvas_tuple_trgt, Image.Transform.PERSPECTIVE, coeffs, Image.Resampling.BICUBIC
+                )
                 ## persp_crop.save(str(canvas_tuple_trgt)+str(crop_tup), "PNG")
                 # Crop desired region from transformed image which is now in
                 # ppi normalized resolution
@@ -1282,8 +1251,7 @@ def span_single_image_advanced(profile, force):
             # Image is now the height of the eff tallest display + possible manual
             # offsets and the width of the combined eff widths + possible manual
             # offsets.
-            img_workingsize = resize_to_fill(img, canvas_tuple_eff,
-                                             zoom=profile.zoom, offset=profile.offsets)
+            img_workingsize = resize_to_fill(img, canvas_tuple_eff, zoom=profile.zoom, offset=profile.offsets)
             # Simultaneously make crops at working size and then resize down to actual
             # resolution from RESOLUTION_ARRAY as needed.
             for crop_tup, (i_res, res) in zip(grp_crops, enumerate(grp_res_arr)):
@@ -1301,13 +1269,13 @@ def span_single_image_advanced(profile, force):
     combined_image = Image.new("RGB", canvas_tuple_fin, color=0)
     combined_image.load()
     # for i in range(len(cropped_images)):
-        # combined_image.paste(cropped_images[i], DISPLAY_OFFSET_ARRAY[i])
+    # combined_image.paste(cropped_images[i], DISPLAY_OFFSET_ARRAY[i])
     for crp_id in cropped_images:
         combined_image.paste(cropped_images[crp_id], DISPLAY_OFFSET_ARRAY[crp_id])
 
     # Saving combined image
     outputfile, outputfile_old = alternating_outputfile(profile.name)
-    combined_image.save(outputfile, quality=95) # set quality if jpg is used, png unaffected
+    combined_image.save(outputfile, quality=95)  # set quality if jpg is used, png unaffected
     if profile.name == G_ACTIVE_PROFILE or force:
         set_wallpaper(outputfile, force, files)
     if os.path.exists(outputfile_old):
@@ -1333,11 +1301,15 @@ def set_multi_image_wallpaper(profile, force):
             image = Image.open(file)
             image = ImageOps.exif_transpose(image)
         except UnidentifiedImageError:
-            sp_logging.G_LOGGER.info(("Opening image '%s' failed with PIL.UnidentifiedImageError."
-                                      "It could be corrupted or is of foreign type."), file)
+            sp_logging.G_LOGGER.info(
+                (
+                    "Opening image '%s' failed with PIL.UnidentifiedImageError."
+                    "It could be corrupted or is of foreign type."
+                ),
+                file,
+            )
             return
-        img_resized.append(resize_to_fill(image, res,
-                                          zoom=profile.zoom, offset=profile.offsets))
+        img_resized.append(resize_to_fill(image, res, zoom=profile.zoom, offset=profile.offsets))
     canvas_tuple = tuple(compute_canvas(RESOLUTION_ARRAY, DISPLAY_OFFSET_ARRAY))
     combined_image = Image.new("RGB", canvas_tuple, color=0)
     combined_image.load()
@@ -1345,7 +1317,7 @@ def set_multi_image_wallpaper(profile, force):
         combined_image.paste(img_resized[i], DISPLAY_OFFSET_ARRAY[i])
 
     outputfile, outputfile_old = alternating_outputfile(profile.name)
-    combined_image.save(outputfile, quality=95) # set quality if jpg is used, png unaffected
+    combined_image.save(outputfile, quality=95)  # set quality if jpg is used, png unaffected
     if profile.name == G_ACTIVE_PROFILE or force:
         set_wallpaper(outputfile, force, files)
     if os.path.exists(outputfile_old):
@@ -1358,6 +1330,7 @@ def set_multi_image_wallpaper(profile, force):
 #     if not result:
 #         raise ctypes.WinError(ctypes.get_last_error())
 
+
 def set_wallpaper(outputfile, force=False, source_files=None):
     """
     Master method to set the composed image as wallpaper.
@@ -1369,26 +1342,26 @@ def set_wallpaper(outputfile, force=False, source_files=None):
     if IS_WINDOWS:
         set_wallpaper_win(outputfile)
     # Old wallpaper setting code with no transition
-#         spi_setdeskwallpaper = 20
-#         spif_update_ini_file = 1
-#         spif_send_change = 2
-#         user32 = ctypes.WinDLL('user32', use_last_error=True)
-#         spiw = user32.SystemParametersInfoW
-#         spiw.argtypes = [
-#             ctypes.c_uint,
-#             ctypes.c_uint,
-#             ctypes.c_void_p,
-#             ctypes.c_uint]
-#         spiw.restype = ctypes.c_int
-#         spiw.errcheck = errcheck
-#         spi_success = spiw(
-#             spi_setdeskwallpaper,
-#             0,
-#             outputfile,
-#             spif_update_ini_file | spif_send_change)
-#         if spi_success == 0:
-#             sp_logging.G_LOGGER.info("SystemParametersInfo wallpaper set failed with \
-# spi_success: '%s'", spi_success)
+    #         spi_setdeskwallpaper = 20
+    #         spif_update_ini_file = 1
+    #         spif_send_change = 2
+    #         user32 = ctypes.WinDLL('user32', use_last_error=True)
+    #         spiw = user32.SystemParametersInfoW
+    #         spiw.argtypes = [
+    #             ctypes.c_uint,
+    #             ctypes.c_uint,
+    #             ctypes.c_void_p,
+    #             ctypes.c_uint]
+    #         spiw.restype = ctypes.c_int
+    #         spiw.errcheck = errcheck
+    #         spi_success = spiw(
+    #             spi_setdeskwallpaper,
+    #             0,
+    #             outputfile,
+    #             spif_update_ini_file | spif_send_change)
+    #         if spi_success == 0:
+    #             sp_logging.G_LOGGER.info("SystemParametersInfo wallpaper set failed with \
+    # spi_success: '%s'", spi_success)
     elif IS_LINUX:
         set_wallpaper_linux(outputfile, force)
     elif IS_MACOS:
@@ -1403,13 +1376,11 @@ def set_wallpaper(outputfile, force=False, source_files=None):
         sp_logging.G_LOGGER.info("Unknown platform: %s", sys.platform)
     script_file = os.path.join(CONFIG_PATH, "run-after-wp-change.py")
     if os.path.isfile(script_file):
-        subprocess.run(["python3",
-                        script_file,
-                        str(outputfile),
-                        str(source_files)])
+        subprocess.run(["python3", script_file, str(outputfile), str(source_files)])
     return 0
 
-def set_wallpaper_macos(outputfile, image_piece_list = None, force = False):
+
+def set_wallpaper_macos(outputfile, image_piece_list=None, force=False):
     """
     MacOS has a separate desktop for each screen, each of which has their own
     background image property. This means that the wallpaper has to be set
@@ -1456,9 +1427,7 @@ def set_wallpaper_macos(outputfile, image_piece_list = None, force = False):
     options = {}
     if profname == G_ACTIVE_PROFILE or image_piece_list or force:
         for screen, imgurl in zip(sorted_screens, img_piece_urls):
-            (result, error) = sharedSpace.setDesktopImageURL_forScreen_options_error_(
-                imgurl, screen, options, None
-            )
+            (result, error) = sharedSpace.setDesktopImageURL_forScreen_options_error_(imgurl, screen, options, None)
             if error:
                 sp_logging.G_LOGGER.info("setDesktopImageURL failed with error: %s", error)
 
@@ -1501,26 +1470,39 @@ def set_wallpaper_linux(outputfile, force=False):
             sp_logging.G_LOGGER.info("Formatted custom command is: '%s'", formatted_command)
             subprocess.run(formatted_command)
     if desk_env:
-        if desk_env in ["gnome", "gnome-wayland", "gnome-xorg",
-                          "unity", "ubuntu",
-                          "pantheon", "budgie-desktop",
-                          "pop", "zorin"]:
-            subprocess.run(["/usr/bin/gsettings", "set",
-                            "org.gnome.desktop.background", "picture-uri-dark",
-                            file])
-            subprocess.run(["/usr/bin/gsettings", "set",
-                            "org.gnome.desktop.background", "picture-uri",
-                            file])
-        elif desk_env in ["cinnamon"] or "cinnamon" in desk_env.lower():
-            subprocess.run(["/usr/bin/gsettings", "set",
-                            "org.cinnamon.desktop.background", "picture-uri",
-                            file])
-        elif desk_env in ["mate"]:
-            subprocess.run(["/usr/bin/gsettings",
-                            "set",
-                            "org.mate.background",
-                            "picture-filename",
-                            outputfile])
+        if desk_env in [
+            "gnome",
+            "gnome-wayland",
+            "gnome-xorg",
+            "unity",
+            "ubuntu",
+            "pantheon",
+            "budgie-desktop",
+            "pop",
+            "zorin",
+        ]:
+            subprocess.run(
+                [
+                    "/usr/bin/gsettings",
+                    "set",
+                    "org.gnome.desktop.background",
+                    "picture-uri-dark",
+                    file,
+                ]
+            )
+            subprocess.run(["/usr/bin/gsettings", "set", "org.gnome.desktop.background", "picture-uri", file])
+        elif desk_env == "cinnamon" or "cinnamon" in desk_env.lower():
+            subprocess.run(
+                [
+                    "/usr/bin/gsettings",
+                    "set",
+                    "org.cinnamon.desktop.background",
+                    "picture-uri",
+                    file,
+                ]
+            )
+        elif desk_env == "mate":
+            subprocess.run(["/usr/bin/gsettings", "set", "org.mate.background", "picture-filename", outputfile])
         elif desk_env in ["xfce", "xubuntu", "ubuntustudio"]:
             xfce_actions(outputfile)
         elif desk_env.lower() == "lubuntu" or "lxqt" in desk_env.lower():
@@ -1530,13 +1512,15 @@ def set_wallpaper_linux(outputfile, force=False):
                 try:
                     subprocess.run(["pcmanfm-qt", "-w", outputfile])
                 except OSError:
-                    sp_logging.G_LOGGER.info("Exception: failure to find either command \
-'pcmanfm' or 'pcmanfm-qt'. Exiting.")
+                    sp_logging.G_LOGGER.info(
+                        "Exception: failure to find either command \
+'pcmanfm' or 'pcmanfm-qt'. Exiting."
+                    )
                     sys.exit(1)
         # elif desk_env in ["/usr/share/xsessions/plasma", "plasma"]:
         elif running_kde():
             kdeplasma_actions(outputfile, force=force, profile_name=G_ACTIVE_PROFILE)
-        elif "i3" in desk_env or desk_env in ["/usr/share/xsessions/bspwm"]:
+        elif "i3" in desk_env or desk_env == "/usr/share/xsessions/bspwm":
             subprocess.run(["feh", "--bg-scale", "--no-xinerama", outputfile])
         else:
             if set_command == "":
@@ -1547,14 +1531,17 @@ settings file superpaper/general_settings. Exiting."
                 show_message_dialog(message, "Error")
                 sys.exit(1)
             else:
-                os.system(set_command.format(image=outputfile))
+                os.system(set_command.format(image=outputfile))  # ty:ignore[deprecated]
     else:
         if running_kde():
             kdeplasma_actions(outputfile, force=force, profile_name=G_ACTIVE_PROFILE)
         elif set_command == "":
-            sp_logging.G_LOGGER.info("DESKTOP_SESSION variable is empty, \
-attempting to use feh to set the wallpaper.")
+            sp_logging.G_LOGGER.info(
+                "DESKTOP_SESSION variable is empty, \
+attempting to use feh to set the wallpaper."
+            )
             subprocess.run(["feh", "--bg-scale", "--no-xinerama", outputfile])
+
 
 def set_wallpaper_piecewise(image_piece_list):
     """
@@ -1573,7 +1560,7 @@ def set_wallpaper_piecewise(image_piece_list):
             kdeplasma_actions(None, image_piece_list, profile_name=G_ACTIVE_PROFILE)
         # desk_env = os.environ.get("DESKTOP_SESSION")
         # elif desk_env in ["xfce", "xubuntu", "ubuntustudio"]:
-            # xfce_actions(None, image_piece_list)
+        # xfce_actions(None, image_piece_list)
     elif IS_MACOS:
         set_wallpaper_macos(None, image_piece_list=image_piece_list)
     else:
@@ -1593,8 +1580,7 @@ def special_image_cropper(outputfile):
     img = Image.open(outputfile)
     outputname = os.path.splitext(outputfile)[0]
     img_names = []
-    crop_id = 0
-    for res, offset in zip(RESOLUTION_ARRAY, DISPLAY_OFFSET_ARRAY):
+    for crop_id, (res, offset) in enumerate(zip(RESOLUTION_ARRAY, DISPLAY_OFFSET_ARRAY)):
         left = offset[0]
         top = offset[1]
         right = left + res[0]
@@ -1604,8 +1590,8 @@ def special_image_cropper(outputfile):
         fname = outputname + "-crop-" + str(crop_id) + ".png"
         img_names.append(fname)
         cropped_img.save(fname, "PNG")
-        crop_id += 1
     return img_names
+
 
 def remove_old_temp_files(outputfile):
     """
@@ -1619,11 +1605,9 @@ def remove_old_temp_files(outputfile):
     # print(opname)
     oldfileid = ""
     if opname.endswith("-a"):
-        newfileid = "-a"
         oldfileid = "-b"
         # print(oldfileid)
     elif opname.endswith("-b"):
-        newfileid = "-b"
         oldfileid = "-a"
         # print(oldfileid)
     else:
@@ -1634,21 +1618,22 @@ def remove_old_temp_files(outputfile):
         match_string = profilename + oldfileid + "-crop"
         match_string = match_string.strip()
         if sp_logging.DEBUG:
-            sp_logging.G_LOGGER.info("Removing images matching with: '%s'",
-                                     match_string)
+            sp_logging.G_LOGGER.info("Removing images matching with: '%s'", match_string)
         for temp_file in os.listdir(TEMP_PATH):
             if match_string in temp_file:
                 # print(temp_file)
                 os.remove(os.path.join(TEMP_PATH, temp_file))
 
+
 def _escape_js_string(s):
     """Escape a string for safe embedding in a JavaScript string literal."""
-    s = s.replace('\\', '\\\\')
+    s = s.replace("\\", "\\\\")
     s = s.replace('"', '\\"')
     s = s.replace("'", "\\'")
-    s = s.replace('\n', '\\n')
-    s = s.replace('\r', '\\r')
+    s = s.replace("\n", "\\n")
+    s = s.replace("\r", "\\r")
     return s
+
 
 def _get_qdbus_cmd():
     """Return the available qdbus command name (qdbus6 for Plasma 6, qdbus otherwise)."""
@@ -1656,6 +1641,7 @@ def _get_qdbus_cmd():
         if shutil.which(cmd):
             return cmd
     return None
+
 
 def get_kde_activity_mapping():
     """Get mapping of activity IDs to activity names."""
@@ -1667,38 +1653,49 @@ def get_kde_activity_mapping():
         # Get list of activity IDs
         result = subprocess.run(
             [qdbus, "org.kde.ActivityManager", "/ActivityManager/Activities", "ListActivities"],
-            capture_output=True, text=True, timeout=5
+            capture_output=True,
+            text=True,
+            timeout=5,
         )
         if result.returncode != 0:
             return {}
 
-        activity_ids = result.stdout.strip().split('\n')
+        activity_ids = result.stdout.strip().split("\n")
         activity_map = {}
 
         # Get name for each activity
         for activity_id in activity_ids:
             if activity_id:
                 result = subprocess.run(
-                    [qdbus, "org.kde.ActivityManager", "/ActivityManager/Activities",
-                     "ActivityName", activity_id],
-                    capture_output=True, text=True, timeout=5
+                    [
+                        qdbus,
+                        "org.kde.ActivityManager",
+                        "/ActivityManager/Activities",
+                        "ActivityName",
+                        activity_id,
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
                 )
                 if result.returncode == 0:
                     activity_name = result.stdout.strip()
                     activity_map[activity_id] = activity_name
 
         sp_logging.G_LOGGER.info("KDE Activities found: %s", activity_map)
-        return activity_map
     except Exception as e:
         sp_logging.G_LOGGER.error("Failed to get KDE activities: %s", e)
         return {}
+    else:
+        return activity_map
+
 
 def kde_load_desktop_mapping_cache():
     """Load cached desktop-to-activity mapping from file."""
     cache_file = os.path.join(CONFIG_PATH, "kde_desktop_mapping.json")
     try:
         if os.path.isfile(cache_file):
-            with open(cache_file, 'r') as f:
+            with open(cache_file) as f:
                 data = json.load(f)
                 if not isinstance(data, dict):
                     sp_logging.G_LOGGER.warning("Invalid cache format, expected dict, got %s", type(data).__name__)
@@ -1714,15 +1711,17 @@ def kde_load_desktop_mapping_cache():
         sp_logging.G_LOGGER.error("Failed to load desktop mapping cache: %s", e)
     return {}
 
+
 def kde_save_desktop_mapping_cache(mapping):
     """Save desktop-to-activity mapping to file."""
     cache_file = os.path.join(CONFIG_PATH, "kde_desktop_mapping.json")
     try:
-        with open(cache_file, 'w') as f:
+        with open(cache_file, "w") as f:
             json.dump(mapping, f, indent=2)
         sp_logging.G_LOGGER.info("Saved desktop mapping cache to %s", cache_file)
     except Exception as e:
         sp_logging.G_LOGGER.error("Failed to save desktop mapping cache: %s", e)
+
 
 def kde_get_desktop_to_activity_mapping():
     """
@@ -1745,17 +1744,21 @@ def kde_get_desktop_to_activity_mapping():
         # Get list of all activities
         result = subprocess.run(
             [qdbus, "org.kde.ActivityManager", "/ActivityManager/Activities", "ListActivities"],
-            capture_output=True, text=True, timeout=5
+            capture_output=True,
+            text=True,
+            timeout=5,
         )
         if result.returncode != 0:
             return desktop_to_activity
 
-        activity_ids = [a.strip() for a in result.stdout.strip().split('\n') if a.strip()]
+        activity_ids = [a.strip() for a in result.stdout.strip().split("\n") if a.strip()]
 
         # Get current activity
         result = subprocess.run(
             [qdbus, "org.kde.ActivityManager", "/ActivityManager/Activities", "CurrentActivity"],
-            capture_output=True, text=True, timeout=5
+            capture_output=True,
+            text=True,
+            timeout=5,
         )
         current_activity_id = result.stdout.strip() if result.returncode == 0 else None
 
@@ -1772,7 +1775,8 @@ print(result.join(';'));
         sessionb = dbus.SessionBus()
         plasma_interface = dbus.Interface(
             sessionb.get_object("org.kde.plasmashell", "/PlasmaShell"),
-            dbus_interface="org.kde.PlasmaShell")
+            dbus_interface="org.kde.PlasmaShell",
+        )
 
         desktop_info = plasma_interface.evaluateScript(script)
         sp_logging.G_LOGGER.info("Desktop info from plasma: %s", desktop_info)
@@ -1781,9 +1785,9 @@ print(result.join(';'));
         all_desktop_ids = []
         active_desktop_ids = []
         if desktop_info:
-            for item in desktop_info.split(';'):
-                if ',' in item:
-                    parts = item.split(',')
+            for item in desktop_info.split(";"):
+                if "," in item:
+                    parts = item.split(",")
                     desktop_id = int(parts[0])
                     screen_id = int(parts[1])
                     all_desktop_ids.append(desktop_id)
@@ -1821,12 +1825,14 @@ print(result.join(';'));
         sp_logging.G_LOGGER.info("Current activity: %s", current_activity_id)
         sp_logging.G_LOGGER.info("Active desktops: %s", active_desktop_ids)
         sp_logging.G_LOGGER.info("Desktop to activity mapping: %s", desktop_to_activity)
-        return desktop_to_activity
 
     except Exception as e:
         sp_logging.G_LOGGER.error("Failed to get desktop-activity mapping: %s", e)
         sp_logging.G_LOGGER.error(traceback.format_exc())
         return {}
+    else:
+        return desktop_to_activity
+
 
 def kde_set_activity_wallpapers(activity_wallpapers_map):
     """
@@ -1850,13 +1856,16 @@ def kde_set_activity_wallpapers(activity_wallpapers_map):
     for desktop_id, activity_id in desktop_to_activity.items():
         if activity_id in activity_wallpapers_map:
             images = activity_wallpapers_map[activity_id]
-            file_urls = ['file://' + img for img in images]
-            images_str = ', '.join('"' + _escape_js_string(url) + '"' for url in file_urls)
-            desktop_images_js += f'    {desktop_id}: [{images_str}],\n'
+            file_urls = ["file://" + img for img in images]
+            images_str = ", ".join('"' + _escape_js_string(url) + '"' for url in file_urls)
+            desktop_images_js += f"    {desktop_id}: [{images_str}],\n"
     desktop_images_js += "}"
 
-    script = """
-var desktopImagesMap = """ + desktop_images_js + """;
+    script = (
+        """
+var desktopImagesMap = """
+        + desktop_images_js
+        + """;
 
 // Get all desktops
 var allDesktops = desktops();
@@ -1938,15 +1947,15 @@ for(var idx = 0; idx < allDesktops.length; idx++) {
     allDesktops[idx].reloadConfig();
 }
 """
+    )
 
     try:
         sp_logging.G_LOGGER.info("kde_set_activity_wallpapers: Creating dbus connection")
         sessionb = dbus.SessionBus()
         plasma_interface = dbus.Interface(
-            sessionb.get_object(
-                "org.kde.plasmashell",
-                "/PlasmaShell"),
-            dbus_interface="org.kde.PlasmaShell")
+            sessionb.get_object("org.kde.plasmashell", "/PlasmaShell"),
+            dbus_interface="org.kde.PlasmaShell",
+        )
 
         sp_logging.G_LOGGER.info("kde_set_activity_wallpapers: Evaluating KDE script")
         plasma_interface.evaluateScript(script)
@@ -1955,7 +1964,8 @@ for(var idx = 0; idx < allDesktops.length; idx++) {
         sp_logging.G_LOGGER.error("kde_set_activity_wallpapers failed: %s", e)
         sp_logging.G_LOGGER.error(traceback.format_exc())
 
-def kdeplasma_actions(outputfile, image_piece_list = None, force=False, profile_name=None):
+
+def kdeplasma_actions(outputfile, image_piece_list=None, force=False, profile_name=None):
     """
     Sets the multi monitor wallpaper on KDE.
 
@@ -1996,22 +2006,29 @@ def kdeplasma_actions(outputfile, image_piece_list = None, force=False, profile_
                 sp_logging.G_LOGGER.info("Activity '%s' matched profile '%s'", act_name, profile_name)
             else:
                 # Try to find existing temp files for a profile matching this activity name
-                matching_files = [i for i in os.listdir(TEMP_PATH)
-                                 if os.path.isfile(os.path.join(TEMP_PATH, i))
-                                 and i.startswith(act_name + "-")
-                                 and "-crop-" in i]
+                matching_files = [
+                    i
+                    for i in os.listdir(TEMP_PATH)
+                    if os.path.isfile(os.path.join(TEMP_PATH, i)) and i.startswith(act_name + "-") and "-crop-" in i
+                ]
 
                 if matching_files:
                     matching_files.sort()
                     full_paths = [os.path.join(TEMP_PATH, f) for f in matching_files]
                     activity_wallpapers[act_id] = full_paths
-                    sp_logging.G_LOGGER.info("Activity '%s' using cached wallpapers from profile '%s'",
-                                           act_name, act_name)
+                    sp_logging.G_LOGGER.info(
+                        "Activity '%s' using cached wallpapers from profile '%s'",
+                        act_name,
+                        act_name,
+                    )
                 elif current_img_names:
                     # No matching profile found, use current profile as fallback
                     activity_wallpapers[act_id] = current_img_names
-                    sp_logging.G_LOGGER.info("Activity '%s' using fallback wallpapers from profile '%s'",
-                                           act_name, profile_name)
+                    sp_logging.G_LOGGER.info(
+                        "Activity '%s' using fallback wallpapers from profile '%s'",
+                        act_name,
+                        profile_name,
+                    )
 
         # Apply wallpapers to all activities at once
         if activity_wallpapers:
@@ -2114,21 +2131,18 @@ for(var idx = 0; idx < allDesktops.length; idx++) {{
     filess_img_names = []
     for fname in img_names:
         filess_img_names.append("file://" + fname)
-    filess_img_names_str = ', '.join('"' + _escape_js_string(item) + '"' for item in filess_img_names)
+    filess_img_names_str = ", ".join('"' + _escape_js_string(item) + '"' for item in filess_img_names)
     # print(script.format(imagelist=filess_img_names_str))
 
     sp_logging.G_LOGGER.info("kdeplasma_actions: Creating dbus connection")
     sessionb = dbus.SessionBus()
     plasma_interface = dbus.Interface(
-        sessionb.get_object(
-            "org.kde.plasmashell",
-            "/PlasmaShell"),
-        dbus_interface="org.kde.PlasmaShell")
+        sessionb.get_object("org.kde.plasmashell", "/PlasmaShell"),
+        dbus_interface="org.kde.PlasmaShell",
+    )
     if profname == G_ACTIVE_PROFILE or image_piece_list or force:
         sp_logging.G_LOGGER.info("kdeplasma_actions: Evaluating KDE script")
-        plasma_interface.evaluateScript(
-            script.format(imagelist=filess_img_names_str)
-        )
+        plasma_interface.evaluateScript(script.format(imagelist=filess_img_names_str))
         sp_logging.G_LOGGER.info("kdeplasma_actions: Script evaluation complete")
 
     # Delete old images after new ones are set
@@ -2147,27 +2161,17 @@ def xfce_actions(outputfile):
     correct pieces that then are set to their respective displays.
     """
 
-    read_prop = subprocess.Popen(["xfconf-query",
-                                  "-c",
-                                  "xfce4-desktop",
-                                  "-p",
-                                  "/backdrop",
-                                  "-l"],
-                                 stdout=subprocess.PIPE)
+    read_prop = subprocess.Popen(
+        ["xfconf-query", "-c", "xfce4-desktop", "-p", "/backdrop", "-l"], stdout=subprocess.PIPE
+    )
     props = []
     if read_prop.stdout is not None:
         props = read_prop.stdout.read().decode("utf-8").split("\n")
     for prop in props:
         if "workspace0/image-style" in prop:
-            os.system(
-                "xfconf-query -c xfce4-desktop -p "
-                + prop
-                + " -s 6")
+            os.system("xfconf-query -c xfce4-desktop -p " + prop + " -s 6")  # ty:ignore[deprecated]
         elif "workspace0/last-image" in prop:
-            os.system(
-                "xfconf-query -c xfce4-desktop -p "
-                + prop
-                + " -s '%s'" % outputfile)
+            os.system("xfconf-query -c xfce4-desktop -p " + prop + f" -s '{outputfile}'")  # ty:ignore[deprecated]
 
     # Delete old images after new ones are set
     if outputfile:
@@ -2187,8 +2191,9 @@ def change_wallpaper_job(profile, force=False, advance=False):
         if profile.spanmode.startswith("single") and profile.ppimode is False:
             thrd = Thread(target=span_single_image_simple, args=(profile, force), daemon=True)
             thrd.start()
-        elif ((profile.spanmode.startswith("single") and profile.ppimode is True) or
-               profile.spanmode.startswith("advanced")):
+        elif (profile.spanmode.startswith("single") and profile.ppimode is True) or profile.spanmode.startswith(
+            "advanced"
+        ):
             thrd = Thread(target=span_single_image_advanced, args=(profile, force), daemon=True)
             thrd.start()
         elif profile.spanmode.startswith("multi"):
@@ -2210,7 +2215,7 @@ def run_profile_job(profile, startup=False):
     """
     global G_ACTIVE_DISPLAYSYSTEM
     # get_display_data()  # Check here so new profile has fresh data.
-    refresh_display_data() # Refresh available display data.
+    refresh_display_data()  # Refresh available display data.
 
     repeating_timer = None
     thrd = None
@@ -2227,8 +2232,7 @@ def run_profile_job(profile, startup=False):
         #     sp_logging.G_LOGGER.info("Running wallpaper slideshow.")
         if not startup:
             thrd = change_wallpaper_job(profile)
-        repeating_timer = RepeatedTimer(
-            profile.delay_list[0], change_wallpaper_job, profile, advance=True)
+        repeating_timer = RepeatedTimer(profile.delay_list[0], change_wallpaper_job, profile, advance=True)
     return (repeating_timer, thrd)
 
 
@@ -2242,44 +2246,42 @@ def quick_profile_job(profile):
     """
     with G_WALLPAPER_CHANGE_LOCK:
         # Look for old temp image:
-        files = [i for i in os.listdir(TEMP_PATH)
-                 if os.path.isfile(os.path.join(TEMP_PATH, i))
-                 and (i.startswith(profile.name + "-a") or
-                      i.startswith(profile.name + "-b"))]
+        files = [
+            i
+            for i in os.listdir(TEMP_PATH)
+            if os.path.isfile(os.path.join(TEMP_PATH, i)) and (i.startswith((profile.name + "-a", profile.name + "-b")))
+        ]
         if sp_logging.DEBUG:
             sp_logging.G_LOGGER.info("quickswitch file lookup: %s", files)
         if files:
-            image_pieces = [os.path.join(TEMP_PATH, i) for i in files
-                            if "-crop-" in i]
+            image_pieces = [os.path.join(TEMP_PATH, i) for i in files if "-crop-" in i]
             if use_image_pieces() and image_pieces:
                 image_pieces.sort()
                 if sp_logging.DEBUG:
-                    sp_logging.G_LOGGER.info("Use wallpaper crop pieces: %s",
-                                             image_pieces)
-                thrd = Thread(target=set_wallpaper_piecewise,
-                              args=(image_pieces,),
-                              daemon=True)
+                    sp_logging.G_LOGGER.info("Use wallpaper crop pieces: %s", image_pieces)
+                thrd = Thread(target=set_wallpaper_piecewise, args=(image_pieces,), daemon=True)
                 thrd.start()
             elif IS_WINDOWS:
                 # Skip quick switch on Windows if not using perspective corrections.
                 if profile.spanmode == "advanced" and G_ACTIVE_DISPLAYSYSTEM.use_perspective:
-                    if ((profile.perspective == "default" and G_ACTIVE_DISPLAYSYSTEM.default_perspective != None) or
-                         profile.perspective not in ["default", "disabled"]):
-                        thrd = Thread(target=set_wallpaper,
-                              args=(os.path.join(TEMP_PATH, files[0]),),
-                              daemon=True)
+                    if (
+                        profile.perspective == "default" and G_ACTIVE_DISPLAYSYSTEM.default_perspective is not None
+                    ) or profile.perspective not in ["default", "disabled"]:
+                        thrd = Thread(
+                            target=set_wallpaper,
+                            args=(os.path.join(TEMP_PATH, files[0]),),
+                            daemon=True,
+                        )
                         thrd.start()
                 else:
                     pass
             else:
-                thrd = Thread(target=set_wallpaper,
-                              args=(os.path.join(TEMP_PATH, files[0]),),
-                              daemon=True)
+                thrd = Thread(target=set_wallpaper, args=(os.path.join(TEMP_PATH, files[0]),), daemon=True)
                 thrd.start()
         else:
             if sp_logging.DEBUG:
-                sp_logging.G_LOGGER.info("Old file for quickswitch was not found. %s",
-                                         files)
+                sp_logging.G_LOGGER.info("Old file for quickswitch was not found. %s", files)
+
 
 def use_image_pieces():
     """Determine if it improves perfomance to use existing image pieces.
@@ -2287,14 +2289,8 @@ def use_image_pieces():
     Systems that use image pieces are: KDE, XFCE.
     """
     if IS_LINUX:
-        if running_kde():
-            return True
         # desk_env = os.environ.get("DESKTOP_SESSION")
         # elif desk_env in ["xfce", "xubuntu", "ubuntustudio"]:
-            # return True
-        else:
-            return False
-    elif IS_MACOS:
-        return True
-    else:
-        return False
+        #     return True
+        return running_kde()
+    return bool(IS_MACOS)

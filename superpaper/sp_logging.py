@@ -2,13 +2,16 @@
 
 import logging
 import os
+from typing import Optional
 
 from superpaper.sp_paths import TEMP_PATH
 
-DEBUG = False
-VERBOSE = False
-LOGGING = False
+DEBUG: bool = False
+VERBOSE: bool = False
+LOGGING: bool = False
 G_LOGGER = logging.getLogger("default")
+CONSOLE_HANDLER: Optional[logging.Handler] = None
+FILE_HANDLER: Optional[logging.Handler] = None
 
 if DEBUG and not LOGGING:
     G_LOGGER.setLevel(logging.INFO)
@@ -17,11 +20,11 @@ if DEBUG and not LOGGING:
 elif LOGGING:
     DEBUG = True
     G_LOGGER.setLevel(logging.INFO)
-    FILE_HANDLER = logging.FileHandler(os.path.join(TEMP_PATH, "log"),
-                                       mode="w")
+    FILE_HANDLER = logging.FileHandler(os.path.join(TEMP_PATH, "log"), mode="w")
     G_LOGGER.addHandler(FILE_HANDLER)
     CONSOLE_HANDLER = logging.StreamHandler()
     G_LOGGER.addHandler(CONSOLE_HANDLER)
+
 
 def custom_exception_handler(exceptiontype, value, tb_var):
     """Log uncaught exceptions."""

@@ -40,7 +40,7 @@ def make_appimage(dist_path, version):
     print(" ".join(cmd))
     os.system(" ".join(cmd))
     print("make-appimage-release: Appdir compilation done.")
-    
+
     # intermediate step: copy resources into appdir directory
     appdir_usr = os.path.join(appdir, "usr")
     appdir_resource_target = os.path.join(appdir_usr, "superpaper/resources")
@@ -48,7 +48,7 @@ def make_appimage(dist_path, version):
         os.makedirs(appdir_resource_target)
     for resrc in include_resources:
         shutil.copy2(resrc, appdir_resource_target)
-    
+
     # final step: package AppImage from appdir
     cmd2 = [
             "VERSION={}".format(version),
@@ -58,7 +58,7 @@ def make_appimage(dist_path, version):
            ]
     print(" ".join(cmd2))
     os.system(" ".join(cmd2))
-    
+
 
 def main():
     if not os.path.isdir(DISTPATH):
@@ -66,7 +66,7 @@ def main():
         print("Made dir %s" % DISTPATH)
     version = read_version()
     dist_path = os.path.join(DISTPATH)
-    
+
     # run pyinstaller build
     try:
         subprocess.call(["python3", "./release-tooling/make-pyinstaller-build.py"])
@@ -75,7 +75,7 @@ def main():
         exit(0)
     print("\nPyinstaller build done.\n")
 
-    make_appimage(dist_path, version)    
+    make_appimage(dist_path, version)
     print("AppImage package build done.")
 
     # done
