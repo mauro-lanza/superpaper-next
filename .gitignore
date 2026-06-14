@@ -7,8 +7,8 @@ __pycache__/
 *.pyc
 *.egg-info
 .venv
-.venv-tools/
-.ruff_cache/
+.venv-tools
+.ruff_cache
 
 # Build artifacts
 build/
