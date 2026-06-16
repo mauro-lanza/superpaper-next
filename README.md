@@ -29,6 +29,24 @@ This fork focuses on KDE Plasma 6 support and improving the wallpaper selection 
 - **Horizontal / vertical positioning**: move the visible area within the image to place the content where you want it, with a live preview
 - Saved per profile. These controls apply to a single fixed image, so they are reset and disabled while a profile's slideshow is enabled.
 
+### Native Wayland System Tray
+- **Interactive tray on Wayland**: a native `StatusNotifierItem` tray icon replaces the legacy X11 tray, which appeared but was completely unclickable on modern Wayland desktops (notably KDE Plasma 6).
+- **Full tray controls**: left-click opens the wallpaper settings, middle-click advances the wallpaper, and right-click shows the full menu with your profiles grouped under a **Profiles** submenu.
+- Automatically used on Linux when a `StatusNotifierWatcher` is present, falling back to the classic tray otherwise.
+
+### Display System Settings
+- **Dedicated Save / Revert**: display sizes, bezels and physical positions are system-wide settings (shared by all profiles) and now have their own explicit Save and Revert instead of being written to disk silently.
+- **Test before you commit**: "Apply" renders with your staged, unsaved system settings, so you can check bezels and sizes before saving them permanently.
+- **Collapsible band**: the system settings live in a collapsible "Display system settings" band above the profile selector; its Save/Revert buttons gray out when nothing has changed.
+- **Manual display sizes**: input display sizes manually with always-visible inch fields (the old "Override detected sizes" toggle is gone).
+
+### Stability & Bug Fixes
+- **Responsive while applying**: the GUI no longer freezes while a profile is being applied.
+- **Outer bezels on apply**: outer bezels are now respected when the wallpaper is applied, matching the preview.
+- **CLI `--profile`**: launching with `--profile <name>` now resolves the profile and applies the wallpaper on startup.
+- **Robust file handling**: a missing wallpaper file can no longer cause an infinite loop, and an empty image list no longer crashes.
+- Plus NumPy 1.24+ compatibility, Zorin OS detection, Python 3.13 install fixes, and various correctness/type-safety improvements.
+
 
 ## Planned Improvements
 
@@ -58,12 +76,13 @@ This fork focuses on KDE Plasma 6 support and improving the wallpaper selection 
 - **Bezel correction**: let the image continuously span behind your bezels.
 - **Perspective correction**: span the image even more flawlessly!
 - Manual pixel offsets for fine-tuning
+- **System display settings**: display sizes, bezels and positions are shared by all profiles, with a dedicated Save/Revert and a "test before save" Apply.
 - **Image zoom & positioning**: zoom into an image and move the visible area while it keeps filling the screen (single-image profiles)
 - Slideshow with configurable file order from local sources
 - Add wallpapers one by one or a folder at a time (no subfolders)
 - Command-line interface
 - Run a script after wallpaper change: [example script](./example-script/run-after-wp-change.py)
-- Tray applet for slideshow control
+- Tray applet for slideshow control (native StatusNotifierItem tray on Wayland)
 - Hotkey support for easy slideshow control (Only Linux and Windows)
 - Align test tool to help fine tune your settings (Accessible only from GUI)
 
