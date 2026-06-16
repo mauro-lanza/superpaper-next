@@ -586,8 +586,13 @@ Use absolute paths for best reliabilty."
             for diplay_image_list in self.all_files_in_paths:
                 self.iterators.append(self.ImageList(diplay_image_list, self.sortmode))
 
-        def next_wallpaper_files(self, peek=False):
+        def next_wallpaper_files(self, peek=False, _attempt=0):
             """Calls its internal iterators to give the next image for each monitor."""
+            # Guard against unbounded recursion: a persistently invalid entry
+            # (e.g. a dangling symlink that keeps being re-listed on reinit)
+            # would otherwise loop forever. After this many reinit attempts,
+            # give up and return whatever valid files were gathered (issue #135).
+            max_attempts = 20
             files = []
             for iterable in self.iterators:
                 if peek:
@@ -605,9 +610,15 @@ Use absolute paths for best reliabilty."
                     # reload all files by initializing
                     if sp_logging.DEBUG:
                         sp_logging.G_LOGGER.info("Ran into an invalid file, reinitializing..")
+                    if _attempt >= max_attempts:
+                        sp_logging.G_LOGGER.info(
+                            "next_wallpaper_files: giving up after %d attempts due to a persistently invalid file: %s",
+                            max_attempts,
+                            next_image,
+                        )
+                        return files
                     self.__init__(self.paths_array, self.sortmode)
-                    files = self.next_wallpaper_files()
-                    break
+                    return self.next_wallpaper_files(peek=peek, _attempt=_attempt + 1)
             return files
 
         class ImageList:

@@ -122,7 +122,17 @@ class TaskBarIcon(wx.adv.TaskBarIcon):
         # Should now return an object if a previous profile was written or
         # None if no previous data was found
         if STARTUP_PROFILE:
-            self.active_profile = self.get_profile_by_name(STARTUP_PROFILE)
+            # STARTUP_PROFILE may be a bare profile name or a full path to a
+            # .profile file (the CLI passes a path). Normalize to the profile
+            # name so it matches the entries in list_of_profiles; otherwise the
+            # lookup silently fails and no profile is applied (issue #140).
+            startup_name = os.path.splitext(os.path.basename(STARTUP_PROFILE))[0]
+            self.active_profile = self.get_profile_by_name(startup_name)
+            if self.active_profile is None:
+                sp_logging.G_LOGGER.error(
+                    "Startup profile '%s' could not be matched to a saved profile.",
+                    STARTUP_PROFILE,
+                )
         else:
             prev_active_prof = read_active_profile()
             if prev_active_prof:
@@ -131,7 +141,10 @@ class TaskBarIcon(wx.adv.TaskBarIcon):
                 self.active_profile = None
         if self.active_profile:
             wpproc.G_ACTIVE_PROFILE = self.active_profile.name
-        self.start_prev_profile(self.active_profile)
+        # An explicit CLI `--profile` launch (STARTUP_PROFILE set) should apply
+        # the wallpaper right away; a normal daemon restart only restores the
+        # last shown wallpaper without re-cycling (issue #140).
+        self.start_prev_profile(self.active_profile, apply_now=bool(STARTUP_PROFILE))
         # if self.active_profile is None:
         #     sp_logging.G_LOGGER.info("Starting up the first profile found.")
         #     self.start_profile(wx.EVT_MENU, self.list_of_profiles[0])
@@ -423,11 +436,21 @@ Check that it is formatted properly and valid keys."
         """Reloads profiles from disk."""
         self.list_of_profiles = list_profiles()
 
-    def start_prev_profile(self, profile):
-        """Checks if a previously running profile has been recorded and starts it."""
+    def start_prev_profile(self, profile, apply_now=False):
+        """Checks if a previously running profile has been recorded and starts it.
+
+        When ``apply_now`` is True (an explicit CLI ``--profile`` launch) the
+        wallpaper is rendered and applied immediately. Otherwise the last shown
+        wallpaper is restored without cycling and only the slideshow timer is
+        armed, so a normal daemon restart does not re-cycle on every launch.
+        """
         with self.job_lock:
             if profile is None:
                 sp_logging.G_LOGGER.info("No previous profile was found.")
+            elif apply_now:
+                # Render and apply the requested profile now, then arm the
+                # slideshow timer (if the profile is a slideshow).
+                self.repeating_timer, thrd = run_profile_job(profile, startup=False)
             else:
                 # Restore the last rendered wallpaper without cycling, then arm
                 # the slideshow timer (if any). The wallpaper is not changed on
