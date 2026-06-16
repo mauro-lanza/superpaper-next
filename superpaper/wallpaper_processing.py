@@ -1073,16 +1073,28 @@ def translate_crops(crop_tuples, translate_tuple):
     return crop_tuples_translated
 
 
-def compute_working_canvas(crop_tuples):
-    """Computes effective size of the desktop are taking into account PPI/offsets/bezels."""
+def compute_working_canvas(crop_tuples, bezels=None):
+    """Computes effective size of the desktop are taking into account PPI/offsets/bezels.
+
+    When ``bezels`` is provided (a list of ``(right, bottom)`` ppi-normalized
+    bezel sizes parallel to ``crop_tuples``), the outer bezels extend the
+    canvas so that the rendered image matches what the GUI preview shows. The
+    preview sizes its canvas with these bezels included, so omitting them here
+    made the applied wallpaper ignore outer bezels.
+    """
     # Take the subtractions of right-most right - left-most left
     # and bottom-most bottom - top-most top (=0).
     leftmost = 0
     topmost = 0
-    # Right-most edge of the crop tuples.
-    rightmost = max(crop_tuples, key=itemgetter(2))[2]
-    # Bottom-most edge of the crop tuples.
-    bottommost = max(crop_tuples, key=itemgetter(3))[3]
+    if bezels:
+        # Right-/bottom-most edge including each display's outer bezel.
+        rightmost = max(round(crp[2] + bez[0]) for crp, bez in zip(crop_tuples, bezels))
+        bottommost = max(round(crp[3] + bez[1]) for crp, bez in zip(crop_tuples, bezels))
+    else:
+        # Right-most edge of the crop tuples.
+        rightmost = max(crop_tuples, key=itemgetter(2))[2]
+        # Bottom-most edge of the crop tuples.
+        bottommost = max(crop_tuples, key=itemgetter(3))[3]
     canvas_size = [rightmost - leftmost, bottommost - topmost]
     return canvas_size
 
@@ -1213,10 +1225,14 @@ def span_single_image_advanced(profile, force):
 
     grp_crop_tuples = translate_to_group_coordinates([[crop_tuples[index] for index in grp] for grp in spangroups])
     grp_res_array = [[RESOLUTION_ARRAY[index] for index in grp] for grp in spangroups]
+    # Per-display outer bezel sizes (ppi-normalized), grouped to match the
+    # crops, so the working canvas can include outer bezels like the preview.
+    bezels_px = G_ACTIVE_DISPLAYSYSTEM.bezels_in_px()
+    grp_bezels = [[bezels_px[index] for index in grp] for grp in spangroups]
     grp_persp_dat = group_persp_data(persp_dat, spangroups)
 
-    for img, grp, grp_p_dat, grp_crops, grp_res_arr in zip(
-        img_list, spangroups, grp_persp_dat, grp_crop_tuples, grp_res_array
+    for img, grp, grp_p_dat, grp_crops, grp_res_arr, grp_bez in zip(
+        img_list, spangroups, grp_persp_dat, grp_crop_tuples, grp_res_array, grp_bezels
     ):
         if persp_dat:
             proj_plane_crops, persp_coeffs = persp.get_backprojected_display_system(grp_crops, grp_p_dat)
@@ -1247,7 +1263,9 @@ def span_single_image_advanced(profile, force):
         else:
             # larger working size needed to fill all the normalized lower density
             # displays. Takes account manual offsets that might require extra space.
-            canvas_tuple_eff = tuple(compute_working_canvas(grp_crops))
+            # Outer bezels extend the canvas so the result matches the preview
+            # (issue #156); the per-display crops below stay resolution-sized.
+            canvas_tuple_eff = tuple(compute_working_canvas(grp_crops, grp_bez))
             # Image is now the height of the eff tallest display + possible manual
             # offsets and the width of the combined eff widths + possible manual
             # offsets.
