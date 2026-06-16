@@ -3,6 +3,7 @@ New wallpaper configuration GUI for Superpaper.
 """
 
 import os
+import tempfile
 import time
 from operator import itemgetter
 from typing import Literal, overload
@@ -90,7 +91,18 @@ class WallpaperSettingsPanel(wx.Panel):
 
         # top half
         self.resized = False
-        # display_data = wpproc.get_display_data()
+        # Profile change tracking. ``_clean_serial`` holds the serialized form of
+        # the profile as last saved/loaded; the Save and Revert buttons enable
+        # only when the current fields serialize differently. The wallpaper
+        # (background) selection is deliberately excluded (see
+        # _collect_temp_profile). ``_loading`` suppresses tracking while fields
+        # are being (re)populated programmatically.
+        self._clean_serial = None
+        self._loading = False
+        # System (display) settings change tracking. ``_system_clean`` holds a
+        # snapshot of the shared DisplaySystem as last saved/loaded; the system
+        # Save/Revert enable only when the live DisplaySystem differs from it.
+        self._system_clean = None
         self.display_sys = wpproc.DisplaySystem()
         # self.wpprev_pnl = WallpaperPreviewPanel(self.frame, self.display_sys)
         self.wpprev_pnl = WallpaperPreviewPanel(self, self.display_sys)
@@ -116,6 +128,9 @@ class WallpaperSettingsPanel(wx.Panel):
         # bottom button row contents
         self.create_sizer_bottom_buttonrow()
 
+        # collapsible system (display-wide) settings band
+        self.create_sizer_system_band()
+
         # Add sub-sizers to bottom_half
         #    Note: horizontal sizer needs children to have proportion = 1
         #    in order to expand them horizontally instead of vertically.
@@ -123,6 +138,10 @@ class WallpaperSettingsPanel(wx.Panel):
         self.sizer_setting_sizers.Add(self.sizer_settings_right, 1, wx.CENTER | wx.EXPAND | wx.TOP | wx.LEFT, 0)
         self.sizer_setting_sizers.Add(self.sizer_setting_adv, 0, wx.CENTER | wx.EXPAND | wx.TOP | wx.RIGHT, 5)
 
+        # System band sits above the profile selector, visually separating the
+        # display-wide settings (top) from the per-profile settings (below).
+        self.sizer_bottom_half.Add(self.system_pane, 0, wx.EXPAND | wx.ALL, 5)
+        self.sizer_bottom_half.Add(wx.StaticLine(self, style=wx.LI_HORIZONTAL), 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 5)
         self.sizer_bottom_half.Add(self.sizer_profiles, 0, wx.CENTER | wx.EXPAND | wx.ALL, 0)
         self.sizer_bottom_half.Add(self.sizer_setting_sizers, 1, wx.CENTER | wx.EXPAND | wx.ALL, 0)
         self.sizer_bottom_half.Add(self.sizer_bottom_buttonrow, 0, wx.CENTER | wx.EXPAND | wx.ALL, 0)
@@ -136,11 +155,25 @@ class WallpaperSettingsPanel(wx.Panel):
 
         self.sizer_setting_sizers.Hide(self.sizer_setting_adv)
 
+        # Change tracking: text fields and naked choices propagate their command
+        # events up to the panel, so a single panel-level binding covers them
+        # without per-control wiring. Controls that already have a dedicated
+        # handler (checkboxes, span radio, sliders, the path list) call
+        # _update_dirty_state() from within that handler instead.
+        self.Bind(wx.EVT_TEXT, self._on_field_changed)
+        self.Bind(wx.EVT_COMBOBOX, self._on_field_changed)
+
         if self.parent_tray_obj.active_profile:
             active_prof_name = self.parent_tray_obj.active_profile.name
             active_id = self.choice_profiles.FindString(active_prof_name)
             self.choice_profiles.SetSelection(active_id)
             self.populate_fields(self.parent_tray_obj.active_profile)
+        else:
+            # No active profile: start from a clean, empty new-profile baseline.
+            self._set_clean_baseline()
+
+        # Record the loaded display-wide settings as the system clean baseline.
+        self._set_system_baseline()
 
         ### End __init__.
 
@@ -163,20 +196,26 @@ class WallpaperSettingsPanel(wx.Panel):
         self.tc_name = wx.TextCtrl(self, -1, size=wx.Size(self.tc_width, -1))
         self.tc_name.SetMaxLength(14)
         # buttons
-        self.button_new = wx.Button(self, label="New")
         self.button_save = wx.Button(self, label="Save")
+        self.button_revert = wx.Button(self, label="Revert")
         self.button_delete = wx.Button(self, label="Delete")
-        self.button_new.Bind(wx.EVT_BUTTON, self.onCreateNewProfile)
         self.button_save.Bind(wx.EVT_BUTTON, self.onSave)
+        self.button_revert.Bind(wx.EVT_BUTTON, self.onRevert)
         self.button_delete.Bind(wx.EVT_BUTTON, self.onDeleteProfile)
+        self.button_save.SetToolTip(wx.ToolTip("Save the current changes permanently to the profile."))
+        self.button_revert.SetToolTip(wx.ToolTip("Discard unsaved changes and reload the saved profile."))
+        # Save/Revert start disabled; they enable only when there are unsaved
+        # changes to the profile configuration.
+        self.button_save.Disable()
+        self.button_revert.Disable()
 
         # Add elements to the sizer
         self.sizer_profiles.Add(st_choice_profiles, 0, wx.CENTER | wx.ALL, 5)
         self.sizer_profiles.Add(self.choice_profiles, 0, wx.CENTER | wx.ALL, 5)
         self.sizer_profiles.Add(st_name, 0, wx.CENTER | wx.ALL, 5)
         self.sizer_profiles.Add(self.tc_name, 0, wx.CENTER | wx.ALL, 5)
-        self.sizer_profiles.Add(self.button_new, 0, wx.CENTER | wx.ALL, 5)
         self.sizer_profiles.Add(self.button_save, 0, wx.CENTER | wx.ALL, 5)
+        self.sizer_profiles.Add(self.button_revert, 0, wx.CENTER | wx.ALL, 5)
         self.sizer_profiles.Add(self.button_delete, 0, wx.CENTER | wx.ALL, 5)
 
     def create_sizer_settings_left(self):
@@ -283,6 +322,19 @@ class WallpaperSettingsPanel(wx.Panel):
         zoom_grid.Add(self.st_offy_val, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 5)
         self.sizer_setting_zoom.Add(zoom_grid, 0, wx.EXPAND | wx.ALL, 5)
 
+        # Small undo button to reset scaling & position to defaults without
+        # touching the rest of the profile configuration.
+        undo_bmp = wx.ArtProvider.GetBitmap(wx.ART_UNDO, wx.ART_BUTTON, wx.Size(16, 16))
+        self.button_zoom_reset = wx.BitmapButton(
+            statbox_parent_zoom, bitmap=wx.BitmapBundle(undo_bmp), name="butt_reset_zoom"
+        )
+        self.button_zoom_reset.SetToolTip(wx.ToolTip("Reset scaling & position to defaults"))
+        self.button_zoom_reset.Bind(wx.EVT_BUTTON, self.onResetZoom)
+        reset_row = wx.BoxSizer(wx.HORIZONTAL)
+        reset_row.AddStretchSpacer()
+        reset_row.Add(self.button_zoom_reset, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 5)
+        self.sizer_setting_zoom.Add(reset_row, 0, wx.EXPAND | wx.BOTTOM, 3)
+
         # Add subsizers to the left column sizer
         self.sizer_settings_left.Add(self.radiobox_spanmode, 0, wx.EXPAND, 5)
         self.sizer_settings_left.Add(self.sizer_setting_slideshow, 0, wx.EXPAND, 5)
@@ -340,44 +392,14 @@ class WallpaperSettingsPanel(wx.Panel):
         # self.sizer_setting_paths.SetItemMinSize(self.path_listctrl, (1000, -1))
 
     def create_sizer_settings_advanced(self):
-        """Create sizer for advanced spanning settings."""
+        """Create sizer for advanced spanning settings.
+
+        Display-wide settings (diagonal sizes, bezels) live in the separate
+        collapsible system band; this box holds only profile-scoped advanced
+        adjustments (manual offsets, span groups, perspective selection).
+        """
         self.sizer_setting_adv = wx.StaticBoxSizer(wx.VERTICAL, self, "Advanced wallpaper adjustment")
-
-        # Fallback Diagonal Inches
-        self.sizer_setting_diaginch = wx.BoxSizer(wx.VERTICAL)
-        statbox_parent_diaginch = self
-        st_diaginch_override = wx.StaticText(statbox_parent_diaginch, -1, "Display diagonal sizes:")
-        self.button_override = wx.Button(statbox_parent_diaginch, label="Override detected sizes")
-        self.button_override.Bind(wx.EVT_BUTTON, self.onOverrideSizes)
-        self.sizer_setting_diaginch.Add(st_diaginch_override, 0, wx.ALIGN_LEFT | wx.BOTTOM, 5)
-        self.sizer_setting_diaginch.Add(self.button_override, 0, wx.ALIGN_LEFT | wx.LEFT, 10)
-
-        # Bezels
-        self.sizer_setting_bezels = wx.BoxSizer(wx.VERTICAL)
-        statbox_parent_bezels = self
-        st_bezels = wx.StaticText(statbox_parent_bezels, -1, "Adjust bezel sizes:")
-
-        self.sizer_bezel_buttons = wx.BoxSizer(wx.HORIZONTAL)
-        self.button_bezels = wx.Button(statbox_parent_bezels, -1, label="Configure")
-        self.button_bezels_save = wx.Button(statbox_parent_bezels, -1, label="Save bezels")
-        self.button_bezels_canc = wx.Button(statbox_parent_bezels, -1, label="Cancel")
-        self.button_bezels.Bind(wx.EVT_BUTTON, self.onConfigureBezels)
-        self.button_bezels_save.Bind(wx.EVT_BUTTON, self.onConfigureBezelsSave)
-        self.button_bezels_canc.Bind(wx.EVT_BUTTON, self.onConfigureBezelsCanc)
         help_bmp = wx.ArtProvider.GetBitmap(wx.ART_QUESTION, wx.ART_BUTTON, wx.Size(20, 20))
-        self.button_help_bezel = wx.BitmapButton(
-            statbox_parent_bezels, bitmap=wx.BitmapBundle(help_bmp), name="butt_help_bez"
-        )
-        self.button_help_bezel.Bind(wx.EVT_BUTTON, self.onHelpBezels)
-
-        self.sizer_bezel_buttons.Add(self.button_bezels, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 10)
-        self.sizer_bezel_buttons.Add(self.button_bezels_save, 0, wx.ALIGN_CENTER_VERTICAL | wx.TOP | wx.BOTTOM, 10)
-        self.sizer_bezel_buttons.Add(self.button_bezels_canc, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 10)
-        self.sizer_bezel_buttons.Add(self.button_help_bezel, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 10)
-        self.sizer_setting_bezels.Add(st_bezels, 0, wx.ALL, 0)
-        self.sizer_setting_bezels.Add(self.sizer_bezel_buttons, 1, wx.EXPAND, 0)
-        self.button_bezels_save.Disable()
-        self.button_bezels_canc.Disable()
 
         # Offsets
         self.sizer_setting_offsets = wx.BoxSizer(wx.VERTICAL)
@@ -442,43 +464,106 @@ class WallpaperSettingsPanel(wx.Panel):
         self.sizer_setting_persp.Add(self.ch_persp, 0, wx.ALIGN_LEFT | wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5)
 
         # Add setting subsizers to the adv settings sizer
-        self.sizer_setting_adv.Add(self.sizer_setting_diaginch, 0, wx.CENTER | wx.EXPAND | wx.ALL, 5)
-        self.sizer_setting_adv.Add(self.sizer_setting_bezels, 0, wx.CENTER | wx.EXPAND | wx.ALL, 5)
         self.sizer_setting_adv.Add(self.sizer_setting_offsets, 0, wx.CENTER | wx.EXPAND | wx.ALL, 5)
         self.sizer_setting_adv.Add(self.sizer_setting_spangroups, 0, wx.CENTER | wx.EXPAND | wx.ALL, 5)
         self.sizer_setting_adv.Add(self.sizer_setting_persp, 0, wx.CENTER | wx.EXPAND | wx.ALL, 5)
 
-    def create_sizer_diaginch_override(self):
-        self.sizer_setting_diaginch.Clear(True)
-        # statbox_parent_diaginch = self.sizer_setting_diaginch.GetStaticBox()
-        statbox_parent_diaginch = self
-        self.cb_diaginch = wx.CheckBox(statbox_parent_diaginch, -1, "Input display sizes manually")
+    def create_sizer_system_band(self):
+        """Build the collapsible system-settings band shown above the profile row.
+
+        Holds display-wide settings (diagonal sizes, bezels) that are shared by
+        every profile, plus a dedicated Save/Revert. Edits are applied live so
+        the preview can be used to dial in values, but they are only written to
+        disk when the band's Save is pressed; Revert restores the last saved
+        state. Collapsed by default — set it once and forget it.
+        """
+        self.system_pane = wx.CollapsiblePane(
+            self,
+            label="Display system settings  (apply to all profiles)",
+            style=wx.CP_DEFAULT_STYLE | wx.CP_NO_TLW_RESIZE,
+        )
+        self.system_pane.Bind(wx.EVT_COLLAPSIBLEPANE_CHANGED, self.onSystemPaneToggle)
+        pane = self.system_pane.GetPane()
+
+        band = wx.BoxSizer(wx.HORIZONTAL)
+
+        # Diagonal sizes group
+        self.sizer_setting_diaginch = wx.BoxSizer(wx.VERTICAL)
+        self.build_diaginch_controls(pane)
+        band.Add(self.sizer_setting_diaginch, 0, wx.ALL, 8)
+
+        band.Add(wx.StaticLine(pane, style=wx.LI_VERTICAL), 0, wx.EXPAND | wx.TOP | wx.BOTTOM, 5)
+
+        # Bezels group
+        self.sizer_setting_bezels = wx.BoxSizer(wx.VERTICAL)
+        self.build_bezel_controls(pane)
+        band.Add(self.sizer_setting_bezels, 0, wx.ALL, 8)
+
+        band.AddStretchSpacer()
+
+        # System Save / Revert
+        sys_btns = wx.BoxSizer(wx.VERTICAL)
+        self.button_system_save = wx.Button(pane, label="Save")
+        self.button_system_revert = wx.Button(pane, label="Revert")
+        self.button_system_save.Bind(wx.EVT_BUTTON, self.onSaveSystem)
+        self.button_system_revert.Bind(wx.EVT_BUTTON, self.onRevertSystem)
+        self.button_system_save.SetToolTip(wx.ToolTip("Save these display settings for all profiles."))
+        self.button_system_revert.SetToolTip(wx.ToolTip("Discard unsaved display setting changes."))
+        self.button_system_save.Disable()
+        self.button_system_revert.Disable()
+        sys_btns.Add(self.button_system_save, 0, wx.ALL, 3)
+        sys_btns.Add(self.button_system_revert, 0, wx.ALL, 3)
+        band.Add(sys_btns, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 8)
+
+        pane.SetSizer(band)
+        self.system_pane.Collapse(True)
+
+    def build_diaginch_controls(self, parent):
+        """Build the manual display diagonal size controls into the system band."""
+        self.cb_diaginch = wx.CheckBox(parent, -1, "Input display sizes manually")
         self.cb_diaginch.Bind(wx.EVT_CHECKBOX, self.onCheckboxDiaginch)
-        st_diaginch = wx.StaticText(statbox_parent_diaginch, -1, "Display diagonal sizes (inches):")
-        st_diaginch.Disable()
-        self.sizer_setting_diaginch.Add(self.cb_diaginch, 0, wx.ALIGN_LEFT | wx.LEFT, 0)
+        st_diaginch = wx.StaticText(parent, -1, "Display diagonal sizes (inches):")
+        self.sizer_setting_diaginch.Add(self.cb_diaginch, 0, wx.ALIGN_LEFT | wx.BOTTOM, 5)
         self.sizer_setting_diaginch.Add(st_diaginch, 0, wx.ALIGN_LEFT | wx.LEFT, 10)
-        # diag size data for fields
         diags = [str(dsp.diagonal_size()[1]) for dsp in self.display_sys.disp_list]
-        # sizer for textctrls
         tc_list_sizer_diag = wx.WrapSizer(wx.HORIZONTAL)
-        self.tc_list_diaginch = self.list_of_textctrl(statbox_parent_diaginch, wpproc.NUM_DISPLAYS, fraction=2 / 5)
+        self.tc_list_diaginch = self.list_of_textctrl(parent, wpproc.NUM_DISPLAYS, fraction=2 / 5)
+        use_user_diags = self.display_sys.use_user_diags
         for tc, diag in zip(self.tc_list_diaginch, diags):
             tc_list_sizer_diag.Add(tc, 0, wx.ALIGN_LEFT | wx.ALL, 5)
             tc.ChangeValue(diag)
-            tc.Disable()
-        self.button_diaginch_save = wx.Button(statbox_parent_diaginch, label="Save")
-        self.button_diaginch_save.Bind(wx.EVT_BUTTON, self.onSaveDiagInch)
-        tc_list_sizer_diag.Add(self.button_diaginch_save, 0, wx.ALL, 5)
-        self.button_diaginch_save.Disable()
+            tc.Enable(use_user_diags)
+            # Dedicated handler consumes the event so display-size edits don't
+            # reach the profile field handler (these are system-wide settings).
+            tc.Bind(wx.EVT_TEXT, self._on_system_field_changed)
         self.sizer_setting_diaginch.Add(tc_list_sizer_diag, 0, wx.ALIGN_LEFT | wx.LEFT, 5)
-        self.sizer_setting_adv.Layout()
+        self.cb_diaginch.SetValue(use_user_diags)
+
+    def build_bezel_controls(self, parent):
+        """Build the bezel configuration controls into the system band."""
+        st_bezels = wx.StaticText(parent, -1, "Adjust bezel sizes:")
+        self.sizer_bezel_buttons = wx.BoxSizer(wx.HORIZONTAL)
+        self.button_bezels = wx.Button(parent, -1, label="Configure")
+        self.button_bezels_save = wx.Button(parent, -1, label="Done")
+        self.button_bezels_canc = wx.Button(parent, -1, label="Cancel")
+        self.button_bezels.Bind(wx.EVT_BUTTON, self.onConfigureBezels)
+        self.button_bezels_save.Bind(wx.EVT_BUTTON, self.onConfigureBezelsSave)
+        self.button_bezels_canc.Bind(wx.EVT_BUTTON, self.onConfigureBezelsCanc)
+        help_bmp = wx.ArtProvider.GetBitmap(wx.ART_QUESTION, wx.ART_BUTTON, wx.Size(20, 20))
+        self.button_help_bezel = wx.BitmapButton(parent, bitmap=wx.BitmapBundle(help_bmp), name="butt_help_bez")
+        self.button_help_bezel.Bind(wx.EVT_BUTTON, self.onHelpBezels)
+        self.sizer_bezel_buttons.Add(self.button_bezels, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 5)
+        self.sizer_bezel_buttons.Add(self.button_bezels_save, 0, wx.ALIGN_CENTER_VERTICAL | wx.TOP | wx.BOTTOM, 5)
+        self.sizer_bezel_buttons.Add(self.button_bezels_canc, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 5)
+        self.sizer_bezel_buttons.Add(self.button_help_bezel, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 5)
+        self.sizer_setting_bezels.Add(st_bezels, 0, wx.ALL, 0)
+        self.sizer_setting_bezels.Add(self.sizer_bezel_buttons, 1, wx.EXPAND, 0)
+        self.button_bezels_save.Disable()
+        self.button_bezels_canc.Disable()
+
+    def onSystemPaneToggle(self, event):
+        """Re-layout when the system band is expanded/collapsed."""
         self.sizer_main.Layout()
-        self.sizer_main.Fit(self.frame)
-        # Check cb according to DisplaySystem 'use_user_diags'
-        self.cb_diaginch.SetValue(self.display_sys.use_user_diags)
-        # Update sizer content based on new cb state
-        self.onCheckboxDiaginch(None)
 
     def create_sizer_bottom_buttonrow(self):
         self.button_help = wx.Button(self, label="Help")
@@ -508,6 +593,7 @@ class WallpaperSettingsPanel(wx.Panel):
     #
     def populate_fields(self, profile):
         """Populates config dialog fields with data from a profile."""
+        self._loading = True
         self.tc_name.ChangeValue(profile.name)
 
         self.show_advanced_settings = False
@@ -623,6 +709,12 @@ class WallpaperSettingsPanel(wx.Panel):
         )
         self.wpprev_pnl.toggle_buttons(show_config=self.show_advanced_settings, in_config=False)
 
+        # Loaded data is the new clean baseline. Slideshow normalization in
+        # _collect_temp_profile means the later (posted) checkbox events produce
+        # the same serialization, so this stays clean without a deferred call.
+        self._loading = False
+        self._set_clean_baseline()
+
     def paths_array_to_listctrl(self, paths_array):
         multi_img = self.use_multi_image or self.use_spangroups()
         self.refresh_path_listctrl(multi_img)
@@ -646,6 +738,133 @@ class WallpaperSettingsPanel(wx.Panel):
     #
     # Helper methods
     #
+    def _current_serial(self):
+        """Serialize the current field state for change comparison.
+
+        Mirrors exactly what Save would write to disk (minus the background
+        selection), so dirtiness tracks real persisted differences.
+        """
+        tmp_profile, _groups = self._collect_temp_profile(resolve_selection=False)
+        return tmp_profile._serialize()
+
+    def _set_clean_baseline(self):
+        """Record the current field state as the saved/clean baseline."""
+        self._clean_serial = self._current_serial()
+        self.button_save.Enable(False)
+        self.button_revert.Enable(False)
+
+    def _update_dirty_state(self):
+        """Enable/disable Save and Revert based on unsaved profile changes."""
+        if self._loading or self._clean_serial is None:
+            return
+        dirty = self._current_serial() != self._clean_serial
+        if dirty != self.button_save.IsEnabled():
+            self.button_save.Enable(dirty)
+            self.button_revert.Enable(dirty)
+
+    def _on_field_changed(self, event):
+        """Panel-level handler: re-evaluate dirty state when a field changes."""
+        event.Skip()
+        self._update_dirty_state()
+
+    #
+    # System (display) settings change tracking
+    #
+    # These settings (display diagonal sizes, bezels, physical positions) live in
+    # the shared DisplaySystem and apply to every profile. They are edited live so
+    # the preview can be used to dial in values, but nothing is written to disk
+    # until the system Save button is pressed. Revert restores the snapshot taken
+    # at load / last save. This is the system-scoped analogue of the profile
+    # Save/Revert above.
+    def _system_snapshot(self):
+        """Capture the system-wide display settings as a comparable structure."""
+        ds = self.display_sys
+        return {
+            "bezels": tuple((round(b[0], 2), round(b[1], 2)) for b in ds.bezels_in_mm()),
+            "offsets": tuple((round(o[0]), round(o[1])) for o in ds.get_ppinorm_offsets()),
+            "use_user_diags": ds.use_user_diags,
+            "diags": tuple(round(dsp.diagonal_size()[1], 2) for dsp in ds.disp_list),
+        }
+
+    def _apply_system_snapshot(self, snap):
+        """Restore DisplaySystem to a previously captured snapshot."""
+        ds = self.display_sys
+        ds.update_bezels([tuple(b) for b in snap["bezels"]])
+        if snap["use_user_diags"]:
+            ds.update_display_diags(list(snap["diags"]), reset_offsets=False)
+        else:
+            ds.update_display_diags("auto")
+        # Positions are restored last; the diag/bezel updates above recompute
+        # initial offsets, so the saved offsets must be written afterwards.
+        ds.update_ppinorm_offsets([tuple(o) for o in snap["offsets"]])
+        self._refresh_system_preview()
+
+    def _refresh_system_preview(self):
+        """Push current DisplaySystem layout to the wallpaper preview."""
+        display_data = self.display_sys.get_disp_list(self.show_advanced_settings)
+        self.wpprev_pnl.update_display_data(display_data, self.show_advanced_settings, self.use_multi_image)
+
+    def _refresh_diaginch_fields(self):
+        """Sync the diagonal-size text fields and checkbox to the DisplaySystem."""
+        if not hasattr(self, "tc_list_diaginch"):
+            return
+        self.cb_diaginch.SetValue(self.display_sys.use_user_diags)
+        diags = [str(dsp.diagonal_size()[1]) for dsp in self.display_sys.disp_list]
+        for tc, diag in zip(self.tc_list_diaginch, diags):
+            tc.ChangeValue(diag)
+            tc.Enable(self.display_sys.use_user_diags)
+
+    def _set_system_baseline(self):
+        """Record the current system settings as the saved/clean baseline."""
+        self._system_clean = self._system_snapshot()
+        if hasattr(self, "button_system_save"):
+            self.button_system_save.Enable(False)
+            self.button_system_revert.Enable(False)
+
+    def _update_system_dirty(self):
+        """Enable/disable the system Save and Revert based on unsaved changes."""
+        if self._loading or self._system_clean is None or not hasattr(self, "button_system_save"):
+            return
+        dirty = self._system_snapshot() != self._system_clean
+        if dirty != self.button_system_save.IsEnabled():
+            self.button_system_save.Enable(dirty)
+            self.button_system_revert.Enable(dirty)
+
+    def _on_system_field_changed(self, event):
+        """Live-apply valid diagonal-size edits and refresh the system dirty state.
+
+        Consumes the event so it does not also reach the profile-level field
+        handler (display sizes are system-wide, not part of a profile).
+        """
+        if not self._loading and self.cb_diaginch.GetValue():
+            inches = []
+            for tc in self.tc_list_diaginch:
+                val = self.test_diag_value(tc.GetValue())
+                if not val:
+                    # Mid-edit / invalid entry: don't apply, wait for valid input.
+                    inches = None
+                    break
+                inches.append(val)
+            if inches:
+                self.display_sys.update_display_diags(inches, reset_offsets=False)
+                self._refresh_system_preview()
+        self._update_system_dirty()
+
+    def onSaveSystem(self, event):
+        """Persist the staged system-wide display settings to disk."""
+        self.display_sys.save_system()
+        self._set_system_baseline()
+
+    def onRevertSystem(self, event):
+        """Discard unsaved system-wide display changes, restoring the baseline."""
+        if self._system_clean is None:
+            return
+        self._loading = True
+        self._apply_system_snapshot(self._system_clean)
+        self._refresh_diaginch_fields()
+        self._loading = False
+        self._update_system_dirty()
+
     def update_choiceprofile(self):
         """Reload profile list into the choice box."""
         # self.list_of_profiles = list_profiles()
@@ -831,6 +1050,7 @@ class WallpaperSettingsPanel(wx.Panel):
         self.st_offx_val.SetLabel(str(offx_pct))
         self.st_offy_val.SetLabel(str(offy_pct))
         self.wpprev_pnl.update_zoom_offset(zoom_pct / 100.0, (offx_pct / 100.0, offy_pct / 100.0))
+        self._update_dirty_state()
 
     def onResize(self, event):
         self.resized = True
@@ -883,6 +1103,7 @@ class WallpaperSettingsPanel(wx.Panel):
             display_data, self.show_advanced_settings, self.use_multi_image, spangroups=spangroups
         )
         self.wpprev_pnl.toggle_buttons(show_config=self.show_advanced_settings, in_config=False)
+        self._update_dirty_state()
 
     def onCheckboxSlideshow(self, event):
         cb_state = self.cb_slideshow.GetValue()
@@ -894,6 +1115,7 @@ class WallpaperSettingsPanel(wx.Panel):
         if cb_state:
             self.reset_zoom_offset()
         self.toggle_zoom_widgets(not cb_state)
+        self._update_dirty_state()
 
     def reset_zoom_offset(self):
         """Return the zoom/position sliders to their no-op defaults."""
@@ -901,6 +1123,14 @@ class WallpaperSettingsPanel(wx.Panel):
         self.sld_offx.SetValue(0)
         self.sld_offy.SetValue(0)
         self.onZoomOffsetChange(None)
+
+    def onResetZoom(self, event):
+        """Reset the image scaling & position to defaults.
+
+        Only the zoom/position controls are affected; the rest of the profile
+        configuration is left untouched.
+        """
+        self.reset_zoom_offset()
 
     def toggle_zoom_widgets(self, enable):
         """Enable/disable the image scaling & position controls."""
@@ -912,11 +1142,13 @@ class WallpaperSettingsPanel(wx.Panel):
         cb_state = self.cb_hotkey.GetValue()
         sizer = self.hotkey_bind_sizer
         self.sizer_toggle_children(sizer, cb_state)
+        self._update_dirty_state()
 
     def onCheckboxOffsets(self, event):
         cb_state = self.cb_offsets.GetValue()
         sizer = self.sizer_setting_offsets
         self.sizer_toggle_children(sizer, cb_state)
+        self._update_dirty_state()
 
     def onCheckboxSpanGroups(self, event):
         cb_state = self.cb_spangroups.GetValue()
@@ -925,20 +1157,27 @@ class WallpaperSettingsPanel(wx.Panel):
             self.cb_spangroups.SetValue(not cb_state)
             return
         self.toggle_spangroup_widgets(cb_state)
+        self._update_dirty_state()
 
     def onCheckboxDiaginch(self, event):
+        """Toggle manual display sizes. Changes are staged, not saved to disk.
+
+        Checking enables the inch fields and applies their current values to the
+        preview; unchecking returns to auto-detected sizes. Either way the change
+        is only persisted when the system band's Save is pressed.
+        """
         cb_state = self.cb_diaginch.GetValue()
-        sizer = self.sizer_setting_diaginch
-        self.sizer_toggle_children(sizer, cb_state)
-        if not cb_state:
-            # revert to automatic detection and save
+        for tc in self.tc_list_diaginch:
+            tc.Enable(cb_state)
+        if cb_state:
+            # Apply the current field values (if valid) so the preview updates.
+            self._on_system_field_changed(None)
+        else:
+            # Back to auto-detected sizes (staged only).
             self.display_sys.update_display_diags("auto")
-            self.display_sys.save_system()
-            diags = [str(dsp.diagonal_size()[1]) for dsp in self.display_sys.disp_list]
-            for tc, diag in zip(self.tc_list_diaginch, diags):
-                tc.ChangeValue(diag)
-            display_data = self.display_sys.get_disp_list(self.show_advanced_settings)
-            self.wpprev_pnl.update_display_data(display_data, self.show_advanced_settings, self.use_multi_image)
+            self._refresh_diaginch_fields()
+            self._refresh_system_preview()
+            self._update_system_dirty()
 
     #
     # ListCtrl methods
@@ -986,6 +1225,7 @@ class WallpaperSettingsPanel(wx.Panel):
     def populate_lc_browse(self, pathslist, imglist):
         for path_item in pathslist:
             self.append_to_listctrl(path_item)
+        self._update_dirty_state()
 
     #
     # Top level button definitions
@@ -1027,29 +1267,6 @@ class WallpaperSettingsPanel(wx.Panel):
             self.read_spangroups(True),
         )
 
-    def onOverrideSizes(self, event):
-        self.create_sizer_diaginch_override()
-
-    def onSaveDiagInch(self, event):
-        """Save user modified display sizes to DisplaySystem."""
-        inches = []
-        for tc in self.tc_list_diaginch:
-            tc_val = tc.GetValue()
-            user_inch = self.test_diag_value(tc_val)
-            if user_inch:
-                inches.append(user_inch)
-            else:
-                # error msg
-                msg = f"Display size must be a positive number, '{tc_val}' was entered."
-                sp_logging.G_LOGGER.info(msg)
-                dial = wx.MessageDialog(self, msg, "Error", wx.OK | wx.STAY_ON_TOP | wx.CENTRE)
-                dial.ShowModal()
-                return -1
-        self.display_sys.update_display_diags(inches)
-        self.display_sys.save_system()
-        display_data = self.display_sys.get_disp_list(self.show_advanced_settings)
-        self.wpprev_pnl.update_display_data(display_data, self.show_advanced_settings, self.use_multi_image)
-
     def onConfigureBezels(self, event):
         """Start bezel size config mode."""
         self.toggle_radio_and_profile_choice(False)
@@ -1059,12 +1276,13 @@ class WallpaperSettingsPanel(wx.Panel):
         self.button_bezels_canc.Enable()
 
     def onConfigureBezelsSave(self, event):
-        """Save out of bezel size config mode."""
+        """Exit bezel config mode, staging the new bezel sizes (not saved yet)."""
         self.toggle_radio_and_profile_choice(True)
         self.wpprev_pnl.bezel_config_save()
         self.button_bezels_save.Disable()
         self.button_bezels_canc.Disable()
         self.button_bezels.Enable()
+        self._update_system_dirty()
 
     def onConfigureBezelsCanc(self, event):
         """Cancel out of bezel size config mode."""
@@ -1098,6 +1316,7 @@ class WallpaperSettingsPanel(wx.Panel):
         item = self.path_listctrl.GetFocusedItem()
         if item != -1:
             self.path_listctrl.DeleteItem(item)
+            self._update_dirty_state()
 
     def onClose(self, event):
         """Closes the profile config panel."""
@@ -1115,28 +1334,58 @@ class WallpaperSettingsPanel(wx.Panel):
         else:
             pass
 
+    def onRevert(self, event):
+        """Discards unsaved changes and reloads the saved profile from disk."""
+        selection = self.choice_profiles.GetSelection()
+        name = self.choice_profiles.GetString(selection) if selection != wx.NOT_FOUND else ""
+        if name and name != "Create a new profile":
+            profile = self.parent_tray_obj.get_profile_by_name(name)
+            if profile is None:
+                profile = open_profile(name)
+            if profile is not None:
+                self.populate_fields(profile)
+                return
+        # No saved profile to revert to: reset to an empty new profile.
+        self.onCreateNewProfile(None)
+
     def onApply(self, event):
-        """Applies the currently open profile. Saves it first."""
+        """Render the current edits as a one-off preview without saving.
+
+        The wallpaper is set using the settings exactly as shown in the dialog,
+        but the stored ``.profile`` on disk and the daemon's active/running
+        profile are left untouched. Use Save to persist the changes.
+        """
+        tmp_profile, _groups = self._collect_temp_profile(resolve_selection=True)
+        if not tmp_profile.test_save():
+            sp_logging.G_LOGGER.info("onApply: validation failed, nothing applied.")
+            return
         busy = wx.BusyCursor()
-        saved_file = self.onSave(None)
-        sp_logging.G_LOGGER.info("onApply profile: saved %s", saved_file)
-        if saved_file:
-            saved_profile_name = ProfileData(saved_file).name
-            self.parent_tray_obj.reload_profiles(event)
-            saved_profile_to_start = self.parent_tray_obj.get_profile_by_name(saved_profile_name)
-            # The chosen wallpaper is persisted in the profile; applying renders
-            # that selection and never cycles on its own.
-            wx.Yield()
-            thrd = self.parent_tray_obj.start_profile(event, saved_profile_to_start, force_reload=True)
-            if thrd:
-                # Pump the event loop while waiting so the GUI stays responsive
-                # instead of freezing (otherwise the apply appears stuck).
-                while thrd.is_alive():
-                    wx.YieldIfNeeded()
-                    time.sleep(0.05)
-        else:
-            pass
-        del busy
+        # ProfileData parses from a file, so serialize the working copy to a
+        # throwaway file (never the real profile) and render that. This reuses
+        # the full ProfileData feature set (zoom/pan, span modes, selection)
+        # instead of duplicating render logic.
+        fd, temp_file = tempfile.mkstemp(prefix="sp_preview_", suffix=".profile")
+        os.close(fd)
+        try:
+            tmp_profile.save(filename=temp_file)
+            preview_profile = ProfileData(temp_file)
+            sp_logging.G_LOGGER.info("onApply preview (unsaved): %s", preview_profile.name)
+            # Render with the dialog's live DisplaySystem so staged (unsaved)
+            # display settings — bezels, sizes, positions — are reflected. This
+            # deliberately does NOT reload from disk (refresh_display_data), which
+            # lets the user test system tweaks via Apply before committing them.
+            wpproc.G_ACTIVE_DISPLAYSYSTEM = self.display_sys
+            thrd = change_wallpaper_job(preview_profile, force=True)
+            # Pump the event loop while rendering so the GUI stays responsive.
+            while thrd is not None and thrd.is_alive():
+                wx.YieldIfNeeded()
+                time.sleep(0.05)
+        finally:
+            try:
+                os.remove(temp_file)
+            except OSError:
+                pass
+            del busy
 
     def _get_selected_wallpaper_path(self):
         """Get the file path of the currently selected item in the wallpaper list."""
@@ -1152,18 +1401,29 @@ class WallpaperSettingsPanel(wx.Panel):
             return None
         return path
 
-    def onSave(self, event):
-        """Saves currently open profile into file. A test method is called to verify data."""
-        busy = None
-        if event:
-            busy = wx.BusyCursor()
+    def _collect_temp_profile(self, resolve_selection=False):
+        """Builds a TempProfileData from the current dialog fields.
+
+        Returns a ``(tmp_profile, groups)`` tuple where ``groups`` is the span
+        groups mapping (or ``None``) used for the preview.
+
+        When ``resolve_selection`` is True the persistent wallpaper selection is
+        filled in (from the focused list item, falling back to the saved
+        profile). It is left out for change-tracking, where the background
+        selection must not count as an unsaved profile change. This method never
+        raises on partial input so it is safe to call on every field edit.
+        """
         tmp_profile = TempProfileData()
         tmp_profile.name = self.tc_name.GetLineText(0)
         tmp_profile.slideshow = self.cb_slideshow.GetValue()
         if tmp_profile.slideshow:
-            tmp_profile.delay = str(
-                60 * float(self.tc_sshow_delay.GetLineText(0))
-            )  # save delay as seconds for compatibility!
+            delay_text = self.tc_sshow_delay.GetLineText(0)
+            try:
+                # save delay as seconds for compatibility!
+                tmp_profile.delay = str(60 * float(delay_text))
+            except ValueError:
+                # Mid-edit / invalid input; keep raw text so test_save rejects it.
+                tmp_profile.delay = delay_text
             tmp_profile.sortmode = (
                 self.ch_sshow_sort.GetString(self.ch_sshow_sort.GetSelection()).lower().replace(" ", "_")
             )
@@ -1208,8 +1468,9 @@ class WallpaperSettingsPanel(wx.Panel):
 
         # wallpaper selection (persistent). For single/advanced span the
         # focused list item is the chosen image. If the user didn't pick a new
-        # one, preserve any selection already saved in the profile.
-        if tmp_profile.spanmode != "multi":
+        # one, preserve any selection already saved in the profile. Skipped for
+        # change-tracking, where the background selection is not a profile change.
+        if resolve_selection and tmp_profile.spanmode != "multi":
             selected_file = self._get_selected_wallpaper_path()
             if selected_file and os.path.isfile(selected_file):
                 tmp_profile.selected = [selected_file]
@@ -1258,6 +1519,15 @@ class WallpaperSettingsPanel(wx.Panel):
                 semicol_sep_paths = ";".join(paths_dict[disp_id])
                 tmp_profile.paths_array.append(semicol_sep_paths)
 
+        return tmp_profile, groups
+
+    def onSave(self, event):
+        """Saves currently open profile into file. A test method is called to verify data."""
+        busy = None
+        if event:
+            busy = wx.BusyCursor()
+        tmp_profile, groups = self._collect_temp_profile(resolve_selection=True)
+
         # log
         sp_logging.G_LOGGER.info(tmp_profile.name)
         sp_logging.G_LOGGER.info(tmp_profile.spanmode)
@@ -1294,6 +1564,9 @@ class WallpaperSettingsPanel(wx.Panel):
                 display_data,
                 groups,
             )
+            # Saved state becomes the new clean baseline.
+            self.list_of_profiles = self.parent_tray_obj.list_of_profiles
+            self._set_clean_baseline()
             del busy
             return saved_file
         else:
@@ -1303,6 +1576,7 @@ class WallpaperSettingsPanel(wx.Panel):
 
     def onCreateNewProfile(self, event):
         """Empties the wallpaper profile config fields."""
+        self._loading = True
         self.choice_profiles.SetSelection(self.choice_profiles.FindString("Create a new profile"))
 
         self.tc_name.ChangeValue("")
@@ -1330,6 +1604,10 @@ class WallpaperSettingsPanel(wx.Panel):
         self.wpprev_pnl.draw_displays()
         self.Refresh()
         self.Update()
+
+        # A fresh (empty) profile starts clean.
+        self._loading = False
+        self._set_clean_baseline()
 
     def onDeleteProfile(self, event):
         """Deletes the currently selected profile after getting confirmation."""
@@ -1416,8 +1694,11 @@ class WallpaperSettingsPanel(wx.Panel):
         if old_persp_str in persp_choices:
             self.ch_persp.SetSelection(self.ch_persp.FindString(old_persp_str))
         else:
+            # The profile referenced a perspective that no longer exists; fall
+            # back to default and surface it as an unsaved change rather than
+            # silently writing to disk (Save is the only thing that persists).
             self.ch_persp.SetSelection(0)
-            self.onSave(None)
+            self._update_dirty_state()
 
     def onHelp(self, event):
         """Open help dialog."""
@@ -2044,14 +2325,17 @@ class WallpaperPreviewPanel(wx.Panel):
         self.Refresh()
 
     def onSave(self, evt):
-        """Save current Display offsets into DisplaySystem."""
+        """Stage current Display offsets into DisplaySystem.
+
+        The new positions are kept in memory (and shown in the preview) but are
+        only written to disk when the system band's Save is pressed.
+        """
         self.config_mode = False
         self.bind_movement_binds(False)
         self.toggle_buttons(True, False)
-        # Export and save offsets to DisplaySystem
+        # Export offsets to DisplaySystem (staged, not persisted here)
         if self.positions_dragged:  # only export drag positions if actually dragged
             self.export_offsets(self.display_sys)
-        self.display_sys.save_system()
         display_data = self.display_sys.get_disp_list(use_ppi_norm=True)
         # Full redraw of preview with new offset data
         if self.current_preview_images:
@@ -2066,6 +2350,7 @@ class WallpaperPreviewPanel(wx.Panel):
         self.frame.toggle_radio_and_profile_choice(True)
         self.frame.toggle_bezel_buttons(False, True)
         self.Refresh()
+        self.frame._update_system_dirty()
 
     def onReset(self, evt):
         """Reset Display preview positions to the initial guess."""
@@ -2389,7 +2674,11 @@ class WallpaperPreviewPanel(wx.Panel):
         self.toggle_buttons(False, False)
 
     def bezel_config_save(self):
-        """Saves bezel values for the active DisplaySystem."""
+        """Stage the new bezel values for the active DisplaySystem.
+
+        Bezel sizes are kept in memory and shown in the preview; persistence to
+        disk happens only when the system band's Save is pressed.
+        """
         self.bezel_conifg_mode = False
         self.show_bezel_buttons(False)
         # Show preview positioning config button
@@ -2398,8 +2687,6 @@ class WallpaperPreviewPanel(wx.Panel):
         self.full_refresh_preview(True, True, False)
         # self.show_staticbmps(True)
         self.Refresh()
-        # trigger a DisplaySystem save.
-        self.display_sys.save_system()
 
     def bezel_config_cancel(self):
         """Exits out of the bezel config mode without saving."""

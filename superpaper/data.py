@@ -734,52 +734,66 @@ class TempProfileData:
         self.selected: Optional[list] = None
         self.paths_array = []
 
-    def save(self):
-        """Saves the TempProfile into a file."""
-        if self.name is not None:
-            fname = os.path.join(PROFILES_PATH, self.name + ".profile")
-            try:
-                with open(fname, "w", encoding="utf-8") as tpfile:
-                    tpfile.write("name=" + str(self.name) + "\n")
-                    if self.spanmode:
-                        tpfile.write("spanmode=" + str(self.spanmode) + "\n")
-                    if self.spangroups:
-                        tpfile.write("spangroups=" + str(self.spangroups) + "\n")
-                    if self.slideshow is not None:
-                        tpfile.write("slideshow=" + str(self.slideshow) + "\n")
-                    if self.delay:
-                        tpfile.write("delay=" + str(self.delay) + "\n")
-                    if self.sortmode:
-                        tpfile.write("sortmode=" + str(self.sortmode) + "\n")
-                    if self.inches:
-                        tpfile.write("diagonal_inches=" + str(self.inches) + "\n")
-                    if self.manual_offsets:
-                        tpfile.write("offsets=" + str(self.manual_offsets) + "\n")
-                    if self.bezels:
-                        tpfile.write("bezels=" + str(self.bezels) + "\n")
-                    if self.hk_binding:
-                        tpfile.write("hotkey=" + str(self.hk_binding) + "\n")
-                    if self.perspective:
-                        tpfile.write("perspective=" + str(self.perspective) + "\n")
-                    if self.zoom is not None and self.zoom != 1.0:
-                        tpfile.write("zoom=" + str(self.zoom) + "\n")
-                    if self.align is not None and tuple(self.align) != (0.0, 0.0):
-                        tpfile.write(f"align={self.align[0]},{self.align[1]}\n")
-                    if self.selected:
-                        tpfile.write("selected=" + ";".join(self.selected) + "\n")
-                    if self.paths_array:
-                        tpfile.writelines(
-                            "display" + str(self.paths_array.index(paths)) + "paths=" + paths + "\n"
-                            for paths in self.paths_array
-                        )
-            except OSError:
-                msg = f"Cannot write to file {fname}"
-                show_message_dialog(msg, "Error")
-                return None
-            return fname
-        else:
+    def save(self, filename=None):
+        """Saves the TempProfile into a file.
+
+        By default the profile is written to ``<name>.profile`` in
+        PROFILES_PATH. Pass ``filename`` to write to a specific path instead;
+        this is used to render unsaved edits (preview) without overwriting the
+        stored profile on disk.
+        """
+        if self.name is None:
             print("tmp.Save(): name is not set.")
             return None
+        fname = filename or os.path.join(PROFILES_PATH, self.name + ".profile")
+        try:
+            with open(fname, "w", encoding="utf-8") as tpfile:
+                tpfile.write(self._serialize())
+        except OSError:
+            msg = f"Cannot write to file {fname}"
+            show_message_dialog(msg, "Error")
+            return None
+        return fname
+
+    def _serialize(self):
+        """Return the ``.profile`` file contents for this profile as a string.
+
+        This is the single source of truth for the on-disk profile format:
+        ``save()`` writes exactly this, and the GUI compares this representation
+        to decide whether there are unsaved changes.
+        """
+        lines = ["name=" + str(self.name)]
+        if self.spanmode:
+            lines.append("spanmode=" + str(self.spanmode))
+        if self.spangroups:
+            lines.append("spangroups=" + str(self.spangroups))
+        if self.slideshow is not None:
+            lines.append("slideshow=" + str(self.slideshow))
+        if self.delay:
+            lines.append("delay=" + str(self.delay))
+        if self.sortmode:
+            lines.append("sortmode=" + str(self.sortmode))
+        if self.inches:
+            lines.append("diagonal_inches=" + str(self.inches))
+        if self.manual_offsets:
+            lines.append("offsets=" + str(self.manual_offsets))
+        if self.bezels:
+            lines.append("bezels=" + str(self.bezels))
+        if self.hk_binding:
+            lines.append("hotkey=" + str(self.hk_binding))
+        if self.perspective:
+            lines.append("perspective=" + str(self.perspective))
+        if self.zoom is not None and self.zoom != 1.0:
+            lines.append("zoom=" + str(self.zoom))
+        if self.align is not None and tuple(self.align) != (0.0, 0.0):
+            lines.append(f"align={self.align[0]},{self.align[1]}")
+        if self.selected:
+            lines.append("selected=" + ";".join(self.selected))
+        if self.paths_array:
+            lines.extend(
+                "display" + str(self.paths_array.index(paths)) + "paths=" + paths for paths in self.paths_array
+            )
+        return "\n".join(lines) + "\n"
 
     def test_save(self):
         """Tests whether the user input for profile settings is valid."""

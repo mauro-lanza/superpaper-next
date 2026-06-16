@@ -1000,7 +1000,10 @@ class PerspectiveConfig(wx.Dialog):
 
     def onDeleteProfile(self, evt):
         """Delete selected perspective profile."""
-        persp_name = self.choice_profiles.GetString(self.choice_profiles.GetSelection())
+        selection = self.choice_profiles.GetSelection()
+        if selection == wx.NOT_FOUND:
+            return
+        persp_name = self.choice_profiles.GetString(selection)
         if self.display_sys.default_perspective == persp_name:
             self.display_sys.default_perspective = None
             self.display_sys.save_system()
