@@ -1028,7 +1028,10 @@ class PerspectiveConfig(wx.Dialog):
 
     def onOk(self, event):
         """Apply/save perspective settings and close dialog."""
-        # self.checkCbmaster()
+        # Persist the master enable/disable toggle even when no named perspective
+        # profile is being saved, so simply unchecking "Use perspective
+        # corrections" and pressing OK actually sticks.
+        self.checkCbmaster()
         if self.tc_name.GetValue():
             self.onSave()
         self.EndModal(wx.ID_OK)
