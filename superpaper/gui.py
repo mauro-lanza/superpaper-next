@@ -1109,6 +1109,11 @@ class WallpaperSettingsPanel(wx.Panel):
         cb_state = self.cb_slideshow.GetValue()
         sizer = self.sizer_setting_slideshow
         self.sizer_toggle_children(sizer, cb_state)
+        # Slideshow needs a sort order; default to Shuffle when enabling so the
+        # dropdown isn't left empty (an unselected dropdown also broke the
+        # dirty-state tracking that reads its current value).
+        if cb_state and self.ch_sshow_sort.GetSelection() == wx.NOT_FOUND:
+            self.ch_sshow_sort.SetSelection(0)
         # Zoom/pan is tuned to a single image's framing. In a slideshow the same
         # crop would be forced onto every (differently composed) image, so reset
         # the controls to defaults and disable them while slideshow is enabled.
@@ -1448,9 +1453,11 @@ class WallpaperSettingsPanel(wx.Panel):
             except ValueError:
                 # Mid-edit / invalid input; keep raw text so test_save rejects it.
                 tmp_profile.delay = delay_text
-            tmp_profile.sortmode = (
-                self.ch_sshow_sort.GetString(self.ch_sshow_sort.GetSelection()).lower().replace(" ", "_")
-            )
+            # The sort dropdown may have no selection yet (-1); GetString(-1)
+            # raises in wx, so only read it when a sort order is chosen.
+            sort_sel = self.ch_sshow_sort.GetSelection()
+            if sort_sel != wx.NOT_FOUND:
+                tmp_profile.sortmode = self.ch_sshow_sort.GetString(sort_sel).lower().replace(" ", "_")
         if self.cb_hotkey.GetValue():
             tmp_profile.hk_binding = self.tc_hotkey_bind.GetLineText(0)
 
