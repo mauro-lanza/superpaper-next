@@ -1735,8 +1735,11 @@ class WallpaperSettingsPanel(wx.Panel):
             testimage, advanced=True, perspective=perspective, spangroups=None, offsets=flat_offsets
         )
         thrd = change_wallpaper_job(profile, force=True)
+        # Pump the event loop while rendering so the GUI stays responsive
+        # instead of freezing.
         while thrd is not None and thrd.is_alive():
-            time.sleep(0.5)
+            wx.YieldIfNeeded()
+            time.sleep(0.05)
         del busy
 
     def onPerspectives(self, event):
