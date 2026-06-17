@@ -435,6 +435,34 @@ Check that it is formatted properly and valid keys."
     def reload_profiles(self, event):
         """Reloads profiles from disk."""
         self.list_of_profiles = list_profiles()
+        # Re-point active_profile at the freshly loaded instance (matched by
+        # name) so consumers that read tray.active_profile -- e.g. the settings
+        # dialog when it reopens -- see the saved state instead of a stale
+        # detached object (was causing edits like span mode to appear reverted).
+        if self.active_profile is not None:
+            refreshed = self.get_profile_by_name(self.active_profile.name)
+            if refreshed is not None:
+                self.active_profile = refreshed
+
+    def rearm_active_timer(self):
+        """Re-arm the slideshow timer for the active profile.
+
+        Used after the active profile's settings change in the settings dialog
+        (slideshow toggled, delay edited) so the change takes effect without
+        restarting the app. The current wallpaper is kept (startup=True), only
+        the repeating timer is rebuilt; if the profile is no longer a slideshow
+        the timer is simply stopped.
+        """
+        with self.job_lock:
+            if self.repeating_timer is not None and self.repeating_timer.is_running:
+                self.repeating_timer.stop()
+            if self.active_profile is not None:
+                # Keep the global active-profile name in sync with the (possibly
+                # renamed) active profile; the wallpaper setter only applies when
+                # profile.name matches it, so a stale name silently blocks every
+                # slideshow tick and manual change after a rename/save.
+                wpproc.G_ACTIVE_PROFILE = self.active_profile.name
+                self.repeating_timer, _thrd = run_profile_job(self.active_profile, startup=True)
 
     def start_prev_profile(self, profile, apply_now=False):
         """Checks if a previously running profile has been recorded and starts it.

@@ -25,6 +25,7 @@ from superpaper.data import (
     ProfileData,
     TempProfileData,
     open_profile,
+    write_active_profile,
 )
 from superpaper.message_dialog import show_message_dialog
 from superpaper.sp_paths import PATH, PROFILES_PATH
@@ -1109,6 +1110,11 @@ class WallpaperSettingsPanel(wx.Panel):
         cb_state = self.cb_slideshow.GetValue()
         sizer = self.sizer_setting_slideshow
         self.sizer_toggle_children(sizer, cb_state)
+        # Slideshow needs a sort order; default to Shuffle when enabling so the
+        # dropdown isn't left empty (an unselected dropdown also broke the
+        # dirty-state tracking that reads its current value).
+        if cb_state and self.ch_sshow_sort.GetSelection() == wx.NOT_FOUND:
+            self.ch_sshow_sort.SetSelection(0)
         # Zoom/pan is tuned to a single image's framing. In a slideshow the same
         # crop would be forced onto every (differently composed) image, so reset
         # the controls to defaults and disable them while slideshow is enabled.
@@ -1380,6 +1386,14 @@ class WallpaperSettingsPanel(wx.Panel):
             while thrd is not None and thrd.is_alive():
                 wx.YieldIfNeeded()
                 time.sleep(0.05)
+            # The applied image becomes the current selection so reopening the
+            # dialog (or a later render) shows the same wallpaper instead of
+            # reverting to the previously saved one (#158). Persist it on the
+            # live profile instance.
+            if tmp_profile.selected:
+                live = self._loaded_profile_with_selection()
+                if live is not None:
+                    live.set_selected_wallpaper(tmp_profile.selected, persist=True)
         finally:
             try:
                 os.remove(temp_file)
@@ -1400,6 +1414,22 @@ class WallpaperSettingsPanel(wx.Panel):
         if os.path.isdir(path):
             return None
         return path
+
+    def _loaded_profile_with_selection(self):
+        """Return the profile currently open in the dialog, by its ORIGINAL name.
+
+        The original name is taken from the profile dropdown, not the (possibly
+        just-edited) name field, so that renaming a profile does not lose its
+        persistent wallpaper selection. Prefers the live tray instance so an
+        updated selection is visible without a reload.
+        """
+        sel = self.choice_profiles.GetSelection()
+        if sel == wx.NOT_FOUND:
+            return None
+        name = self.choice_profiles.GetString(sel)
+        if not name or name == "Create a new profile":
+            return None
+        return self.parent_tray_obj.get_profile_by_name(name) or open_profile(name)
 
     def _collect_temp_profile(self, resolve_selection=False):
         """Builds a TempProfileData from the current dialog fields.
@@ -1424,9 +1454,11 @@ class WallpaperSettingsPanel(wx.Panel):
             except ValueError:
                 # Mid-edit / invalid input; keep raw text so test_save rejects it.
                 tmp_profile.delay = delay_text
-            tmp_profile.sortmode = (
-                self.ch_sshow_sort.GetString(self.ch_sshow_sort.GetSelection()).lower().replace(" ", "_")
-            )
+            # The sort dropdown may have no selection yet (-1); GetString(-1)
+            # raises in wx, so only read it when a sort order is chosen.
+            sort_sel = self.ch_sshow_sort.GetSelection()
+            if sort_sel != wx.NOT_FOUND:
+                tmp_profile.sortmode = self.ch_sshow_sort.GetString(sort_sel).lower().replace(" ", "_")
         if self.cb_hotkey.GetValue():
             tmp_profile.hk_binding = self.tc_hotkey_bind.GetLineText(0)
 
@@ -1475,7 +1507,12 @@ class WallpaperSettingsPanel(wx.Panel):
             if selected_file and os.path.isfile(selected_file):
                 tmp_profile.selected = [selected_file]
             else:
-                existing = open_profile(tmp_profile.name)
+                # No new image picked in the list: preserve the selection of the
+                # profile currently open in the dialog. Look it up by the original
+                # (dropdown) name, NOT tmp_profile.name, which may have just been
+                # edited (rename) and not exist on disk yet -- otherwise the
+                # selection is lost and the preview/applied image cycles (#158).
+                existing = self._loaded_profile_with_selection()
                 if existing and existing.selected:
                     tmp_profile.selected = existing.selected
 
@@ -1545,9 +1582,31 @@ class WallpaperSettingsPanel(wx.Panel):
             if old_profile:
                 old_profile_binding = old_profile.hk_binding
             saved_file = tmp_profile.save()
+            # If the profile was renamed, remove the file stored under the old
+            # name so a rename moves the profile instead of leaving a duplicate.
+            sel = self.choice_profiles.GetSelection()
+            old_name = self.choice_profiles.GetString(sel) if sel != wx.NOT_FOUND else ""
+            if old_name and old_name not in ("Create a new profile", tmp_profile.name):
+                old_fname = os.path.join(PROFILES_PATH, old_name + ".profile")
+                if os.path.isfile(old_fname):
+                    os.remove(old_fname)
+                # If the renamed profile was the running/active one, update the
+                # persisted "running profile" pointer so a restart resumes under
+                # the new name instead of failing to find the removed old file.
+                active = self.parent_tray_obj.active_profile
+                if active is not None and active.name == old_name:
+                    write_active_profile(tmp_profile.name)
             self.parent_tray_obj.reload_profiles(event)
+            # The just-saved profile becomes the active one so reopening the
+            # dialog shows the saved state (span mode, etc.) instead of a stale
+            # in-memory profile from before the edit.
+            self.parent_tray_obj.active_profile = self.parent_tray_obj.get_profile_by_name(tmp_profile.name)
             self.update_choiceprofile()
             self.parent_tray_obj.update_hotkey(tmp_profile.name, old_profile_binding, tmp_profile.hk_binding)
+            # Re-arm the active profile's slideshow timer so toggling slideshow
+            # (or editing the delay) takes effect immediately instead of only
+            # after an app restart.
+            self.parent_tray_obj.rearm_active_timer()
             self.choice_profiles.SetSelection(self.choice_profiles.FindString(tmp_profile.name))
             # Update wallpaper preview from selected profile. The profile's
             # persistent selection (if any) is what next_wallpaper_files returns.
@@ -1628,6 +1687,12 @@ class WallpaperSettingsPanel(wx.Panel):
         result = dlg.ShowModal()
         if result == wx.ID_YES and file_exists:
             os.remove(fname)
+            # Refresh tray state so the deleted profile disappears from the
+            # dropdown and is no longer active; otherwise it lingers in memory
+            # and a later save can recreate it.
+            if self.parent_tray_obj.active_profile is not None and self.parent_tray_obj.active_profile.name == profname:
+                self.parent_tray_obj.active_profile = None
+            self.parent_tray_obj.reload_profiles(event)
             self.update_choiceprofile()
             self.onCreateNewProfile(None)
         else:
@@ -1670,8 +1735,11 @@ class WallpaperSettingsPanel(wx.Panel):
             testimage, advanced=True, perspective=perspective, spangroups=None, offsets=flat_offsets
         )
         thrd = change_wallpaper_job(profile, force=True)
+        # Pump the event loop while rendering so the GUI stays responsive
+        # instead of freezing.
         while thrd is not None and thrd.is_alive():
-            time.sleep(0.5)
+            wx.YieldIfNeeded()
+            time.sleep(0.05)
         del busy
 
     def onPerspectives(self, event):

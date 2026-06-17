@@ -523,6 +523,18 @@ class ProfileData:
             self._write_selected()
         return files
 
+    def set_selected_wallpaper(self, files, persist=True):
+        """Pin the given file(s) as the current selection.
+
+        The selection is the source of truth for what is rendered; pinning it
+        keeps the preview and the applied wallpaper in sync across reloads.
+        When ``persist`` is True the choice is written into the profile file so
+        it survives a restart.
+        """
+        self.selected = list(files) if files else None
+        if persist:
+            self._write_selected()
+
     def _write_selected(self):
         """Persist the current selection into the profile file."""
         if not self.selected or not self.file:
