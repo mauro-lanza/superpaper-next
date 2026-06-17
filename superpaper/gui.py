@@ -25,6 +25,7 @@ from superpaper.data import (
     ProfileData,
     TempProfileData,
     open_profile,
+    write_active_profile,
 )
 from superpaper.message_dialog import show_message_dialog
 from superpaper.sp_paths import PATH, PROFILES_PATH
@@ -1581,9 +1582,31 @@ class WallpaperSettingsPanel(wx.Panel):
             if old_profile:
                 old_profile_binding = old_profile.hk_binding
             saved_file = tmp_profile.save()
+            # If the profile was renamed, remove the file stored under the old
+            # name so a rename moves the profile instead of leaving a duplicate.
+            sel = self.choice_profiles.GetSelection()
+            old_name = self.choice_profiles.GetString(sel) if sel != wx.NOT_FOUND else ""
+            if old_name and old_name not in ("Create a new profile", tmp_profile.name):
+                old_fname = os.path.join(PROFILES_PATH, old_name + ".profile")
+                if os.path.isfile(old_fname):
+                    os.remove(old_fname)
+                # If the renamed profile was the running/active one, update the
+                # persisted "running profile" pointer so a restart resumes under
+                # the new name instead of failing to find the removed old file.
+                active = self.parent_tray_obj.active_profile
+                if active is not None and active.name == old_name:
+                    write_active_profile(tmp_profile.name)
             self.parent_tray_obj.reload_profiles(event)
+            # The just-saved profile becomes the active one so reopening the
+            # dialog shows the saved state (span mode, etc.) instead of a stale
+            # in-memory profile from before the edit.
+            self.parent_tray_obj.active_profile = self.parent_tray_obj.get_profile_by_name(tmp_profile.name)
             self.update_choiceprofile()
             self.parent_tray_obj.update_hotkey(tmp_profile.name, old_profile_binding, tmp_profile.hk_binding)
+            # Re-arm the active profile's slideshow timer so toggling slideshow
+            # (or editing the delay) takes effect immediately instead of only
+            # after an app restart.
+            self.parent_tray_obj.rearm_active_timer()
             self.choice_profiles.SetSelection(self.choice_profiles.FindString(tmp_profile.name))
             # Update wallpaper preview from selected profile. The profile's
             # persistent selection (if any) is what next_wallpaper_files returns.
@@ -1664,6 +1687,12 @@ class WallpaperSettingsPanel(wx.Panel):
         result = dlg.ShowModal()
         if result == wx.ID_YES and file_exists:
             os.remove(fname)
+            # Refresh tray state so the deleted profile disappears from the
+            # dropdown and is no longer active; otherwise it lingers in memory
+            # and a later save can recreate it.
+            if self.parent_tray_obj.active_profile is not None and self.parent_tray_obj.active_profile.name == profname:
+                self.parent_tray_obj.active_profile = None
+            self.parent_tray_obj.reload_profiles(event)
             self.update_choiceprofile()
             self.onCreateNewProfile(None)
         else:
