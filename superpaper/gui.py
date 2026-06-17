@@ -1380,6 +1380,14 @@ class WallpaperSettingsPanel(wx.Panel):
             while thrd is not None and thrd.is_alive():
                 wx.YieldIfNeeded()
                 time.sleep(0.05)
+            # The applied image becomes the current selection so reopening the
+            # dialog (or a later render) shows the same wallpaper instead of
+            # reverting to the previously saved one (#158). Persist it on the
+            # live profile instance.
+            if tmp_profile.selected:
+                live = self._loaded_profile_with_selection()
+                if live is not None:
+                    live.set_selected_wallpaper(tmp_profile.selected, persist=True)
         finally:
             try:
                 os.remove(temp_file)
@@ -1400,6 +1408,22 @@ class WallpaperSettingsPanel(wx.Panel):
         if os.path.isdir(path):
             return None
         return path
+
+    def _loaded_profile_with_selection(self):
+        """Return the profile currently open in the dialog, by its ORIGINAL name.
+
+        The original name is taken from the profile dropdown, not the (possibly
+        just-edited) name field, so that renaming a profile does not lose its
+        persistent wallpaper selection. Prefers the live tray instance so an
+        updated selection is visible without a reload.
+        """
+        sel = self.choice_profiles.GetSelection()
+        if sel == wx.NOT_FOUND:
+            return None
+        name = self.choice_profiles.GetString(sel)
+        if not name or name == "Create a new profile":
+            return None
+        return self.parent_tray_obj.get_profile_by_name(name) or open_profile(name)
 
     def _collect_temp_profile(self, resolve_selection=False):
         """Builds a TempProfileData from the current dialog fields.
@@ -1475,7 +1499,12 @@ class WallpaperSettingsPanel(wx.Panel):
             if selected_file and os.path.isfile(selected_file):
                 tmp_profile.selected = [selected_file]
             else:
-                existing = open_profile(tmp_profile.name)
+                # No new image picked in the list: preserve the selection of the
+                # profile currently open in the dialog. Look it up by the original
+                # (dropdown) name, NOT tmp_profile.name, which may have just been
+                # edited (rename) and not exist on disk yet -- otherwise the
+                # selection is lost and the preview/applied image cycles (#158).
+                existing = self._loaded_profile_with_selection()
                 if existing and existing.selected:
                     tmp_profile.selected = existing.selected
 
