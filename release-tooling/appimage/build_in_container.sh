@@ -67,21 +67,51 @@ cp -a /usr/share/glib-2.0/schemas/*.xml "${APPDIR}/usr/share/glib-2.0/schemas/" 
 cp -a /usr/share/glib-2.0/schemas/*.gschema.override "${APPDIR}/usr/share/glib-2.0/schemas/" 2>/dev/null || true
 glib-compile-schemas "${APPDIR}/usr/share/glib-2.0/schemas"
 
-echo "==> Writing empty gdk-pixbuf loader cache (built-in png/jpeg only)"
-# Ubuntu's libgdk-pixbuf compiles the png/jpeg loaders in (hence libpng/libjpeg
-# get bundled as its dependencies), so no external loader modules are needed for
-# the app's PNG icons. An empty cache makes the bundled library use those
-# built-ins and stops it from scanning the host loader cache, which would
-# otherwise reintroduce the #170-class version skew.
-cat > "${APPDIR}/usr/lib/gdk-pixbuf-2.0/2.10.0/loaders.cache" <<'EOF'
-# GdkPixbuf Image Loader Modules file
-# Automatically generated file, do not edit
-EOF
+echo "==> Bundling gdk-pixbuf loaders + librsvg (SVG theme icons / combo arrows)"
+GP_HOST="/usr/lib/x86_64-linux-gnu/gdk-pixbuf-2.0"
+INTERNAL="${APPDIR}/usr/bin/_internal"
+cp -a "${GP_HOST}/2.10.0/loaders/." "${APPDIR}/usr/lib/gdk-pixbuf-2.0/2.10.0/loaders/"
 
-echo "==> Bundling fallback font + icon themes"
+# The SVG loader (used for GTK symbolic icons such as the combo-box dropdown
+# arrow) needs librsvg and its non-glibc deps. PyInstaller doesn't bundle them
+# because nothing links them directly -- the loader is dlopened at runtime -- so
+# copy them next to the other bundled libs, where the loader resolves them via
+# PyInstaller's existing search path. glibc / dynamic-loader libs are skipped on
+# purpose so the bundle keeps using the host's matching ones.
+SKIP_RE='^(libc|libpthread|libdl|libm|librt|libresolv|libutil|ld-linux)'
+bundle_deps() {
+    ldd "$1" 2>/dev/null | awk '{print $3}' | grep '^/' | while read -r dep; do
+        base="$(basename "${dep}")"
+        echo "${base}" | grep -qE "${SKIP_RE}" && continue
+        [ -e "${INTERNAL}/${base}" ] && continue
+        cp -aL "${dep}" "${INTERNAL}/"
+    done
+}
+RSVG="$(ldconfig -p | awk '/librsvg-2\.so\.2 /{print $NF; exit}')"
+[ -n "${RSVG}" ] && cp -aL "${RSVG}" "${INTERNAL}/"
+# A few passes so transitive deps (e.g. librsvg -> libxml2 -> liblzma) get pulled.
+for _pass in 1 2 3; do
+    for so in "${APPDIR}"/usr/lib/gdk-pixbuf-2.0/2.10.0/loaders/*.so \
+              "${INTERNAL}"/librsvg-2.so.2 "${INTERNAL}"/libxml2.so.2; do
+        [ -e "${so}" ] && bundle_deps "${so}"
+    done
+done
+
+# Relocatable loader cache: built against the bundled loaders, with the build
+# time AppDir prefix replaced by the @APPDIR@ token that AppRun rewrites at
+# launch (the cache stores absolute loader paths). Built-in png/jpeg keep working
+# regardless of the cache contents.
+GP_QUERY="${GP_HOST}/gdk-pixbuf-query-loaders"
+[ -x "${GP_QUERY}" ] || GP_QUERY="$(command -v gdk-pixbuf-query-loaders)"
+"${GP_QUERY}" "${APPDIR}"/usr/lib/gdk-pixbuf-2.0/2.10.0/loaders/*.so \
+    | sed "s|${APPDIR}|@APPDIR@|g" \
+    > "${APPDIR}/usr/lib/gdk-pixbuf-2.0/2.10.0/loaders.cache"
+
+echo "==> Bundling fallback font + icon themes + mime database"
 cp -a /usr/share/fonts/truetype/dejavu "${APPDIR}/usr/share/fonts/" 2>/dev/null || true
 cp -a /usr/share/icons/hicolor "${APPDIR}/usr/share/icons/" 2>/dev/null || true
 cp -a /usr/share/icons/Adwaita "${APPDIR}/usr/share/icons/" 2>/dev/null || true
+cp -a /usr/share/mime "${APPDIR}/usr/share/" 2>/dev/null || true
 
 # usr/lib/gio/modules is intentionally left EMPTY: with GIO_MODULE_DIR pointed
 # here, GLib loads no host gio modules (the #170 undefined-symbol trigger).

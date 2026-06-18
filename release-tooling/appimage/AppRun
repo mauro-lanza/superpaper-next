@@ -34,12 +34,19 @@ export GSETTINGS_SCHEMA_DIR="${APPDIR}/usr/share/glib-2.0/schemas"
 # GUI startup (#170).
 export GIO_MODULE_DIR="${APPDIR}/usr/lib/gio/modules"
 
-# gdk-pixbuf: point at the bundled (intentionally empty) loader cache. With no
-# external modules listed, the bundled libgdk-pixbuf falls back to its compiled
-# in png/jpeg loaders -- enough to render the app's PNG icons -- and never scans
-# the host's loader cache, which would otherwise reintroduce the #170-class
-# version skew (host loader built against a newer libgdk-pixbuf).
-export GDK_PIXBUF_MODULE_FILE="${APPDIR}/usr/lib/gdk-pixbuf-2.0/2.10.0/loaders.cache"
+# gdk-pixbuf: the bundled loaders.cache stores absolute loader paths, generated
+# at build time with an @APPDIR@ token. Rewrite it to this run's $APPDIR so the
+# SVG loader (GTK symbolic icons like the combo-box arrow) and friends resolve.
+# Built-in png/jpeg keep working regardless. Pointing at the bundled cache also
+# stops the library from scanning the host cache (#170-class version skew).
+PIXBUF_BASE="${APPDIR}/usr/lib/gdk-pixbuf-2.0"
+export GDK_PIXBUF_MODULEDIR="${PIXBUF_BASE}/2.10.0/loaders"
+if [ -f "${PIXBUF_BASE}/2.10.0/loaders.cache" ]; then
+    sed "s|@APPDIR@|${APPDIR}|g" "${PIXBUF_BASE}/2.10.0/loaders.cache" > "${RUNTMP}/loaders.cache"
+    export GDK_PIXBUF_MODULE_FILE="${RUNTMP}/loaders.cache"
+else
+    export GDK_PIXBUF_MODULE_FILE="${PIXBUF_BASE}/2.10.0/loaders.cache"
+fi
 
 # Fonts: generate a minimal fontconfig config that points at the bundled font so
 # text always renders, regardless of the host's (newer) /etc/fonts that the
