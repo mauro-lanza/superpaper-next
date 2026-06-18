@@ -1,0 +1,60 @@
+#!/bin/sh
+# Isolating launcher for the Superpaper AppImage.
+#
+# Everything GTK/GLib/fontconfig needs is bundled under $APPDIR. We point the
+# runtime at the bundled copies and stop it from reaching out to the host's
+# (version-mismatched) gio modules / gsettings schemas / fontconfig configs.
+# That host "reach-out" is what broke launches on newer distros:
+#   * #170  host gio module loaded into the older bundled glib ->
+#           "undefined symbol: g_assertion_message_cmpint" -> no GUI
+#   * #164  host gsettings schema present but missing the 'antialiasing' key ->
+#           GLib-GIO-ERROR -> core dump
+#   * #169  bundled libfontconfig too old to parse the host's newer /etc/fonts
+#           -> no fonts found -> every glyph renders as a [] tofu box
+set -u
+
+HERE="$(dirname "$(readlink -f "${0}")")"
+export APPDIR="${HERE}"
+
+# Per-run scratch dir for generated caches/config (cleaned up on exit).
+RUNTMP="$(mktemp -d "${TMPDIR:-/tmp}/superpaper.XXXXXX")"
+trap 'rm -rf "${RUNTMP}"' EXIT INT TERM
+
+# Use ONLY the bundled data tree (schemas, icons, mime). Isolating from the host
+# /usr/share means a host schema carrying a mismatched key can no longer be
+# found and crash GTK (#164).
+export XDG_DATA_DIRS="${APPDIR}/usr/share"
+
+# GSettings: don't talk to dconf/host; read the bundled compiled schemas.
+export GSETTINGS_BACKEND="memory"
+export GSETTINGS_SCHEMA_DIR="${APPDIR}/usr/share/glib-2.0/schemas"
+
+# GIO: only load bundled modules (the dir is intentionally empty) so host
+# modules built against a newer glib can't fail with undefined-symbol and abort
+# GUI startup (#170).
+export GIO_MODULE_DIR="${APPDIR}/usr/lib/gio/modules"
+
+# gdk-pixbuf: point at the bundled (intentionally empty) loader cache. With no
+# external modules listed, the bundled libgdk-pixbuf falls back to its compiled
+# in png/jpeg loaders -- enough to render the app's PNG icons -- and never scans
+# the host's loader cache, which would otherwise reintroduce the #170-class
+# version skew (host loader built against a newer libgdk-pixbuf).
+export GDK_PIXBUF_MODULE_FILE="${APPDIR}/usr/lib/gdk-pixbuf-2.0/2.10.0/loaders.cache"
+
+# Fonts: generate a minimal fontconfig config that points at the bundled font so
+# text always renders, regardless of the host's (newer) /etc/fonts that the
+# bundled libfontconfig can't parse (#169). $APPDIR is not known until runtime,
+# and fontconfig does not expand env vars inside <dir>, hence the generation.
+FONT_CACHE="${XDG_CACHE_HOME:-${HOME}/.cache}/superpaper/fontconfig"
+mkdir -p "${FONT_CACHE}"
+cat > "${RUNTMP}/fonts.conf" <<EOF
+<?xml version="1.0"?>
+<fontconfig>
+  <dir>${APPDIR}/usr/share/fonts</dir>
+  <cachedir>${FONT_CACHE}</cachedir>
+  <match target="pattern"><test name="family"><string>sans-serif</string></test></match>
+</fontconfig>
+EOF
+export FONTCONFIG_FILE="${RUNTMP}/fonts.conf"
+
+exec "${APPDIR}/usr/bin/superpaper" "$@"
