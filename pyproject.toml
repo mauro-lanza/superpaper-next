@@ -11,6 +11,13 @@ dev = [
     "ty>=0.0.1a1",
     "pre-commit>=4.0.0",
 ]
+# Tools needed only to produce distributable builds (PyInstaller binary +
+# AppImage). Not runtime dependencies; kept separate from the lint/type `dev`
+# group. uv itself is intentionally NOT listed here -- it is a standalone
+# environment manager installed outside the project.
+build = [
+    "pyinstaller>=6.21.0",
+]
 
 # ---------------------------------------------------------------------------
 # Ruff: linter + formatter
