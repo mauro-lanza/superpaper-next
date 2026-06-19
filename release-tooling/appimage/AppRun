@@ -16,9 +16,13 @@ set -u
 HERE="$(dirname "$(readlink -f "${0}")")"
 export APPDIR="${HERE}"
 
-# Per-run scratch dir for generated caches/config (cleaned up on exit).
+# Per-run scratch dir for generated caches/config (cleaned up on exit). The
+# generated fonts.conf / loaders.cache below live here and must survive for the
+# whole run, so we do NOT exec the app (see the end of the script); the EXIT
+# trap then reliably removes this dir once the app has quit. INT/TERM are
+# forwarded to the app instead of cleaning up early.
 RUNTMP="$(mktemp -d "${TMPDIR:-/tmp}/superpaper.XXXXXX")"
-trap 'rm -rf "${RUNTMP}"' EXIT INT TERM
+trap 'rm -rf "${RUNTMP}"' EXIT
 
 # Use ONLY the bundled data tree (schemas, icons, mime). Isolating from the host
 # /usr/share means a host schema carrying a mismatched key can no longer be
@@ -64,4 +68,77 @@ cat > "${RUNTMP}/fonts.conf" <<EOF
 EOF
 export FONTCONFIG_FILE="${RUNTMP}/fonts.conf"
 
-exec "${APPDIR}/usr/bin/superpaper" "$@"
+# Desktop integration so KDE/GNOME on Wayland can resolve this window's icon.
+# Wayland has no client-side window-icon API for GTK3, so the compositor matches
+# the window's app_id ("Superpaper", taken from the program name) to an
+# installed .desktop file (via StartupWMClass) and uses its Icon=. X11 doesn't
+# need this (wx sets _NET_WM_ICON directly), but Wayland does. Install the entry
+# plus a full hicolor icon set into the per-user XDG data dir -- only when
+# launched as a real AppImage ($APPIMAGE set), and skippable via
+# SUPERPAPER_NO_INTEGRATION.
+#
+# The Icon= is a THEME NAME ("superpaper"), not an absolute path: window
+# decorations resolve the icon through the icon theme (KWin via
+# QIcon::fromTheme), which only searches the standard hicolor size buckets and
+# ignores both absolute paths and loose ~/.local/share/icons/<name>.png files.
+# Installing one icon per size bucket is what lets the title-bar/decoration icon
+# resolve, not just the taskbar (which honoured the absolute path already).
+if [ -n "${APPIMAGE:-}" ] && [ -z "${SUPERPAPER_NO_INTEGRATION:-}" ]; then
+    DATA_HOME="${XDG_DATA_HOME:-${HOME}/.local/share}"
+    APPS_DIR="${DATA_HOME}/applications"
+    THEME_DIR="${DATA_HOME}/icons/hicolor"
+    # Reverse-DNS application id (matches the AppStream metainfo <id> and the
+    # desktop file shipped inside the AppDir). The window app_id stays
+    # "Superpaper" (set by the program name); the compositor matches it via the
+    # StartupWMClass below, independent of this file's name.
+    APP_ID="io.github.hhannine.Superpaper"
+    mkdir -p "${APPS_DIR}" 2>/dev/null || true
+
+    # Mirror the bundled hicolor icon set (scalable SVG + one PNG per size
+    # bucket) into the user's icon theme so by-name lookups in any toolkit
+    # resolve it.
+    for src in "${APPDIR}"/usr/share/icons/hicolor/*/apps/superpaper.png \
+               "${APPDIR}"/usr/share/icons/hicolor/scalable/apps/superpaper.svg; do
+        [ -e "${src}" ] || continue
+        bucket="$(basename "$(dirname "$(dirname "${src}")")")"   # 256x256 or scalable
+        mkdir -p "${THEME_DIR}/${bucket}/apps" 2>/dev/null || true
+        cp -f "${src}" "${THEME_DIR}/${bucket}/apps/" 2>/dev/null || true
+    done
+    # Remove the loose icon shipped by earlier AppImage builds; left in place it
+    # would shadow the themed icon for GTK's fallback path.
+    rm -f "${DATA_HOME}/icons/superpaper.png" 2>/dev/null || true
+    # Remove the legacy short-named entry written by earlier builds so it can't
+    # linger as a duplicate launcher next to the reverse-DNS one below.
+    rm -f "${APPS_DIR}/superpaper.desktop" 2>/dev/null || true
+
+    cat > "${APPS_DIR}/${APP_ID}.desktop" <<EOF 2>/dev/null || true
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Superpaper
+GenericName=Multi-monitor wallpaper manager
+Exec=${APPIMAGE}
+Icon=superpaper
+Terminal=false
+Categories=Utility;
+StartupWMClass=Superpaper
+EOF
+
+    # Refresh the icon cache + desktop database so a freshly-integrated launch is
+    # picked up without a re-login (best-effort; harmless if tools are missing).
+    if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+        gtk-update-icon-cache -q -t -f "${THEME_DIR}" >/dev/null 2>&1 || true
+    fi
+    if command -v update-desktop-database >/dev/null 2>&1; then
+        update-desktop-database "${APPS_DIR}" >/dev/null 2>&1 || true
+    fi
+fi
+
+# Run the app in the foreground (not via exec) so the EXIT trap can remove
+# ${RUNTMP} after it quits -- the generated fonts.conf / loaders.cache there
+# must outlive startup. Forward INT/TERM to the app and propagate its exit code.
+"${APPDIR}/usr/bin/superpaper" "$@" &
+SP_PID=$!
+trap 'kill -TERM "${SP_PID}" 2>/dev/null' INT TERM
+wait "${SP_PID}"
+exit $?
