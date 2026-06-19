@@ -284,7 +284,6 @@ class WallpaperSettingsPanel(wx.Panel):
             statbox_parent_hkey, bitmap=wx.BitmapBundle(help_bmp), name="butt_help_hk"
         )
         self.button_help_hotkey.Bind(wx.EVT_BUTTON, self.onHelpHotkey)
-        self.button_help_hotkey.Disable()
         self.hotkey_bind_sizer.Add(self.button_help_hotkey, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 5)
         self.sizer_setting_hotkey.Add(self.cb_hotkey, 0, wx.ALIGN_LEFT | wx.ALL, 5)
         self.sizer_setting_hotkey.Add(self.hotkey_bind_sizer, 0, wx.CENTER | wx.EXPAND | wx.ALL, 5)
@@ -908,6 +907,10 @@ class WallpaperSettingsPanel(wx.Panel):
                 self.sizer_toggle_children(child.GetSizer(), bool_state)
             else:
                 widget = child.GetWindow()
+                # Help/note buttons stay clickable even when their section is
+                # disabled, so the explanation is always available to the user.
+                if widget is not None and widget.GetName().startswith("butt_help"):
+                    continue
                 if isinstance(widget, (wx.TextCtrl, wx.StaticText, wx.Choice, wx.ComboBox, wx.Button)) or (
                     isinstance(widget, wx.CheckBox) and toggle_cb
                 ):
