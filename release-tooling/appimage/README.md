@@ -49,11 +49,12 @@ the host's loader cache (which would reintroduce the same version skew).
 
 - [`Dockerfile`](Dockerfile) — Ubuntu 22.04 build image (Python, wx/GTK runtime
   libs, schema/pixbuf/font tooling, `appimagetool`).
-- [`build.sh`](build.sh) — host orchestrator: builds the image, runs the
-  container build, writes to `releases/`.
-- [`build_in_container.sh`](build_in_container.sh) — PyInstaller `--onedir`
-  build, AppDir assembly, GTK data staging, packaging.
+- [`build.sh`](build.sh) — single entry point. Host phase builds the image and
+  runs the container; the `--in-container` phase (invoked automatically) does
+  the PyInstaller build, AppDir assembly, GTK data staging and packaging.
 - [`AppRun`](AppRun) — host-isolating launcher.
+- [`io.github.hhannine.Superpaper.metainfo.xml`](io.github.hhannine.Superpaper.metainfo.xml)
+  — AppStream metadata, staged into `usr/share/metainfo/`.
 
 ## Notes
 
@@ -61,6 +62,16 @@ the host's loader cache (which would reintroduce the same version skew).
   (`PATH = dirname(dirname(exe))` in `superpaper/sp_paths.py`): the executable
   lives at `usr/bin/superpaper`, so resources are staged at
   `usr/superpaper/resources/`.
+- **Icons.** The build renders the SVG master
+  (`superpaper/resources/superpaper.svg`) into the hicolor theme: the scalable
+  icon (`scalable/apps/superpaper.svg`) plus PNG buckets rendered natively with
+  `rsvg-convert` (`{16,24,32,48,64,128,256}x.../apps/superpaper.png`). On first
+  launch `AppRun` mirrors that set into `~/.local/share/icons/hicolor/` and
+  writes a desktop entry with `Icon=superpaper` (a theme *name*, not an absolute
+  path). This is what lets the Wayland title-bar/decoration icon resolve: KWin/Qt
+  look the icon up by name through the theme and ignore loose
+  `~/.local/share/icons/<name>.png` files and absolute paths. Set
+  `SUPERPAPER_NO_INTEGRATION=1` to skip the integration.
 - Releases must be built via this container (old base), **not** directly on a
   rolling-release host, or the glibc floor and version-skew bugs return.
 - wxPython is installed from the prebuilt Ubuntu 22.04 wheel index
