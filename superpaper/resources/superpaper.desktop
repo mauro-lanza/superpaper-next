@@ -7,4 +7,5 @@ Exec=superpaper
 Icon=superpaper
 Terminal=false
 Categories=Utility;
+StartupWMClass=Superpaper
 X-KDE-autostart-after=panel
