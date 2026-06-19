@@ -20,7 +20,7 @@ from superpaper.data import (
 from superpaper.gui import ConfigFrame
 from superpaper.message_dialog import show_message_dialog
 from superpaper.sni_tray import build_tray, sni_supported
-from superpaper.sp_platform import IS_MACOS, IS_WINDOWS
+from superpaper.sp_platform import IS_MACOS, IS_WINDOWS, host_spawn_env
 from superpaper.wallpaper_processing import (
     change_wallpaper_job,
     quick_profile_job,
@@ -408,17 +408,20 @@ Check that it is formatted properly and valid keys."
             try:
                 # os.startfile is Windows-only; the branch is IS_WINDOWS-guarded.
                 os.startfile(sp_paths.CONFIG_PATH)  # pyright: ignore[reportAttributeAccessIssue]
-            except BaseException:
+            except BaseException as e:
+                sp_logging.G_LOGGER.error("open_config failed for %s: %s", sp_paths.CONFIG_PATH, e, exc_info=True)
                 show_message_dialog("There was an error trying to open the config folder.")
         elif IS_MACOS:
             try:
-                subprocess.check_call(["open", sp_paths.CONFIG_PATH])
-            except subprocess.CalledProcessError:
+                subprocess.check_call(["open", sp_paths.CONFIG_PATH], env=host_spawn_env())
+            except (subprocess.CalledProcessError, OSError) as e:
+                sp_logging.G_LOGGER.error("open_config failed for %s: %s", sp_paths.CONFIG_PATH, e, exc_info=True)
                 show_message_dialog("There was an error trying to open the config folder.")
         else:
             try:
-                subprocess.check_call(["xdg-open", sp_paths.CONFIG_PATH])
-            except subprocess.CalledProcessError:
+                subprocess.check_call(["xdg-open", sp_paths.CONFIG_PATH], env=host_spawn_env())
+            except (subprocess.CalledProcessError, OSError) as e:
+                sp_logging.G_LOGGER.error("open_config failed for %s: %s", sp_paths.CONFIG_PATH, e, exc_info=True)
                 show_message_dialog("There was an error trying to open the config folder.")
 
     def configure_wallpapers(self, event):

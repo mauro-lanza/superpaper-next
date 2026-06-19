@@ -24,6 +24,24 @@ export APPDIR="${HERE}"
 RUNTMP="$(mktemp -d "${TMPDIR:-/tmp}/superpaper.XXXXXX")"
 trap 'rm -rf "${RUNTMP}"' EXIT
 
+# Snapshot the host value of every variable we override below before clobbering
+# it, so the app can hand spawned host programs (xdg-open for "Open Config
+# Folder", gsettings, the file manager, custom commands) a clean host
+# environment. Without this they inherit our bundled XDG_DATA_DIRS / GIO /
+# GSettings / fontconfig and fail -- e.g. xdg-open can't find the host file
+# manager or mime associations and exits non-zero. The app restores these via
+# superpaper.sp_platform.host_spawn_env(); an unset variable is recorded with a
+# sentinel so it can be removed rather than restored.
+for _hv in XDG_DATA_DIRS GSETTINGS_BACKEND GSETTINGS_SCHEMA_DIR GIO_MODULE_DIR \
+           GDK_PIXBUF_MODULEDIR GDK_PIXBUF_MODULE_FILE FONTCONFIG_FILE; do
+    if eval "[ \"\${${_hv}+set}\" = set ]"; then
+        eval "export SUPERPAPER_HOSTENV_${_hv}=\"\${${_hv}}\""
+    else
+        export "SUPERPAPER_HOSTENV_${_hv}=__SUPERPAPER_UNSET__"
+    fi
+done
+unset _hv
+
 # Use ONLY the bundled data tree (schemas, icons, mime). Isolating from the host
 # /usr/share means a host schema carrying a mismatched key can no longer be
 # found and crash GTK (#164).
