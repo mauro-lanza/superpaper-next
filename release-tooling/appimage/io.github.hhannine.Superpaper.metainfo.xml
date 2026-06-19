@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.hhannine.Superpaper</id>
+  <metadata_license>FSFAP</metadata_license>
+  <project_license>MIT</project_license>
+  <name>Superpaper</name>
+  <summary>Multi-monitor wallpaper manager</summary>
+  <description>
+    <p>
+      Superpaper is a cross-platform wallpaper manager that focuses on
+      multi-monitor support. It can span a single image across several displays
+      and manage per-monitor wallpapers.
+    </p>
+    <p>Features include:</p>
+    <ul>
+      <li>Spanning a single wallpaper across multiple monitors</li>
+      <li>Per-monitor PPI and bezel corrections for seamless spans</li>
+      <li>Slideshow with configurable interval and ordering</li>
+      <li>Global keyboard shortcuts</li>
+    </ul>
+  </description>
+  <launchable type="desktop-id">io.github.hhannine.Superpaper.desktop</launchable>
+  <url type="homepage">https://github.com/hhannine/superpaper</url>
+  <url type="bugtracker">https://github.com/hhannine/superpaper/issues</url>
+  <developer id="io.github.hhannine">
+    <name>Henri Hänninen</name>
+  </developer>
+  <provides>
+    <binary>superpaper</binary>
+  </provides>
+  <categories>
+    <category>Utility</category>
+  </categories>
+  <content_rating type="oars-1.1" />
+  <releases>
+    <release version="2.3.0" date="2026-06-19" />
+  </releases>
+</component>
