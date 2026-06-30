@@ -1,0 +1,19 @@
+# Keep the AppImage Docker build context small. The image build only needs the
+# package source plus packaging metadata (see release-tooling/appimage/Dockerfile,
+# which COPYies requirements_full_linux.txt). Everything below is irrelevant to
+# the build and would otherwise be uploaded as build context on every run --
+# notably releases/, which holds large prebuilt AppImages.
+.git
+.github
+releases/
+snap/
+docs/
+tests/
+example-script/
+*.egg-info/
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+build/
+dist/
+*.AppImage

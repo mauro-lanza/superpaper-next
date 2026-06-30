@@ -284,7 +284,6 @@ class WallpaperSettingsPanel(wx.Panel):
             statbox_parent_hkey, bitmap=wx.BitmapBundle(help_bmp), name="butt_help_hk"
         )
         self.button_help_hotkey.Bind(wx.EVT_BUTTON, self.onHelpHotkey)
-        self.button_help_hotkey.Disable()
         self.hotkey_bind_sizer.Add(self.button_help_hotkey, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 5)
         self.sizer_setting_hotkey.Add(self.cb_hotkey, 0, wx.ALIGN_LEFT | wx.ALL, 5)
         self.sizer_setting_hotkey.Add(self.hotkey_bind_sizer, 0, wx.CENTER | wx.EXPAND | wx.ALL, 5)
@@ -908,6 +907,10 @@ class WallpaperSettingsPanel(wx.Panel):
                 self.sizer_toggle_children(child.GetSizer(), bool_state)
             else:
                 widget = child.GetWindow()
+                # Help/note buttons stay clickable even when their section is
+                # disabled, so the explanation is always available to the user.
+                if widget is not None and widget.GetName().startswith("butt_help"):
+                    continue
                 if isinstance(widget, (wx.TextCtrl, wx.StaticText, wx.Choice, wx.ComboBox, wx.Button)) or (
                     isinstance(widget, wx.CheckBox) and toggle_cb
                 ):
@@ -2342,36 +2345,37 @@ class WallpaperPreviewPanel(wx.Panel):
         self.button_cancel.Show(False)
 
     def move_buttons(self):
-        """Position display config buttons to bottom right corner."""
+        """Position display config buttons in the bottom-right corner.
+
+        Each button is right-aligned using its own width so wider labels such as
+        "Positions" and "Exact entry" stay fully inside the panel. Using
+        ``GetDefaultSize`` here clipped them, as it returns wx's generic button
+        width and ignores the actual label.
+        """
         sz_area = self.GetSize()
-        sz_butt = self.button_config.GetDefaultSize()
-        sz_help = self.button_help.GetSize()
         self.butt_gap = 10
-        self.button_config.SetPosition(
-            wx.Point(sz_area[0] - sz_butt[0] - self.butt_gap, sz_area[1] - sz_butt[1] - self.butt_gap)
-        )
+        gap = self.butt_gap
+        row_h = self.button_config.GetBestSize()[1]
+        right = sz_area[0] - gap
+        bottom_y = sz_area[1] - row_h - gap
+
+        def right_aligned(button, row):
+            button.SetPosition(wx.Point(right - button.GetBestSize()[0], bottom_y - row * (row_h + gap)))
+
+        # Right column, bottom to top. Config/Cancel share the bottom row (only
+        # one is ever shown at a time depending on config mode).
+        right_aligned(self.button_config, 0)
+        right_aligned(self.button_cancel, 0)
+        right_aligned(self.button_reset, 1)
+        right_aligned(self.button_entry, 2)
+        # Save sits to the left of the bottom-right Cancel button.
         self.button_save.SetPosition(
             wx.Point(
-                sz_area[0] - 2 * (sz_butt[0] + self.butt_gap),
-                sz_area[1] - sz_butt[1] - self.butt_gap,
+                right - self.button_cancel.GetBestSize()[0] - gap - self.button_save.GetBestSize()[0],
+                bottom_y,
             )
         )
-        self.button_reset.SetPosition(
-            wx.Point(
-                sz_area[0] - sz_butt[0] - self.butt_gap,
-                sz_area[1] - 2 * (sz_butt[1] + self.butt_gap),
-            )
-        )
-        self.button_entry.SetPosition(
-            wx.Point(
-                sz_area[0] - sz_butt[0] - self.butt_gap,
-                sz_area[1] - 3 * (sz_butt[1] + self.butt_gap),
-            )
-        )
-        self.button_cancel.SetPosition(
-            wx.Point(sz_area[0] - sz_butt[0] - self.butt_gap, sz_area[1] - sz_butt[1] - self.butt_gap)
-        )
-        self.button_help.SetPosition(wx.Point(sz_area[0] - sz_help[0] - self.butt_gap, self.butt_gap))
+        self.button_help.SetPosition(wx.Point(right - self.button_help.GetBestSize()[0], gap))
 
     def toggle_buttons(self, show_config, in_config):
         """Toggle visibility of display positioning config buttons."""

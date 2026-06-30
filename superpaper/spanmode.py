@@ -5,7 +5,7 @@ import subprocess
 import sys
 from typing import Any
 
-from superpaper.sp_platform import IS_LINUX, IS_MACOS, IS_WINDOWS
+from superpaper.sp_platform import IS_LINUX, IS_MACOS, IS_WINDOWS, host_spawn_env
 
 # winreg is a Windows-only stdlib module. Bind a fallback so the name is always
 # defined, and guard the import with a literal sys.platform comparison so type
@@ -50,7 +50,8 @@ def set_spanmode():
                         "org.gnome.desktop.background",
                         "picture-options",
                         "spanned",
-                    ]
+                    ],
+                    env=host_spawn_env(),
                 )
             elif desk_env == "cinnamon":
                 subprocess.run(
@@ -60,7 +61,8 @@ def set_spanmode():
                         "org.cinnamon.desktop.background",
                         "picture-options",
                         "spanned",
-                    ]
+                    ],
+                    env=host_spawn_env(),
                 )
             elif desk_env == "mate":
                 subprocess.run(
@@ -70,14 +72,15 @@ def set_spanmode():
                         "org.mate.background",
                         "picture-options",
                         "spanned",
-                    ]
+                    ],
+                    env=host_spawn_env(),
                 )
             elif desk_env.lower() == "lubuntu" or "lxqt" in desk_env.lower():
                 try:
-                    subprocess.run(["pcmanfm", "--wallpaper-mode=stretch"])
+                    subprocess.run(["pcmanfm", "--wallpaper-mode=stretch"], env=host_spawn_env())
                 except OSError:
                     try:
-                        subprocess.run(["pcmanfm-qt", "--wallpaper-mode=stretch"])
+                        subprocess.run(["pcmanfm-qt", "--wallpaper-mode=stretch"], env=host_spawn_env())
                     except OSError:
                         pass
     elif IS_MACOS:

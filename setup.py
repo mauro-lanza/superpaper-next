@@ -73,6 +73,7 @@ if __name__ == "__main__":
         package_data={
             "superpaper": [
                 "resources/superpaper.png",
+                "resources/superpaper.svg",
                 "resources/test.png",
                 "resources/icons8-merge-vertical-96.png",
                 "resources/icons8-merge-horizontal-96.png",
@@ -82,6 +83,10 @@ if __name__ == "__main__":
         },
         data_files=[
             ("share/applications", ["superpaper/resources/superpaper.desktop"]),
-            ("share/icons/hicolor/256x256/apps", ["superpaper/resources/superpaper.png"]),
+            # Scalable SVG is valid at any requested size; the PNG goes in its
+            # real 96x96 bucket (it was previously mis-filed under 256x256, which
+            # icon-theme lookups reject on the size mismatch).
+            ("share/icons/hicolor/scalable/apps", ["superpaper/resources/superpaper.svg"]),
+            ("share/icons/hicolor/96x96/apps", ["superpaper/resources/superpaper.png"]),
         ],
     )
