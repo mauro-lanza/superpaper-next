@@ -1,0 +1,49 @@
+name: CI
+
+# Runs the same lint/format gate that pre-commit enforces locally, so PRs are
+# checked automatically. Type checking (ty) and tests are intentionally NOT here
+# yet: they require the full GUI runtime stack (wxPython, dbus-python, ...) which
+# isn't installable from PyPI on CI without heavy system deps. Those land once
+# the dependencies are consolidated (PEP 621 [project] + extras).
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+# Least-privilege: the lint job only needs to read the repo.
+permissions:
+  contents: read
+
+# Cancel superseded runs on the same ref to save CI minutes.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint & format (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      # setup-uv v8 dropped major/minor tags for supply-chain safety, so the
+      # full version must be pinned. Latest as of 2026-07-01.
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v8.2.0
+        with:
+          enable-cache: true
+          python-version: "3.12"
+
+      # Installs only the `dev` dependency group (ruff, ty, pre-commit) from
+      # uv.lock -- the runtime deps are not locked here and aren't needed for
+      # linting.
+      - name: Install dev tooling
+        run: uv sync --frozen --group dev
+
+      - name: Ruff lint
+        run: uv run ruff check --output-format=github
+
+      - name: Ruff format check
+        run: uv run ruff format --check
