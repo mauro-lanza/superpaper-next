@@ -51,12 +51,45 @@ def host_spawn_env():
     AppRun saves each original value as ``SUPERPAPER_HOSTENV_<VAR>`` (or the unset
     sentinel), which we restore here. For AppImages built before that change, fall
     back to dropping the bundled isolation variables so spawned tools use the
-    host's defaults. Outside the AppImage this is a plain copy of the current
+    host's defaults. Separately, PyInstaller's bootloader repoints
+    ``LD_LIBRARY_PATH`` at the bundled libs (saving the original in
+    ``LD_LIBRARY_PATH_ORIG``); that is restored too, otherwise a spawned ``/bin/sh``
+    loads the bundled libreadline and dies with an undefined-symbol error (so
+    xdg-open exits 127). Outside the AppImage this is a plain copy of the current
     environment.
     """
     import os
+    import sys
 
     env = dict(os.environ)
+
+    # PyInstaller points LD_LIBRARY_PATH (and macOS DYLD_LIBRARY_PATH) at the
+    # frozen app's bundled libs and stashes the pre-launch value in *_ORIG. Host
+    # programs must not load those bundled libs (built against an older glibc /
+    # readline), so restore the saved original, or scrub the bundle paths if no
+    # original was saved.
+    meipass = getattr(sys, "_MEIPASS", None)
+    bundle_root = env.get("APPDIR")
+    for var in ("LD_LIBRARY_PATH", "DYLD_LIBRARY_PATH"):
+        orig = env.pop(var + "_ORIG", None)
+        if orig is not None:
+            if orig:
+                env[var] = orig
+            else:
+                env.pop(var, None)
+            continue
+        current = env.get(var)
+        if not current:
+            continue
+        kept = [
+            p
+            for p in current.split(os.pathsep)
+            if p and p != meipass and not (bundle_root and p.startswith(bundle_root))
+        ]
+        if kept:
+            env[var] = os.pathsep.join(kept)
+        else:
+            env.pop(var, None)
 
     saved_keys = [k for k in env if k.startswith(_HOSTENV_PREFIX)]
     if saved_keys:
