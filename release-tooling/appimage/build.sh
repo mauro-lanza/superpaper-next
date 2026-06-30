@@ -44,18 +44,18 @@ mkdir -p "${APPDIR}" "${OUT}" "${WORK}/src"
 # Copy only what the build needs (the package + packaging metadata), not the
 # whole repo -- avoids dragging releases/ (large AppImages), .git, snap and
 # other artifacts into the container on every build.
-for path in superpaper setup.py pyproject.toml README.md MANIFEST.in; do
+for path in superpaper pyproject.toml README.md LICENSE; do
     cp -a "${SRC}/${path}" "${WORK}/src/"
 done
 cd "${WORK}/src"
 
 # The Python build venv (wxPython, runtime deps, PyInstaller) is baked into the
-# image as a cached layer (see Dockerfile) and is already on PATH. Only the app
-# changes between builds, so install just that here -- the expensive deps are
-# already satisfied in the venv, so pip skips them and only adds the small
-# remaining ones.
+# image as a cached layer (see Dockerfile) and is already on PATH. That layer
+# installed the dependencies from pyproject's [linux] extra plus a metadata-only
+# package stub; --force-reinstall replaces the stub with the full app source
+# here, and --no-deps skips re-resolving the already-satisfied dependencies.
 echo "==> Installing Superpaper into the prebuilt venv"
-pip install .
+pip install --no-deps --force-reinstall .
 
 echo "==> Running PyInstaller (onedir)"
 # Exclude the unused Tk bindings to trim the bundle (the app is wxPython/GTK;
@@ -226,8 +226,8 @@ fi
 echo "==> Building Superpaper ${VERSION} AppImage"
 
 # Build context is the repo root (cd'd to above) so the image can bake in the
-# Python deps from requirements_full_linux.txt. .dockerignore keeps the context
-# small; the Dockerfile itself lives under release-tooling/appimage/.
+# Python deps from pyproject.toml ([linux] extra). .dockerignore keeps the
+# context small; the Dockerfile itself lives under release-tooling/appimage/.
 ${DOCKER} build -t "${IMAGE}" -f release-tooling/appimage/Dockerfile .
 
 mkdir -p releases

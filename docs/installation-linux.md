@@ -28,7 +28,7 @@ You may use a manually created venv.
 
 ### Step 2: Install superpaper from PyPI
 
-Superpaper is available from [PyPI](https://pypi.org/project/superpaper), and needs `Python 3.6+`.
+Superpaper is available from [PyPI](https://pypi.org/project/superpaper), and needs `Python 3.14+`.
 To install, run in a terminal:
 
 ```sh

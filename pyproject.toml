@@ -1,9 +1,91 @@
-# Tooling configuration for superpaper-next.
+# Project metadata + tooling configuration for superpaper-next.
 #
-# NOTE: This file intentionally does NOT contain a [project] table. Packaging is
-# still driven by setup.py (used by PyInstaller, snap, and the release tooling).
-# This file only holds dev-tool configuration (ruff, ty) and the dev dependency
-# group managed by uv.
+# pyproject.toml is the single source of truth for packaging metadata and
+# runtime dependencies (PEP 621 [project] table). setup.py has been removed;
+# the build, snap and AppImage tooling all consume the metadata below. The
+# platform-specific runtime sets are expressed as dependency markers + extras
+# (see [project.optional-dependencies]) so a plain `pip install .` resolves the
+# right packages per OS, replacing the old requirements_*.txt files.
+
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "superpaper"
+dynamic = ["version"]
+description = "Cross-platform wallpaper manager that focuses on multi-monitor support. Features include ppi corrections, keyboard shortcuts, slideshow."
+readme = "README.md"
+requires-python = ">=3.14"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Henri Hänninen" }]
+keywords = ["dual-monitor", "multi-monitor", "wallpaper", "background", "manager"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: X11 Applications",
+    "Intended Audience :: End Users/Desktop",
+    "Natural Language :: English",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Utilities",
+]
+# Cross-platform runtime core. These ship wheels (no system build deps), so
+# they install cleanly via `pip install superpaper`. X11 helpers are gated to
+# Linux and pywin32 to Windows via environment markers.
+dependencies = [
+    "Pillow>=12.2.0",
+    "screeninfo>=0.8.1",
+    "numpy>=2.5.0",
+    "system_hotkey310>=1.0.5",
+    "xcffib>=1.12.0 ; sys_platform == 'linux'",
+    "xpybutil>=0.0.6 ; sys_platform == 'linux'",
+    "pywin32 ; sys_platform == 'win32'",
+]
+
+[project.optional-dependencies]
+# GTK GUI toolkit. Installs from PyPI on Windows/macOS; on Linux wxPython has no
+# PyPI wheel -- install it from your distro or the wxPython extras index (see
+# docs/installation-linux.md).
+gui = ["wxPython>=4.2.5"]
+# Linux desktop integration. dbus-python builds from source and needs the system
+# libdbus + glib development headers present (see docs/installation-linux.md).
+linux = ["dbus-python>=1.4.0"]
+
+[project.urls]
+Homepage = "https://github.com/hhannine/superpaper"
+Repository = "https://github.com/mauro-lanza/superpaper-next"
+
+[project.scripts]
+superpaper = "superpaper.__main__:main"
+
+# ---------------------------------------------------------------------------
+# setuptools: package discovery, dynamic version, bundled data
+# ---------------------------------------------------------------------------
+[tool.setuptools]
+packages = ["superpaper"]
+
+[tool.setuptools.dynamic]
+version = { attr = "superpaper.__version__.__version__" }
+
+[tool.setuptools.package-data]
+superpaper = [
+    "resources/superpaper.png",
+    "resources/superpaper.svg",
+    "resources/test.png",
+    "resources/icons8-merge-vertical-96.png",
+    "resources/icons8-merge-horizontal-96.png",
+    "profiles/example.profile",
+    "profiles/example_multi.profile",
+]
+
+# Desktop-entry + icon installation (formerly setup.py data_files). The scalable
+# SVG is valid at any requested size; the PNG goes in its real 96x96 bucket.
+[tool.setuptools.data-files]
+"share/applications" = ["superpaper/resources/superpaper.desktop"]
+"share/icons/hicolor/scalable/apps" = ["superpaper/resources/superpaper.svg"]
+"share/icons/hicolor/96x96/apps" = ["superpaper/resources/superpaper.png"]
 
 [dependency-groups]
 dev = [
