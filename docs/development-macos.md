@@ -3,7 +3,7 @@
 Install the following:
 
 **Software Requirements**
-- [Python 3.6+](https://www.python.org/downloads/)
+- [Python 3.14+](https://www.python.org/downloads/)
 
 **Python packages**
 - Pillow: Pillow is a Python Imaging Library (PIL), which adds support for opening, manipulating, and saving images.
