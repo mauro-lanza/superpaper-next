@@ -10,7 +10,6 @@ import math
 import os
 import random
 import sys
-from typing import Optional
 
 import superpaper.sp_logging as sp_logging
 import superpaper.sp_paths as sp_paths
@@ -350,7 +349,7 @@ class ProfileData:
                             try:
                                 offs.append((int(res_str[0]), int(res_str[1])))
                                 offs_user_only.append((int(res_str[0]), int(res_str[1])))
-                            except (ValueError, IndexError):
+                            except ValueError, IndexError:
                                 offs.append((0, 0))
                                 offs_user_only.append((0, 0))
                         while len(offs) < wpproc.NUM_DISPLAYS:
@@ -401,7 +400,7 @@ class ProfileData:
                             off_x = min(1.0, max(-1.0, float(parts[0])))
                             off_y = min(1.0, max(-1.0, float(parts[1])))
                             self.offsets = (off_x, off_y)
-                        except (ValueError, IndexError):
+                        except ValueError, IndexError:
                             self.offsets = (0.0, 0.0)
                     elif words[0] == "selected":
                         sel = line.split("=", 1)[1].strip()
@@ -730,20 +729,20 @@ class TempProfileData:
     """Data object to test the validity of user input and for saving said input into profiles."""
 
     def __init__(self):
-        self.name: Optional[str] = None
-        self.spanmode: Optional[str] = None
-        self.spangroups: Optional[str] = None
-        self.slideshow: Optional[bool] = None
-        self.delay: Optional[str] = None
-        self.sortmode: Optional[str] = None
+        self.name: str | None = None
+        self.spanmode: str | None = None
+        self.spangroups: str | None = None
+        self.slideshow: bool | None = None
+        self.delay: str | None = None
+        self.sortmode: str | None = None
         self.inches = None
-        self.manual_offsets: Optional[str] = None
+        self.manual_offsets: str | None = None
         self.bezels = None
-        self.hk_binding: Optional[str] = None
-        self.perspective: Optional[str] = None
-        self.zoom: Optional[float] = None
-        self.align: Optional[tuple] = None
-        self.selected: Optional[list] = None
+        self.hk_binding: str | None = None
+        self.perspective: str | None = None
+        self.zoom: float | None = None
+        self.align: tuple | None = None
+        self.selected: list | None = None
         self.paths_array = []
 
     def save(self, filename=None):

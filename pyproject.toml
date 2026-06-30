@@ -23,7 +23,7 @@ build = [
 # Ruff: linter + formatter
 # ---------------------------------------------------------------------------
 [tool.ruff]
-target-version = "py39"
+target-version = "py314"
 line-length = 120
 src = ["superpaper"]
 extend-exclude = [
@@ -67,6 +67,8 @@ ignore = [
     "SIM105",  # contextlib.suppress: slower and less explicit than try/except/pass
     "RUF059",  # unused unpacked variable: legacy tuple unpacking is intentional
     "RUF002",  # ambiguous unicode char in docstring: false positives
+    "B905",    # zip() without strict=: deferred -- needs per-call review to pick
+               # strict=True/False rather than a blind auto-fix (py310+ only).
 ]
 
 [tool.ruff.lint.isort]
@@ -92,4 +94,4 @@ exclude = [
 ]
 
 [tool.ty.environment]
-python-version = "3.9"
+python-version = "3.14"

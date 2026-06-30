@@ -1,6 +1,6 @@
-Pillow>=7.0.0
-screeninfo>=0.6.1
-numpy>=1.18.0
-wxPython>=4.0.4
+Pillow>=12.2.0
+screeninfo>=0.8.1
+numpy>=2.5.0
+wxPython>=4.2.5
 system_hotkey310>=1.0.5
 pywin32

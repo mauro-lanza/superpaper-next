@@ -2,7 +2,6 @@
 
 import logging
 import os
-from typing import Optional
 
 from superpaper.sp_paths import TEMP_PATH
 
@@ -10,8 +9,8 @@ DEBUG: bool = False
 VERBOSE: bool = False
 LOGGING: bool = False
 G_LOGGER = logging.getLogger("default")
-CONSOLE_HANDLER: Optional[logging.Handler] = None
-FILE_HANDLER: Optional[logging.Handler] = None
+CONSOLE_HANDLER: logging.Handler | None = None
+FILE_HANDLER: logging.Handler | None = None
 
 if DEBUG and not LOGGING:
     G_LOGGER.setLevel(logging.INFO)

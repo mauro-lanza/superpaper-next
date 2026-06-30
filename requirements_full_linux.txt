@@ -1,7 +1,7 @@
-Pillow>=7.0.0
-screeninfo>=0.6.1
-numpy>=1.18.0
+Pillow>=12.2.0
+screeninfo>=0.8.1
+numpy>=2.5.0
 system_hotkey310>=1.0.5
-xcffib>=0.8.0
-xpybutil>=0.0.5
-dbus-python>=1.2.0
+xcffib>=1.12.0
+xpybutil>=0.0.6
+dbus-python>=1.4.0
