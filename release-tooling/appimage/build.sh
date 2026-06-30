@@ -59,9 +59,10 @@ pip install .
 
 echo "==> Running PyInstaller (onedir)"
 # Exclude the unused Tk bindings to trim the bundle (the app is wxPython/GTK;
-# nothing here uses tkinter). NOTE: do NOT add --strip -- stripping corrupts
-# NumPy's bundled OpenBLAS (.so), producing an "ELF load command address/offset
-# not page-aligned" ImportError at runtime.
+# nothing here uses tkinter). NOTE: do NOT pass PyInstaller's global --strip --
+# it also strips NumPy's bundled OpenBLAS (.so), producing an "ELF load command
+# address/offset not page-aligned" ImportError at runtime. We instead strip the
+# safe-to-strip wxPython binaries explicitly after assembly (see below).
 pyinstaller --noconfirm --clean --onedir --name superpaper \
     --exclude-module tkinter --exclude-module _tkinter \
     --console superpaper/__main__.py
@@ -185,10 +186,24 @@ done
 # 128/256 PNG here. appimagetool derives .DirIcon from this root icon.
 cp "${APPDIR}/usr/share/icons/hicolor/256x256/apps/superpaper.png" "${APPDIR}/superpaper.png"
 
+echo "==> Stripping wxPython debug symbols (wheels ship unstripped; saves ~190 MB)"
+# wxPython's Linux wheels bundle full debug_info: wx/_core.so alone is ~170 MB
+# and strips to ~13 MB (the other wx modules similarly). These are the app's own
+# extension modules / their private libs, so --strip-unneeded is safe here --
+# unlike a global strip, which corrupts numpy.libs' prebuilt OpenBLAS. Scope to
+# wx/ only: the rest of the bundle is either already stripped (distro libs) or
+# not worth the risk for marginal savings.
+find "${APPDIR}/usr/bin/_internal/wx" -type f \( -name '*.so' -o -name '*.so.*' \) -print0 \
+    | while IFS= read -r -d '' so; do
+        strip --strip-unneeded "${so}" 2>/dev/null || true
+    done
+
 echo "==> Packaging AppImage"
 export ARCH=x86_64
 export APPIMAGE_EXTRACT_AND_RUN=1
-appimagetool "${APPDIR}" "${OUT}/Superpaper-${VERSION}-x86_64.AppImage"
+# zstd is the only compressor the bundled mksquashfs supports (and the default).
+# Be explicit so the intent is clear and stable across appimagetool versions.
+appimagetool --comp zstd "${APPDIR}" "${OUT}/Superpaper-${VERSION}-x86_64.AppImage"
 
 echo "==> Done: ${OUT}/Superpaper-${VERSION}-x86_64.AppImage"
 exit 0
