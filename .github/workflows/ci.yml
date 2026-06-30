@@ -36,9 +36,9 @@ jobs:
           enable-cache: true
           python-version: "3.14"
 
-      # Installs only the `dev` dependency group (ruff, ty, pre-commit) from
-      # uv.lock -- the runtime deps are not locked here and aren't needed for
-      # linting.
+      # Syncs the project plus the `dev` dependency group (ruff, ty, pre-commit)
+      # from uv.lock. Only the core runtime deps (all wheels) come along; the
+      # gui/linux extras that need system build deps are not installed.
       - name: Install dev tooling
         run: uv sync --frozen --group dev
 
