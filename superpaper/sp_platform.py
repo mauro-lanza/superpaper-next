@@ -12,6 +12,7 @@ platform-dead-code when they see that exact form. A derived boolean constant is
 opaque to them and would re-trigger missing-import / possibly-unbound warnings.
 """
 
+import os
 import sys
 
 IS_WINDOWS = sys.platform == "win32"
@@ -58,9 +59,6 @@ def host_spawn_env():
     xdg-open exits 127). Outside the AppImage this is a plain copy of the current
     environment.
     """
-    import os
-    import sys
-
     env = dict(os.environ)
 
     # PyInstaller points LD_LIBRARY_PATH (and macOS DYLD_LIBRARY_PATH) at the

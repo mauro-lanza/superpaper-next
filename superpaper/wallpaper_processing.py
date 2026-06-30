@@ -2201,11 +2201,13 @@ def xfce_actions(outputfile):
         props = read_prop.stdout.read().decode("utf-8").split("\n")
     for prop in props:
         if "workspace0/image-style" in prop:
-            subprocess.run("xfconf-query -c xfce4-desktop -p " + prop + " -s 6", shell=True, env=host_spawn_env())
+            subprocess.run(
+                ["xfconf-query", "-c", "xfce4-desktop", "-p", prop, "-s", "6"],
+                env=host_spawn_env(),
+            )
         elif "workspace0/last-image" in prop:
             subprocess.run(
-                "xfconf-query -c xfce4-desktop -p " + prop + f" -s '{outputfile}'",
-                shell=True,
+                ["xfconf-query", "-c", "xfce4-desktop", "-p", prop, "-s", outputfile],
                 env=host_spawn_env(),
             )
 
