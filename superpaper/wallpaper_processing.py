@@ -26,7 +26,7 @@ import superpaper.perspective as persp
 import superpaper.sp_logging as sp_logging
 from superpaper.message_dialog import show_message_dialog
 from superpaper.sp_paths import CONFIG_PATH, TEMP_PATH
-from superpaper.sp_platform import IS_LINUX, IS_MACOS, IS_WINDOWS
+from superpaper.sp_platform import IS_LINUX, IS_MACOS, IS_WINDOWS, host_spawn_env
 
 # Disables PIL.Image.DecompressionBombError.
 Image.MAX_IMAGE_PIXELS = None  # 715827880 would be 4x default max.
@@ -1394,7 +1394,7 @@ def set_wallpaper(outputfile, force=False, source_files=None):
         sp_logging.G_LOGGER.info("Unknown platform: %s", sys.platform)
     script_file = os.path.join(CONFIG_PATH, "run-after-wp-change.py")
     if os.path.isfile(script_file):
-        subprocess.run(["python3", script_file, str(outputfile), str(source_files)])
+        subprocess.run(["python3", script_file, str(outputfile), str(source_files)], env=host_spawn_env())
     return 0
 
 
@@ -1479,14 +1479,14 @@ def set_wallpaper_linux(outputfile, force=False):
     if set_command != "":
         if set_command == "feh":
             sp_logging.G_LOGGER.info("Using 'feh' command mode!")
-            subprocess.run(["feh", "--bg-scale", "--no-xinerama", outputfile])
+            subprocess.run(["feh", "--bg-scale", "--no-xinerama", outputfile], env=host_spawn_env())
         else:
             command_string_list = set_command.split()
             formatted_command = []
             for term in command_string_list:
                 formatted_command.append(term.format(image=outputfile))
             sp_logging.G_LOGGER.info("Formatted custom command is: '%s'", formatted_command)
-            subprocess.run(formatted_command)
+            subprocess.run(formatted_command, env=host_spawn_env())
     if desk_env:
         if desk_env in [
             "gnome",
@@ -1506,9 +1506,13 @@ def set_wallpaper_linux(outputfile, force=False):
                     "org.gnome.desktop.background",
                     "picture-uri-dark",
                     file,
-                ]
+                ],
+                env=host_spawn_env(),
             )
-            subprocess.run(["/usr/bin/gsettings", "set", "org.gnome.desktop.background", "picture-uri", file])
+            subprocess.run(
+                ["/usr/bin/gsettings", "set", "org.gnome.desktop.background", "picture-uri", file],
+                env=host_spawn_env(),
+            )
         elif desk_env == "cinnamon" or "cinnamon" in desk_env.lower():
             subprocess.run(
                 [
@@ -1517,18 +1521,22 @@ def set_wallpaper_linux(outputfile, force=False):
                     "org.cinnamon.desktop.background",
                     "picture-uri",
                     file,
-                ]
+                ],
+                env=host_spawn_env(),
             )
         elif desk_env == "mate":
-            subprocess.run(["/usr/bin/gsettings", "set", "org.mate.background", "picture-filename", outputfile])
+            subprocess.run(
+                ["/usr/bin/gsettings", "set", "org.mate.background", "picture-filename", outputfile],
+                env=host_spawn_env(),
+            )
         elif desk_env in ["xfce", "xubuntu", "ubuntustudio"]:
             xfce_actions(outputfile)
         elif desk_env.lower() == "lubuntu" or "lxqt" in desk_env.lower():
             try:
-                subprocess.run(["pcmanfm", "-w", outputfile])
+                subprocess.run(["pcmanfm", "-w", outputfile], env=host_spawn_env())
             except OSError:
                 try:
-                    subprocess.run(["pcmanfm-qt", "-w", outputfile])
+                    subprocess.run(["pcmanfm-qt", "-w", outputfile], env=host_spawn_env())
                 except OSError:
                     sp_logging.G_LOGGER.info(
                         "Exception: failure to find either command \
@@ -1539,7 +1547,7 @@ def set_wallpaper_linux(outputfile, force=False):
         elif running_kde():
             kdeplasma_actions(outputfile, force=force, profile_name=G_ACTIVE_PROFILE)
         elif "i3" in desk_env or desk_env == "/usr/share/xsessions/bspwm":
-            subprocess.run(["feh", "--bg-scale", "--no-xinerama", outputfile])
+            subprocess.run(["feh", "--bg-scale", "--no-xinerama", outputfile], env=host_spawn_env())
         else:
             if set_command == "":
                 message = "Your DE could not be detected to set the wallpaper. \
@@ -1549,7 +1557,7 @@ settings file superpaper/general_settings. Exiting."
                 show_message_dialog(message, "Error")
                 sys.exit(1)
             else:
-                os.system(set_command.format(image=outputfile))  # ty:ignore[deprecated]
+                subprocess.run(set_command.format(image=outputfile), shell=True, env=host_spawn_env())
     else:
         if running_kde():
             kdeplasma_actions(outputfile, force=force, profile_name=G_ACTIVE_PROFILE)
@@ -1558,7 +1566,7 @@ settings file superpaper/general_settings. Exiting."
                 "DESKTOP_SESSION variable is empty, \
 attempting to use feh to set the wallpaper."
             )
-            subprocess.run(["feh", "--bg-scale", "--no-xinerama", outputfile])
+            subprocess.run(["feh", "--bg-scale", "--no-xinerama", outputfile], env=host_spawn_env())
 
 
 def set_wallpaper_piecewise(image_piece_list):
@@ -1674,6 +1682,7 @@ def get_kde_activity_mapping():
             capture_output=True,
             text=True,
             timeout=5,
+            env=host_spawn_env(),
         )
         if result.returncode != 0:
             return {}
@@ -1695,6 +1704,7 @@ def get_kde_activity_mapping():
                     capture_output=True,
                     text=True,
                     timeout=5,
+                    env=host_spawn_env(),
                 )
                 if result.returncode == 0:
                     activity_name = result.stdout.strip()
@@ -1765,6 +1775,7 @@ def kde_get_desktop_to_activity_mapping():
             capture_output=True,
             text=True,
             timeout=5,
+            env=host_spawn_env(),
         )
         if result.returncode != 0:
             return desktop_to_activity
@@ -1777,6 +1788,7 @@ def kde_get_desktop_to_activity_mapping():
             capture_output=True,
             text=True,
             timeout=5,
+            env=host_spawn_env(),
         )
         current_activity_id = result.stdout.strip() if result.returncode == 0 else None
 
@@ -2180,16 +2192,22 @@ def xfce_actions(outputfile):
     """
 
     read_prop = subprocess.Popen(
-        ["xfconf-query", "-c", "xfce4-desktop", "-p", "/backdrop", "-l"], stdout=subprocess.PIPE
+        ["xfconf-query", "-c", "xfce4-desktop", "-p", "/backdrop", "-l"],
+        stdout=subprocess.PIPE,
+        env=host_spawn_env(),
     )
     props = []
     if read_prop.stdout is not None:
         props = read_prop.stdout.read().decode("utf-8").split("\n")
     for prop in props:
         if "workspace0/image-style" in prop:
-            os.system("xfconf-query -c xfce4-desktop -p " + prop + " -s 6")  # ty:ignore[deprecated]
+            subprocess.run("xfconf-query -c xfce4-desktop -p " + prop + " -s 6", shell=True, env=host_spawn_env())
         elif "workspace0/last-image" in prop:
-            os.system("xfconf-query -c xfce4-desktop -p " + prop + f" -s '{outputfile}'")  # ty:ignore[deprecated]
+            subprocess.run(
+                "xfconf-query -c xfce4-desktop -p " + prop + f" -s '{outputfile}'",
+                shell=True,
+                env=host_spawn_env(),
+            )
 
     # Delete old images after new ones are set
     if outputfile:
