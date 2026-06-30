@@ -80,4 +80,7 @@ parts:
       - libgdk-pixbuf2.0-dev
     # python-packages:
       # - dbus-python
-    requirements: [requirements_full_linux.txt]
+    # Runtime Python dependencies are declared in pyproject.toml and installed
+    # from the source tree by the python plugin (`source: .`). dbus-python and
+    # wxPython are provided by the python3-dbus / python3-wxgtk4.0 stage-packages
+    # above rather than pip, so no extra is needed here.

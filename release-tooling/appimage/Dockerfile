@@ -52,17 +52,27 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # later layers and the runtime build use it without an explicit `activate`.
 #
 # wxPython has no universal manylinux wheel; it comes from the prebuilt Ubuntu
-# 22.04 wheel index, pinned to the runtime-verified 4.2.5. The requirements
-# file is COPYied first so editing it (and only then) busts this layer's cache.
+# 22.04 wheel index, pinned to the runtime-verified 4.2.5.
+#
+# The runtime dependencies come from the project's pyproject.toml [linux] extra
+# (the single source of truth). Only the packaging metadata + the (stable)
+# bundled resources are COPYied here -- not the app's .py source -- so this
+# heavy layer stays cached across source edits and rebuilds only when the
+# declared dependencies (or version/resources) change; the real app is
+# installed in build.sh. wxPython is installed first and is in the `gui` extra,
+# not `linux`, so the metadata install below leaves the pinned 4.2.5 untouched.
 ENV VIRTUAL_ENV=/opt/venv
 ENV PATH="${VIRTUAL_ENV}/bin:${PATH}"
-COPY requirements_full_linux.txt /tmp/requirements_full_linux.txt
+COPY pyproject.toml README.md LICENSE /tmp/superpaper-deps/
+COPY superpaper/__init__.py superpaper/__version__.py /tmp/superpaper-deps/superpaper/
+COPY superpaper/resources /tmp/superpaper-deps/superpaper/resources
+COPY superpaper/profiles /tmp/superpaper-deps/superpaper/profiles
 RUN python3 -m venv "${VIRTUAL_ENV}" \
     && pip install --no-cache-dir --upgrade pip wheel \
     && pip install --no-cache-dir \
         -f "https://extras.wxpython.org/wxPython4/extras/linux/gtk3/ubuntu-22.04" \
         "wxPython==4.2.5" \
-    && pip install --no-cache-dir -r /tmp/requirements_full_linux.txt \
+    && pip install --no-cache-dir "/tmp/superpaper-deps[linux]" \
     && pip install --no-cache-dir pyinstaller
 
 # appimagetool packages the finished AppDir into a single-file AppImage.

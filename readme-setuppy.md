@@ -1,7 +1,7 @@
 # Some notes on building and uploading PyPI packages
 
 ## Building a wheel / sdist
-python3 setup.py sdist bdist_wheel
+python3 -m build
 
 ## Checking that twine (pypi tool) passes the built package
 twine check dist/*

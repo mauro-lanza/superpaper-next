@@ -1,5 +1,4 @@
 import ctypes
-from typing import Optional
 
 # pywin32 ships type stubs but the compiled modules are Windows-only, so the
 # source can't be resolved off-Windows (reportMissingModuleSource).
@@ -11,7 +10,7 @@ from win32com.shell import shell, shellcon  # pyright: ignore[reportMissingModul
 user32 = ctypes.windll.user32  # pyright: ignore[reportAttributeAccessIssue]  # ty:ignore[unresolved-attribute]
 
 
-def _make_filter(class_name: Optional[str], title: Optional[str]):
+def _make_filter(class_name: str | None, title: str | None):
     """https://docs.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-enumwindows"""
 
     def enum_windows(handle: int, h_list: list):
@@ -27,7 +26,7 @@ def _make_filter(class_name: Optional[str], title: Optional[str]):
 
 
 def find_window_handles(
-    parent: Optional[int] = None, window_class: Optional[str] = None, title: Optional[str] = None
+    parent: int | None = None, window_class: str | None = None, title: str | None = None
 ) -> list[int]:
     cb = _make_filter(window_class, title)
     try:

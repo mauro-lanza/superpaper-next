@@ -124,7 +124,7 @@ The AppImage will run once you make it executable.
 
 1. Clone the repo
 2. Create a virtualenv: `python -m venv .venv && source .venv/bin/activate`
-3. Install requirements: `pip install -r requirements_install_python_package.txt`
+3. Install Superpaper with its Linux extras: `pip install -e '.[gui,linux]'`
 4. Run: `python -m superpaper`
 
 For other installation options see: [installing on linux](./docs/installation-linux.md).

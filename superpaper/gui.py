@@ -1714,7 +1714,7 @@ class WallpaperSettingsPanel(wx.Panel):
             off = off_tc.GetLineText(0).split(",")
             try:
                 offsets.append([int(off[0]), int(off[1])])
-            except (IndexError, ValueError):
+            except IndexError, ValueError:
                 show_message_dialog(
                     f"Offsets must be integer pairs separated with a comma!\nProblematic offset is {off}"
                 )
@@ -2130,9 +2130,9 @@ class WallpaperPreviewPanel(wx.Panel):
         )
 
     @overload
-    def resize_and_bitmap(self, fname, size, enhance_color: Literal[False] = False) -> "wx.Bitmap": ...
+    def resize_and_bitmap(self, fname, size, enhance_color: Literal[False] = False) -> wx.Bitmap: ...
     @overload
-    def resize_and_bitmap(self, fname, size, enhance_color: Literal[True]) -> "tuple[wx.Bitmap, wx.Bitmap]": ...
+    def resize_and_bitmap(self, fname, size, enhance_color: Literal[True]) -> tuple[wx.Bitmap, wx.Bitmap]: ...
 
     def resize_and_bitmap(self, fname, size, enhance_color=False):
         """Take filename of an image and resize and crop it to size."""

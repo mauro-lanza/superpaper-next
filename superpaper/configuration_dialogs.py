@@ -880,7 +880,7 @@ class PerspectiveConfig(wx.Dialog):
                 off_str = tc.GetValue().split(",")
                 try:
                     offsets.append((int(off_str[0]), int(off_str[1])))
-                except (ValueError, IndexError):
+                except ValueError, IndexError:
                     offsets.append((0, 0))
         else:
             offsets = wpproc.NUM_DISPLAYS * [(0, 0)]
@@ -1070,7 +1070,7 @@ class PerspectiveConfig(wx.Dialog):
             off = off_tc.GetLineText(0).split(",")
             try:
                 offsets.append([int(off[0]), int(off[1])])
-            except (IndexError, ValueError):
+            except IndexError, ValueError:
                 show_message_dialog(
                     f"Offsets must be integer pairs separated with a comma!\nProblematic offset is {off}"
                 )
@@ -1519,7 +1519,7 @@ class HelpPopup(wx.PopupTransientWindow):
                     off_str = tc.GetValue().split(",")
                     try:
                         offsets.append((int(off_str[0]), int(off_str[1])))
-                    except (ValueError, IndexError):
+                    except ValueError, IndexError:
                         offsets.append((0, 0))
             else:
                 offsets = wpproc.NUM_DISPLAYS * [(0, 0)]

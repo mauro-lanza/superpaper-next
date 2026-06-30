@@ -72,7 +72,7 @@ RESOLUTION_ARRAY = []
 DISPLAY_OFFSET_ARRAY = []
 
 # Lazily initialized in load_system() before any wallpaper processing runs.
-G_ACTIVE_DISPLAYSYSTEM: "DisplaySystem" = None  # pyright: ignore[reportAssignmentType]  # ty:ignore[invalid-assignment]
+G_ACTIVE_DISPLAYSYSTEM: DisplaySystem = None  # pyright: ignore[reportAssignmentType]  # ty:ignore[invalid-assignment]
 G_ACTIVE_PROFILE = None
 G_WALLPAPER_CHANGE_LOCK = Lock()
 G_SUPPORTED_IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".bmp", ".gif", ".tiff", ".webp")
@@ -422,7 +422,7 @@ class DisplaySystem:
         col_sizes = []
         try:
             col_sizes = [self.column_size(col) for col in columns]
-        except (ValueError, IndexError):
+        except ValueError, IndexError:
             sp_logging.G_LOGGER.info("Problem with column sizes. col_sizes: %s", col_sizes)
         # print("col_sizes", col_sizes)
         max_col_h = 0
@@ -904,7 +904,7 @@ def compute_ppi_corrected_res_array(res_array, ppi_list_rel_density):
 def resize_to_fill(
     img,
     res,
-    quality: "str | Image.Resampling" = Image.Resampling.LANCZOS,
+    quality: str | Image.Resampling = Image.Resampling.LANCZOS,
     zoom=1.0,
     offset=(0.0, 0.0),
 ):
@@ -930,14 +930,14 @@ def resize_to_fill(
     # Sanitize positioning parameters.
     try:
         zoom = float(zoom)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         zoom = 1.0
     if zoom < 1.0:
         zoom = 1.0
     try:
         offset_x = min(1.0, max(-1.0, float(offset[0])))
         offset_y = min(1.0, max(-1.0, float(offset[1])))
-    except (TypeError, ValueError, IndexError):
+    except TypeError, ValueError, IndexError:
         offset_x, offset_y = 0.0, 0.0
 
     image_size = img.size  # returns image (width,height)
@@ -1732,7 +1732,7 @@ def kde_load_desktop_mapping_cache():
                 for k, v in data.items():
                     try:
                         result[int(k)] = str(v)
-                    except (ValueError, TypeError):
+                    except ValueError, TypeError:
                         sp_logging.G_LOGGER.warning("Skipping invalid cache entry: %s -> %s", k, v)
                 return result
     except (json.JSONDecodeError, OSError) as e:
