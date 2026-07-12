@@ -13,8 +13,6 @@ __pycache__/
 # Build artifacts
 build/
 dist/
-prime/
 releases/
 *.AppImage
-*.snap
 *.spec

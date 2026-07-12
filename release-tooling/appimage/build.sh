@@ -42,7 +42,7 @@ echo "==> Preparing writable source copy"
 rm -rf "${WORK}"
 mkdir -p "${APPDIR}" "${OUT}" "${WORK}/src"
 # Copy only what the build needs (the package + packaging metadata), not the
-# whole repo -- avoids dragging releases/ (large AppImages), .git, snap and
+# whole repo -- avoids dragging releases/ (large AppImages), .git and
 # other artifacts into the container on every build.
 for path in superpaper pyproject.toml README.md LICENSE; do
     cp -a "${SRC}/${path}" "${WORK}/src/"

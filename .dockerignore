@@ -6,7 +6,6 @@
 .git
 .github
 releases/
-snap/
 docs/
 tests/
 example-script/
