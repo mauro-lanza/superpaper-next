@@ -1,39 +1,53 @@
-import os
+"""Build the Superpaper PyInstaller one-file binary.
+
+Usage:
+    python release-tooling/make-pyinstaller-build.py [testing|dist]
+
+The build-type argument is required only on Windows:
+    testing  keep the console window (shows debug output)
+    dist     hide the console window (--noconsole), for release builds
+
+WARNING: The Windows code path has not yet been run on a Windows machine. The
+modernization was verified only via command-capture tests on Linux; validate a
+real Windows build before relying on it for a release.
+"""
+
 import platform
+import subprocess
 import sys
 
-def wrap_run(arg_list):
-    print(" ".join(arg_list))
-    os.system(" ".join(arg_list))
+ENTRY_POINT = "superpaper/__main__.py"
+WINDOWS_ICON = r".\superpaper\resources\superpaper.ico"
+
+
+def run(cmd):
+    print(" ".join(cmd))
+    subprocess.run(cmd, check=True)
     print("make-pyinstaller-build: Build finished.")
 
+
 def main():
-    platform_sys = platform.system()
-    if platform_sys == "Linux":
-        cmd = ["pyinstaller", "--onefile",
-               "--name", "superpaper",
-               "superpaper/__main__.py"]
-        wrap_run(cmd)
-    elif platform_sys == "Windows":
-        if len(sys.argv) == 2:
-            if sys.argv[1] == "testing":
-                cmd = ["pyinstaller", "--onefile",
-                       "--name", "superpaper",
-                       "-i", r".\superpaper\resources\superpaper.ico",
-                       r".\superpaper\__main__.py"]
-                wrap_run(cmd)
-            elif sys.argv[1] == "dist":
-                cmd = ["pyinstaller", "--onefile",
-                       "--noconsole",
-                       "--name", "superpaper",
-                       "-i", r".\superpaper\resources\superpaper.ico",
-                       r".\superpaper\__main__.py"]
-                wrap_run(cmd)
-        else:
-            print("A type of build must be passed as the only argument: 'testing' or 'dist'.")
-    else:
-        print("Running on currently unsupported or untested OS: {}".format(platform_sys))
+    system = platform.system()
+
+    if system == "Linux":
+        run(["pyinstaller", "--onefile", "--name", "superpaper", ENTRY_POINT])
+        return
+
+    if system == "Windows":
+        build_type = sys.argv[1] if len(sys.argv) == 2 else None
+        if build_type not in ("testing", "dist"):
+            print("A build type must be passed as the only argument: 'testing' or 'dist'.")
+            sys.exit(1)
+        cmd = ["pyinstaller", "--onefile"]
+        if build_type == "dist":
+            cmd.append("--noconsole")
+        cmd += ["--name", "superpaper", "-i", WINDOWS_ICON, ENTRY_POINT]
+        run(cmd)
+        return
+
+    print(f"Running on currently unsupported or untested OS: {system}")
+    sys.exit(1)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
