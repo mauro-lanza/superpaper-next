@@ -38,7 +38,7 @@ def list_profiles():
             res = show_message_dialog(msg, "Error", style="YES_NO")
             if res:
                 # remove pfle
-                print("removing:", os.path.join(sp_paths.PROFILES_PATH, pfle))
+                sp_logging.G_LOGGER.info("Removing profile: %s", os.path.join(sp_paths.PROFILES_PATH, pfle))
                 os.remove(os.path.join(sp_paths.PROFILES_PATH, pfle))
                 continue
             else:
@@ -233,8 +233,8 @@ class ProfileDataException(Exception):
 
     def __init__(self, message, profile_name, parse_file, errors):
         super().__init__(message)
-        print(message, profile_name, parse_file)
-        print(errors)
+        sp_logging.G_LOGGER.info("%s %s %s", message, profile_name, parse_file)
+        sp_logging.G_LOGGER.info(errors)
 
 
 class ProfileData:
@@ -608,10 +608,8 @@ Use absolute paths for best reliabilty."
             for iterable in self.iterators:
                 if peek:
                     next_image = iterable.__peek__()
-                    # print("PEEKED: {}".format(next_image))
                 else:
                     next_image = iterable.__next__()
-                    # print("NEXT: {}".format(next_image))
                 if next_image is None:
                     # No images available for this monitor, skip it.
                     continue
@@ -754,7 +752,7 @@ class TempProfileData:
         stored profile on disk.
         """
         if self.name is None:
-            print("tmp.Save(): name is not set.")
+            sp_logging.G_LOGGER.info("tmp.Save(): name is not set.")
             return None
         fname = filename or os.path.join(PROFILES_PATH, self.name + ".profile")
         try:
@@ -912,7 +910,7 @@ Valid modifiers are 'control', 'super', 'alt', 'shift'."
             valid_profile = True
             return valid_profile
         else:
-            print("tmp.Save(): name is not set.")
+            sp_logging.G_LOGGER.info("tmp.Save(): name is not set.")
             msg = "You must enter a name for the profile."
             show_message_dialog(msg, "Error")
             return False

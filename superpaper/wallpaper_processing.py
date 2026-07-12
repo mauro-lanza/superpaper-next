@@ -392,12 +392,6 @@ class DisplaySystem:
                     work_col = [dsp]
                 if dsp == self.disp_list[-1]:
                     columns.append(work_col)
-            # print("columns", columns)
-            # print("work_col", work_col)
-        # print("columns done", columns)
-        # for col in columns:
-        # for dsp in col:
-        # print(str(dsp))
 
         col_ids = [list(range(len(col))) for col in columns]
         # sort columns in place vertically in digital offset
@@ -410,10 +404,6 @@ class DisplaySystem:
             sorted_columns.append(srt_col)
         columns = sorted_columns
 
-        # print("columns sorted", columns, "sorted_ids", sorted_ids)
-        # for col in columns:
-        # for dsp in col:
-        # print(str(dsp))
         if columns == []:
             sp_logging.G_LOGGER.info("DisplaySystem column recostruction has failed completely. Trigger fallback.")
             columns = [[dsp] for dsp in self.disp_list]
@@ -424,7 +414,6 @@ class DisplaySystem:
             col_sizes = [self.column_size(col) for col in columns]
         except ValueError, IndexError:
             sp_logging.G_LOGGER.info("Problem with column sizes. col_sizes: %s", col_sizes)
-        # print("col_sizes", col_sizes)
         max_col_h = 0
         try:
             max_col_h = max([sz[1] for sz in col_sizes])
@@ -435,7 +424,6 @@ class DisplaySystem:
         for sz in col_sizes:
             col_left_tops.append((current_left, round((max_col_h - sz[1]) / 2)))
             current_left += sz[0]
-        # print("col_left_tops", col_left_tops)
 
         # Tile displays in columns onto the plane with horizontal centering
         # within the column. Anchor columns to col_left_tops.
@@ -448,7 +436,6 @@ class DisplaySystem:
                     col_anchor[0] + round((max_dsp_w - dsp_w) / 2),
                     col_anchor[1] + current_top,
                 )
-                # print(dsp.ppi_norm_offset)
                 current_top += dsp.ppi_norm_resolution[1] + dsp.ppi_norm_bezels[1]
         # Restore column order to the original order that matches self.disp_list and other sorts (kde).
         restored_columns = []
@@ -461,9 +448,6 @@ class DisplaySystem:
         flattened_cols = [dsp for col in columns for dsp in col]
         for scope_dsp, dsp in zip(flattened_cols, self.disp_list):
             dsp.ppi_norm_offset = scope_dsp.ppi_norm_offset
-        # print("PPI NORM RESOLUTIONS AND OFFSETS")
-        # print([(dsp.ppi_norm_resolution, dsp.ppi_norm_offset) for dsp in self.disp_list])
-        # sys.exit()
 
     def get_disp_list(self, use_ppi_norm=False):
         if use_ppi_norm:
@@ -1628,14 +1612,11 @@ def remove_old_temp_files(outputfile):
     """
     opbase = os.path.basename(outputfile)
     opname = os.path.splitext(opbase)[0]
-    # print(opname)
     oldfileid = ""
     if opname.endswith("-a"):
         oldfileid = "-b"
-        # print(oldfileid)
     elif opname.endswith("-b"):
         oldfileid = "-a"
-        # print(oldfileid)
     else:
         pass
     if oldfileid:
@@ -1647,7 +1628,6 @@ def remove_old_temp_files(outputfile):
             sp_logging.G_LOGGER.info("Removing images matching with: '%s'", match_string)
         for temp_file in os.listdir(TEMP_PATH):
             if match_string in temp_file:
-                # print(temp_file)
                 os.remove(os.path.join(TEMP_PATH, temp_file))
 
 
@@ -2162,7 +2142,6 @@ for(var idx = 0; idx < allDesktops.length; idx++) {{
     for fname in img_names:
         filess_img_names.append("file://" + fname)
     filess_img_names_str = ", ".join('"' + _escape_js_string(item) + '"' for item in filess_img_names)
-    # print(script.format(imagelist=filess_img_names_str))
 
     sp_logging.G_LOGGER.info("kdeplasma_actions: Creating dbus connection")
     sessionb = dbus.SessionBus()

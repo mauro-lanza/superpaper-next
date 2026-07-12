@@ -1554,7 +1554,6 @@ class WallpaperSettingsPanel(wx.Panel):
                     paths_dict[disp_id].append(path_item)
                 else:
                     paths_dict[disp_id] = [path_item]
-            # print(paths_dict)
             for disp_id in paths_dict:
                 semicol_sep_paths = ";".join(paths_dict[disp_id])
                 tmp_profile.paths_array.append(semicol_sep_paths)
@@ -2065,14 +2064,12 @@ class WallpaperPreviewPanel(wx.Panel):
                 preview_img_list = [self.preview_img_list[i] for i in grp]
 
                 canv_sz, canvas_pos = self.canvas_display_group(display_rel_sizes, (0, 0))
-                # print(canv_sz, canvas_pos)
                 bmp_clr, bmp_bw = self.resize_and_bitmap(img_nm, canv_sz, True)
                 for disp, img_sz, bez_szs, st_bmp in zip(
                     display_rel_sizes, img_rel_sizes, bz_rel_sizes, preview_img_list
                 ):
                     sz = disp[0]
                     pos = (disp[1][0] - canvas_pos[0], disp[1][1] - canvas_pos[1])
-                    # print("pos", pos, "img_sz", img_sz)
                     crop = safe_sub_bitmap(bmp_clr, wx.Rect(pos, img_sz))
                     crop_w_bez = self.bezels_to_bitmap(crop, sz, bez_szs)
                     st_bmp.SetBitmap(crop_w_bez)
@@ -2642,10 +2639,8 @@ class WallpaperPreviewPanel(wx.Panel):
 
         # Canvas drawing
         if not self.config_mode and not self.use_multi_image and self.current_preview_images:
-            # print("Drawing canvas: ", self.config_mode, not self.use_multi_image, self.current_preview_images)
             self.draw_canvas(dc)
         else:
-            # print("Skipping canvas: ", self.config_mode, not self.use_multi_image, self.current_preview_images)
             self.draw_canvas(dc, False)
 
         # Display drawing
@@ -2816,10 +2811,8 @@ class WallpaperPreviewPanel(wx.Panel):
     def popup_at_button(self, button):
         """Initialize a popup at button position."""
         try:
-            # print("primary bezel pop")
             pop = self.BezelEntryPopup(self, wx.SIMPLE_BORDER | wx.PU_CONTAINS_CONTROLS)
         except AttributeError:
-            # print("fallback bezel pop")
             pop = self.BezelEntryPopup(self, wx.SIMPLE_BORDER)
         return pop
 

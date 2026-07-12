@@ -85,7 +85,6 @@ def get_backprojected_display_system(crops, persp_data, plot=False):
     ppi_norm_corners = [
         ((crop[0], crop[1]), (crop[2], crop[1]), (crop[2], crop[3]), (crop[0], crop[3])) for crop in crops
     ]
-    # print("ppi_norm_corners", ppi_norm_corners)
     projected_coeffs = []
     for ordquad, ppi_norm_quad in zip(ordered_quads, ppi_norm_corners):
         coeffs = find_coeffs(ordquad, ppi_norm_quad)
@@ -103,7 +102,6 @@ def get_backprojected_display_system(crops, persp_data, plot=False):
         # for dat, color, group in zip(data, colors, groups):
         for dat, color in zip(data, colors):
             for corner in dat:
-                # print(corner)
                 x, y = corner
                 # ax.scatter(x,    y, alpha=0.8, c=color, edgecolors='none', s=30)
                 plt.plot(x, y, c=color, marker="o", linestyle="dashed", linewidth=2, markersize=6)
@@ -199,10 +197,6 @@ def get_backprojected_display(
 
     # Convert corners into poster plane coordinates
     poster_plane_corners = convert_to_plane_basis(proj_corners, posterplane_basis, posterplane_center)
-    # print("disp_corners", disp_corners)
-    # print("proj_corners", proj_corners)
-    # print("display_plane.corners_2d", display_plane.corners_2d())
-    # print("poster_plane_corners", poster_plane_corners)
 
     return poster_plane_corners
 
