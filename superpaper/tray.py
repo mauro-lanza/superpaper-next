@@ -20,6 +20,7 @@ from superpaper.data import (
 from superpaper.gui import ConfigFrame
 from superpaper.message_dialog import show_message_dialog
 from superpaper.sni_tray import build_tray, sni_supported
+from superpaper.sp_paths import TRAY_ICON
 from superpaper.sp_platform import IS_MACOS, IS_WINDOWS, host_spawn_env
 from superpaper.wallpaper_processing import (
     change_wallpaper_job,
@@ -38,7 +39,6 @@ except ImportError as import_e:
 
 # Constants
 TRAY_TOOLTIP = "Superpaper"
-TRAY_ICON = os.path.join(sp_paths.PATH, "superpaper/resources/superpaper.png")
 STARTUP_PROFILE = None
 
 

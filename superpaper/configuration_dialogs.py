@@ -12,7 +12,7 @@ from superpaper.data import (
     GeneralSettingsData,
 )
 from superpaper.message_dialog import show_message_dialog
-from superpaper.sp_paths import PATH
+from superpaper.sp_paths import RESOURCES_PATH, TRAY_ICON
 from superpaper.wallpaper_processing import change_wallpaper_job
 
 try:
@@ -20,9 +20,6 @@ try:
     import wx.adv
 except ImportError:
     exit()
-
-RESOURCES_PATH = os.path.join(PATH, "superpaper/resources")
-TRAY_ICON = os.path.join(RESOURCES_PATH, "superpaper.png")
 
 
 class BrowsePaths(wx.Dialog):
@@ -1057,7 +1054,7 @@ class PerspectiveConfig(wx.Dialog):
         if image:
             testimage = [os.path.realpath(image)]
         else:
-            testimage = [os.path.join(PATH, "superpaper/resources/test.png")]
+            testimage = [os.path.join(RESOURCES_PATH, "test.png")]
         if not os.path.isfile(testimage[0]):
             msg = f"Test image not found in {testimage}."
             show_message_dialog(msg, "Error")

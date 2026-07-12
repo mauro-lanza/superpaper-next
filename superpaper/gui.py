@@ -28,7 +28,7 @@ from superpaper.data import (
     write_active_profile,
 )
 from superpaper.message_dialog import show_message_dialog
-from superpaper.sp_paths import PATH, PROFILES_PATH
+from superpaper.sp_paths import PROFILES_PATH, RESOURCES_PATH, TRAY_ICON
 from superpaper.wallpaper_processing import (
     change_wallpaper_job,
     resize_to_fill,
@@ -39,9 +39,6 @@ try:
     import wx.adv
 except ImportError:
     exit()
-
-RESOURCES_PATH = os.path.join(PATH, "superpaper/resources")
-TRAY_ICON = os.path.join(RESOURCES_PATH, "superpaper.png")
 
 
 class ConfigFrame(wx.Frame):
@@ -1703,7 +1700,7 @@ class WallpaperSettingsPanel(wx.Panel):
     def onAlignTest(self, event):
         """Align test, takes alignment settings from open profile and sets a test image wp."""
         # Use the settings currently written out in the fields!
-        testimage = [os.path.join(PATH, "superpaper/resources/test.png")]
+        testimage = [os.path.join(RESOURCES_PATH, "test.png")]
         if not os.path.isfile(testimage[0]):
             msg = f"Test image not found in {testimage}."
             show_message_dialog(msg, "Error")

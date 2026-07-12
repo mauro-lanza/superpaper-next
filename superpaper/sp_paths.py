@@ -12,6 +12,10 @@ if getattr(sys, "frozen", False):
 else:
     PATH = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 
+# Bundled resource paths (shared by the GUI, dialogs and tray).
+RESOURCES_PATH = os.path.join(PATH, "superpaper/resources")
+TRAY_ICON = os.path.join(RESOURCES_PATH, "superpaper.png")
+
 
 def setup_config_path() -> str:
     """Sets up config path for settings and profiles.
