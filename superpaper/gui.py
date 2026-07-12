@@ -3,6 +3,7 @@ New wallpaper configuration GUI for Superpaper.
 """
 
 import os
+import sys
 import tempfile
 import time
 from operator import itemgetter
@@ -38,7 +39,7 @@ try:
     import wx  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-import]
     import wx.adv  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-import]
 except ImportError:
-    exit()
+    sys.exit()
 
 
 class ConfigFrame(wx.Frame):

@@ -34,7 +34,7 @@ try:
 except ImportError as import_e:
     sp_logging.G_LOGGER.info("Failed to define tray applet classes. Is wxPython installed?")
     sp_logging.G_LOGGER.info(import_e)
-    exit()
+    sys.exit()
 
 
 # Constants
@@ -77,7 +77,7 @@ GUI unavailable, exiting."
             "ERROR: Module 'wx' import has failed. Is it installed? \
 GUI unavailable, exiting."
         )
-        exit()
+        sys.exit()
 
 
 # Tray applet definitions

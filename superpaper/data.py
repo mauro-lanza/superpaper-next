@@ -252,7 +252,7 @@ class ProfileData:
             msg = "Cannot parse profile, monitor resolution data is missing."
             show_message_dialog(msg)
             sp_logging.G_LOGGER.error(msg)
-            exit()
+            sys.exit()
 
         self.file = profile_file
         self.name = "default_profile"

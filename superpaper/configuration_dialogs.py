@@ -3,6 +3,7 @@ GUI dialogs for Superpaper.
 """
 
 import os
+import sys
 import time
 
 import superpaper.perspective as persp
@@ -19,7 +20,7 @@ try:
     import wx  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-import]
     import wx.adv  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-import]
 except ImportError:
-    exit()
+    sys.exit()
 
 
 class BrowsePaths(wx.Dialog):
