@@ -1,3 +1,14 @@
+"""Build the Windows release artifacts: PyInstaller exe, portable zip and Inno installer.
+
+Run from the repository root:
+    python release-tooling/make-windows-release.py
+
+WARNING: This script has not yet been run on a Windows machine. The
+modernization was verified only via command-capture tests on Linux; validate a
+real Windows build (PyInstaller exe + Inno installer) before relying on it for
+a release.
+"""
+
 import os
 import shutil
 import subprocess
@@ -7,16 +18,17 @@ SRCPATH = os.path.realpath("./superpaper")
 DISTPATH = os.path.realpath("./releases/")
 INNO_STUB = os.path.realpath("./releases/innostub")
 
+
 def read_version():
     with open("superpaper/__version__.py") as verfile:
-        verlines = verfile.readlines()
-    for line in verlines:
-        if "__version__" in line:
-            ver_str = line.split("=")[1].strip().replace('"',"")
-            print("Found version: %s" % ver_str)
-            return ver_str
-    print("Version not found, exitting install.")
+        for line in verfile:
+            if "__version__" in line:
+                ver_str = line.split("=")[1].strip().replace('"', "")
+                print(f"Found version: {ver_str}")
+                return ver_str
+    print("Version not found, exiting build.")
     sys.exit(1)
+
 
 def make_portable(dst_path):
     portpath = os.path.join(dst_path, "superpaper-portable")
@@ -29,49 +41,42 @@ def make_portable(dst_path):
     shutil.copytree(os.path.join(SRCPATH, "profiles-win"), portprof, dirs_exist_ok=True)
     # copy exe-less structure to be used by innosetup
     shutil.copytree(portpath, INNO_STUB, dirs_exist_ok=True)
-
     # copy executable
     shutil.copy2("./dist/superpaper.exe", portexec)
     # zip it
-    shutil.make_archive(portpath, 'zip', dst_path, "superpaper-portable")
+    shutil.make_archive(portpath, "zip", dst_path, "superpaper-portable")
+
 
 def run_inno_script(version_str):
-    inno_cmd = "iscc ./release-tooling/inno-setup-script.iss /DMyAppVersion={}".format(version_str)
-    os.system(inno_cmd)
-
-
+    subprocess.run(
+        ["iscc", "./release-tooling/inno-setup-script.iss", f"/DMyAppVersion={version_str}"],
+        check=True,
+    )
 
 
 def main():
-    if not os.path.isdir(DISTPATH):
-        os.mkdir(DISTPATH)
-        print("Made dir %s" % DISTPATH)
+    os.makedirs(DISTPATH, exist_ok=True)
     version = read_version()
     dist_path = os.path.join(DISTPATH, version)
-    if not os.path.isdir(dist_path):
-        os.mkdir(dist_path)
-        print("Made dir %s" % dist_path)
+    os.makedirs(dist_path, exist_ok=True)
 
     # run pyinstaller build
-    # os.system("python make-pyinstaller-build.py dist")
     try:
-        subprocess.call(["python", "./release-tooling/make-pyinstaller-build.py", "dist"])
-    except:
-        print("\nPyinstaller build FAILED.\n")
-        exit(0)
-    print("\nPyinstaller build done.\n")
+        subprocess.run([sys.executable, "./release-tooling/make-pyinstaller-build.py", "dist"], check=True)
+    except subprocess.CalledProcessError:
+        print("\nPyInstaller build FAILED.\n")
+        sys.exit(1)
+    print("\nPyInstaller build done.\n")
 
     # copy binary, resources and examples into package structure
     make_portable(dist_path)
-
     print("Portable package build done.")
 
     # run inno installer compilation
     run_inno_script(version)
 
-    # done
     print("Release built and packaged.")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

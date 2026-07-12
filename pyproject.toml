@@ -2,7 +2,7 @@
 #
 # pyproject.toml is the single source of truth for packaging metadata and
 # runtime dependencies (PEP 621 [project] table). setup.py has been removed;
-# the build, snap and AppImage tooling all consume the metadata below. The
+# the build and AppImage tooling all consume the metadata below. The
 # platform-specific runtime sets are expressed as dependency markers + extras
 # (see [project.optional-dependencies]) so a plain `pip install .` resolves the
 # right packages per OS, replacing the old requirements_*.txt files.
@@ -89,9 +89,9 @@ superpaper = [
 
 [dependency-groups]
 dev = [
-    "ruff>=0.14.0",
-    "ty>=0.0.1a1",
-    "pre-commit>=4.0.0",
+    "ruff>=0.15.21",
+    "ty>=0.0.58",
+    "pre-commit>=4.6.0",
 ]
 # Tools needed only to produce distributable builds (PyInstaller binary +
 # AppImage). Not runtime dependencies; kept separate from the lint/type `dev`
@@ -113,7 +113,6 @@ extend-exclude = [
     "dist",
     "releases",
     "release-tooling",
-    "snap",
     "example-script",
     ".venv",
     "superpaper.egg-info",
@@ -170,7 +169,6 @@ exclude = [
     "dist",
     "releases",
     "release-tooling",
-    "snap",
     ".venv",
     "**/__pycache__",
 ]

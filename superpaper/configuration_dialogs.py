@@ -3,6 +3,7 @@ GUI dialogs for Superpaper.
 """
 
 import os
+import sys
 import time
 
 import superpaper.perspective as persp
@@ -12,17 +13,14 @@ from superpaper.data import (
     GeneralSettingsData,
 )
 from superpaper.message_dialog import show_message_dialog
-from superpaper.sp_paths import PATH
+from superpaper.sp_paths import RESOURCES_PATH, TRAY_ICON
 from superpaper.wallpaper_processing import change_wallpaper_job
 
 try:
-    import wx
-    import wx.adv
+    import wx  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-import]
+    import wx.adv  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-import]
 except ImportError:
-    exit()
-
-RESOURCES_PATH = os.path.join(PATH, "superpaper/resources")
-TRAY_ICON = os.path.join(RESOURCES_PATH, "superpaper.png")
+    sys.exit()
 
 
 class BrowsePaths(wx.Dialog):
@@ -255,7 +253,6 @@ class BrowsePaths(wx.Dialog):
             for col in range(columns):
                 item_dat.append(self.paths_listctrl.GetItemText(idx, col))
             self.path_list_data.append(item_dat)
-        # print(self.path_list_data)
         # if listctrl is empty, onOk maybe could pass on the selected item? or disable OK if list is empty?
         self.EndModal(wx.ID_OK)
 
@@ -1058,7 +1055,7 @@ class PerspectiveConfig(wx.Dialog):
         if image:
             testimage = [os.path.realpath(image)]
         else:
-            testimage = [os.path.join(PATH, "superpaper/resources/test.png")]
+            testimage = [os.path.join(RESOURCES_PATH, "test.png")]
         if not os.path.isfile(testimage[0]):
             msg = f"Test image not found in {testimage}."
             show_message_dialog(msg, "Error")

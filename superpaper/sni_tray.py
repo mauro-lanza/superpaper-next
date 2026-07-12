@@ -26,8 +26,8 @@ dbus: Any = None
 Image: Any = None
 
 try:
-    import dbus
-    import dbus.service
+    import dbus  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-import]
+    import dbus.service  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-import]
 except ImportError:
     pass
 
@@ -168,7 +168,7 @@ class _MenuModel:
         action = entry["action"]
         # Actions are wx GUI calls; marshal onto the main loop to be safe.
         try:
-            import wx
+            import wx  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-import]
 
             wx.CallAfter(self._safe_call, action)
         except Exception:

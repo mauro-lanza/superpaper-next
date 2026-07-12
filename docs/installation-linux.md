@@ -35,11 +35,3 @@ To install, run in a terminal:
 pipx install --system-site-packages superpaper
 ```
 On some Linux setups, you might need to log out and in, or restart to get the menu/launcher entry to show up.
-
-
-## Snaps
-
-Snaps are currently not packaged, however for reference: To install the Snap (if available) you need to install it from the downloaded file with:
-```
-sudo snap install superpaper_1.2.0_amd64_experimental_classic.snap --classic --dangerous
-```

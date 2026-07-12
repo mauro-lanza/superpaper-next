@@ -11,7 +11,10 @@ if getattr(sys, "frozen", False):
     PATH = os.path.dirname(os.path.dirname(os.path.realpath(sys.executable)))
 else:
     PATH = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
-print(PATH)
+
+# Bundled resource paths (shared by the GUI, dialogs and tray).
+RESOURCES_PATH = os.path.join(PATH, "superpaper/resources")
+TRAY_ICON = os.path.join(RESOURCES_PATH, "superpaper.png")
 
 
 def setup_config_path() -> str:
@@ -22,15 +25,12 @@ def setup_config_path() -> str:
     Snap package uses SNAP_USER_DATA.
     On Windows and Mac use executable portable path for now.
     """
-    # from sp_logging import DEBUG, G_LOGGER
-
     if IS_LINUX:
         snap_user_data = os.environ.get("SNAP_USER_DATA")
         if snap_user_data:
             return snap_user_data
         else:
             config_path = xdg_path_setup("XDG_CONFIG_HOME", os.path.join(os.path.expanduser("~"), ".config"))
-            # if DEBUG: G_LOGGER.info("config path: %s", config_path)
             return config_path
     elif IS_WINDOWS:
         # Windows and Mac default to the old portable config behavior
@@ -55,8 +55,6 @@ def setup_cache_path() -> str:
     On Linux systems use XDG_CACHE_HOME standard. Snap package uses SNAP_USER_COMMON.
     On Windows and Mac use executable portable path (PATH/temp) for now.
     """
-    # from sp_logging import DEBUG, G_LOGGER
-
     if IS_LINUX:
         snap_user_common = os.environ.get("SNAP_USER_COMMON")
         if snap_user_common:
@@ -65,7 +63,6 @@ def setup_cache_path() -> str:
         else:
             cache_path = xdg_path_setup("XDG_CACHE_HOME", os.path.join(os.path.expanduser("~"), ".cache"))
             temp_path = os.path.join(cache_path, "temp")
-            # if DEBUG: G_LOGGER.info("temp path: %s", temp_path)
             return temp_path
     elif IS_WINDOWS:
         # Windows and Mac default to the old portable temp behavior
@@ -124,12 +121,10 @@ def test_git_path(path):
 
 # Derivative paths
 CONFIG_PATH = setup_config_path()  # Save profiles and settings here.
-print(CONFIG_PATH)
 TEMP_PATH = setup_cache_path()  # Save adjusted wallpapers in here.
 if not os.path.isdir(TEMP_PATH):
     os.mkdir(TEMP_PATH)
 PROFILES_PATH = os.path.join(CONFIG_PATH, "profiles")
-print(PROFILES_PATH)
 if not os.path.isdir(PROFILES_PATH):
     # Profiles folder didn't exist, so create it and copy example
     # profiles in there assuming it's a first time run.

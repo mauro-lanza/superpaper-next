@@ -20,6 +20,7 @@ from superpaper.data import (
 from superpaper.gui import ConfigFrame
 from superpaper.message_dialog import show_message_dialog
 from superpaper.sni_tray import build_tray, sni_supported
+from superpaper.sp_paths import TRAY_ICON
 from superpaper.sp_platform import IS_MACOS, IS_WINDOWS, host_spawn_env
 from superpaper.wallpaper_processing import (
     change_wallpaper_job,
@@ -28,17 +29,16 @@ from superpaper.wallpaper_processing import (
 )
 
 try:
-    import wx
-    import wx.adv
+    import wx  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-import]
+    import wx.adv  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-import]
 except ImportError as import_e:
     sp_logging.G_LOGGER.info("Failed to define tray applet classes. Is wxPython installed?")
     sp_logging.G_LOGGER.info(import_e)
-    exit()
+    sys.exit()
 
 
 # Constants
 TRAY_TOOLTIP = "Superpaper"
-TRAY_ICON = os.path.join(sp_paths.PATH, "superpaper/resources/superpaper.png")
 STARTUP_PROFILE = None
 
 
@@ -61,7 +61,7 @@ def tray_loop(profile=None):
             # GLib main loop. Must be set as the default main loop before the
             # first bus connection is created (i.e. before the wx.App).
             try:
-                from dbus.mainloop.glib import DBusGMainLoop
+                from dbus.mainloop.glib import DBusGMainLoop  # ty:ignore[unresolved-import]
 
                 DBusGMainLoop(set_as_default=True)
             except ImportError:
@@ -77,7 +77,7 @@ GUI unavailable, exiting."
             "ERROR: Module 'wx' import has failed. Is it installed? \
 GUI unavailable, exiting."
         )
-        exit()
+        sys.exit()
 
 
 # Tray applet definitions

@@ -1,6 +1,6 @@
 """Error etc. info dialog."""
 
-import wx
+import wx  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-import]
 
 
 def show_message_dialog(message, msg_type="Info", parent=None, style="OK"):

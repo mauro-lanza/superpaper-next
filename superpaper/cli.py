@@ -103,7 +103,7 @@ def cli_logic():
 a file: (%s). Exiting.",
                         filename,
                     )
-                    exit()
+                    sys.exit()
         elif args.profile and not args.setimages:
             if os.path.isfile(os.path.join(sp_paths.PROFILES_PATH, args.profile + ".profile")):
                 tray_loop(profile=os.path.join(sp_paths.PROFILES_PATH, args.profile + ".profile"))
@@ -118,20 +118,20 @@ a file: (%s). Exiting.",
 (%s)",
                     sorted([os.path.splitext(fname)[0] for fname in os.listdir(sp_paths.PROFILES_PATH)]),
                 )
-                exit()
+                sys.exit()
         else:
             sp_logging.G_LOGGER.info("""Exception: You must pass either image(s) to set as \
 wallpaper with '-s' or '--setimages', or a profile \
 to start Superpaper with using '-p' or '--profile'. \
 Exiting.""")
-            exit()
+            sys.exit()
         if args.perspective:
             refresh_display_data()
             if args.perspective not in wpproc.G_ACTIVE_DISPLAYSYSTEM.perspective_dict:
                 sp_logging.G_LOGGER.error(
                     f"Exception: Valid perspective profile names are: {list(wpproc.G_ACTIVE_DISPLAYSYSTEM.perspective_dict.keys())}."
                 )
-                exit()
+                sys.exit()
         spangrp = None
         if args.spangroups:
             # Parse spangroups
@@ -145,21 +145,21 @@ Exiting.""")
                         f"Exception: One of the display ids \
 was not an integer: {grp}. Exiting."
                     )
-                    exit()
+                    sys.exit()
         if args.offsets and len(args.offsets) % 2 != 0:
             sp_logging.G_LOGGER.error(
                 "Exception: Number of offset pixels not even. \
 If passing manual offsets, give width and height offset for each display, even if \
 not actually offsetting every display. Exiting."
             )
-            exit()
+            sys.exit()
         if args.command:
             if len(args.command) > 1:
                 sp_logging.G_LOGGER.error(
                     "Exception: Remember to put the \
 custom command in quotes. Exiting."
                 )
-                exit()
+                sys.exit()
             wpproc.G_SET_COMMAND_STRING = args.command[0]
 
         get_display_data()
