@@ -57,7 +57,7 @@ elif sys.platform == "linux":
     # KDE has special needs
     # if os.environ.get("DESKTOP_SESSION") in ["/usr/share/xsessions/plasma", "plasma"]:
     if running_kde():
-        import dbus
+        import dbus  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-import]
 elif sys.platform == "darwin":
     from AppKit import NSScreen, NSWorkspace
     from Foundation import NSURL

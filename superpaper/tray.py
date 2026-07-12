@@ -29,8 +29,8 @@ from superpaper.wallpaper_processing import (
 )
 
 try:
-    import wx
-    import wx.adv
+    import wx  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-import]
+    import wx.adv  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-import]
 except ImportError as import_e:
     sp_logging.G_LOGGER.info("Failed to define tray applet classes. Is wxPython installed?")
     sp_logging.G_LOGGER.info(import_e)
@@ -61,7 +61,7 @@ def tray_loop(profile=None):
             # GLib main loop. Must be set as the default main loop before the
             # first bus connection is created (i.e. before the wx.App).
             try:
-                from dbus.mainloop.glib import DBusGMainLoop
+                from dbus.mainloop.glib import DBusGMainLoop  # ty:ignore[unresolved-import]
 
                 DBusGMainLoop(set_as_default=True)
             except ImportError:

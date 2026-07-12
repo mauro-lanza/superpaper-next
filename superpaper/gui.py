@@ -35,8 +35,8 @@ from superpaper.wallpaper_processing import (
 )
 
 try:
-    import wx
-    import wx.adv
+    import wx  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-import]
+    import wx.adv  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-import]
 except ImportError:
     exit()
 

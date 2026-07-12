@@ -16,8 +16,8 @@ from superpaper.sp_paths import RESOURCES_PATH, TRAY_ICON
 from superpaper.wallpaper_processing import change_wallpaper_job
 
 try:
-    import wx
-    import wx.adv
+    import wx  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-import]
+    import wx.adv  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-import]
 except ImportError:
     exit()
 

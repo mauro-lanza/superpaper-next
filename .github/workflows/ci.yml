@@ -1,10 +1,12 @@
 name: CI
 
-# Runs the same lint/format gate that pre-commit enforces locally, so PRs are
-# checked automatically. Type checking (ty) and tests are intentionally NOT here
-# yet: they require the full GUI runtime stack (wxPython, dbus-python, ...) which
-# isn't installable from PyPI on CI without heavy system deps. Those land once
-# the dependencies are consolidated (PEP 621 [project] + extras).
+# Runs the same lint/format/type gate that pre-commit enforces locally, so PRs
+# are checked automatically. Type checking (ty) runs here too: the wx/dbus
+# imports it cannot resolve without the GUI/Linux extras are suppressed with
+# inline `# ty:ignore[unresolved-import]` directives, so ty passes against the
+# `dev` group sync alone. Tests are still omitted -- they need the full GUI
+# runtime stack (wxPython, dbus-python, ...) which isn't installable on CI
+# without heavy system deps.
 
 on:
   push:
@@ -22,7 +24,7 @@ concurrency:
 
 jobs:
   lint:
-    name: Lint & format (ruff)
+    name: Lint, format & type-check
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -47,3 +49,6 @@ jobs:
 
       - name: Ruff format check
         run: uv run ruff format --check
+
+      - name: Type check (ty)
+        run: uv run ty check
