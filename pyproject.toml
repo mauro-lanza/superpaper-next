@@ -89,9 +89,9 @@ superpaper = [
 
 [dependency-groups]
 dev = [
-    "ruff>=0.14.0",
-    "ty>=0.0.1a1",
-    "pre-commit>=4.0.0",
+    "ruff>=0.15.21",
+    "ty>=0.0.58",
+    "pre-commit>=4.6.0",
 ]
 # Tools needed only to produce distributable builds (PyInstaller binary +
 # AppImage). Not runtime dependencies; kept separate from the lint/type `dev`
