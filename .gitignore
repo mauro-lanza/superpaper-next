@@ -16,3 +16,6 @@ dist/
 releases/
 *.AppImage
 *.spec
+
+# Test artifacts
+.pytest_cache/

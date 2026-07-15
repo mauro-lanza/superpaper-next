@@ -1111,13 +1111,17 @@ def span_single_image_simple(profile, force):
     desktop canvas. Since no corrections are applied, no offset dependent
     cuts are needed and so this should work on any monitor arrangement.
     """
-    file = profile.next_wallpaper_files()[0]
+    files = profile.next_wallpaper_files()
+    if len(files) != 1:
+        sp_logging.G_LOGGER.error("No complete wallpaper selection is available for profile '%s'.", profile.name)
+        return
+    file = files[0]
     if sp_logging.DEBUG:
         sp_logging.G_LOGGER.info(file)
     try:
         img = Image.open(file)
         img = ImageOps.exif_transpose(img)
-    except UnidentifiedImageError:
+    except OSError, UnidentifiedImageError:
         sp_logging.G_LOGGER.info(
             ("Opening image '%s' failed with PIL.UnidentifiedImageError.It could be corrupted or is of foreign type."),
             file,
@@ -1176,12 +1180,16 @@ def span_single_image_advanced(profile, force):
     Further description todo.
     """
     files = profile.next_wallpaper_files()
+    expected_files = len(profile.spangroups) if profile.spangroups else 1
+    if len(files) != expected_files:
+        sp_logging.G_LOGGER.error("No complete wallpaper selection is available for profile '%s'.", profile.name)
+        return
     if sp_logging.DEBUG:
         sp_logging.G_LOGGER.info(files)
     try:
         img_list = [Image.open(fil) for fil in files]
         img_list = [ImageOps.exif_transpose(img) for img in img_list]
-    except UnidentifiedImageError:
+    except OSError, UnidentifiedImageError:
         sp_logging.G_LOGGER.info(
             ("Opening image '%s' failed with PIL.UnidentifiedImageError.It could be corrupted or is of foreign type."),
             files,
@@ -1294,6 +1302,9 @@ def set_multi_image_wallpaper(profile, force):
     the resulting image as the wallpaper.
     """
     files = profile.next_wallpaper_files()
+    if len(files) != NUM_DISPLAYS:
+        sp_logging.G_LOGGER.error("No complete wallpaper selection is available for profile '%s'.", profile.name)
+        return
     if sp_logging.DEBUG:
         sp_logging.G_LOGGER.info(str(files))
     img_resized = []
@@ -1302,7 +1313,7 @@ def set_multi_image_wallpaper(profile, force):
         try:
             image = Image.open(file)
             image = ImageOps.exif_transpose(image)
-        except UnidentifiedImageError:
+        except OSError, UnidentifiedImageError:
             sp_logging.G_LOGGER.info(
                 (
                     "Opening image '%s' failed with PIL.UnidentifiedImageError."
@@ -2203,8 +2214,9 @@ def change_wallpaper_job(profile, force=False, advance=False):
     been established yet, the first image is picked once and saved as the selection.
     """
     with G_WALLPAPER_CHANGE_LOCK:
-        if advance or not profile.selected:
-            profile.advance_wallpaper()
+        if (advance or not profile.has_valid_selection()) and not profile.advance_wallpaper():
+            sp_logging.G_LOGGER.error("Wallpaper change skipped: profile '%s' has no complete selection.", profile.name)
+            return None
         if profile.spanmode.startswith("single") and profile.ppimode is False:
             thrd = Thread(target=span_single_image_simple, args=(profile, force), daemon=True)
             thrd.start()

@@ -53,6 +53,8 @@ This fork focuses on KDE Plasma 6 support and improving the wallpaper selection 
 - **Visual wallpaper selector**: replace the file path list with an image grid/icon view, showing the path on hover
 - **Interactive positioning**: drag-to-pan and scroll-to-zoom directly on the preview, in addition to the current sliders
 
+Python 3.14 is the compatibility floor for development after v2.3.2. The v2.3.2 release is the stable cutoff for older Python environments.
+
 
 ## Features
 

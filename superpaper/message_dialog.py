@@ -1,13 +1,16 @@
 """Error etc. info dialog."""
 
-import wx  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-import]
+try:
+    import wx  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-import]
+except ImportError:
+    wx = None
 
 
 def show_message_dialog(message, msg_type="Info", parent=None, style="OK"):
     """General purpose info dialog in GUI mode, falls back to print in CLI mode."""
     # Type can be 'Info', 'Error', 'Question', 'Exclamation'
     # In CLI mode there is no wx.App, so fall back to printing the message.
-    if wx.App.Get() is None:
+    if wx is None or wx.App.Get() is None:
         print(f"[{msg_type}] {message}")
         if style == "YES_NO":
             return False

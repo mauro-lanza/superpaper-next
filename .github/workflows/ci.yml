@@ -3,10 +3,9 @@ name: CI
 # Runs the same lint/format/type gate that pre-commit enforces locally, so PRs
 # are checked automatically. Type checking (ty) runs here too: the wx/dbus
 # imports it cannot resolve without the GUI/Linux extras are suppressed with
-# inline `# ty:ignore[unresolved-import]` directives, so ty passes against the
-# `dev` group sync alone. Tests are still omitted -- they need the full GUI
-# runtime stack (wxPython, dbus-python, ...) which isn't installable on CI
-# without heavy system deps.
+# inline `# ty:ignore[unresolved-import]` directives, so ty and the headless
+# unit tests pass against the `dev` group sync alone. GUI integration remains a
+# separate platform-testing concern.
 
 on:
   push:
@@ -38,7 +37,8 @@ jobs:
           enable-cache: true
           python-version: "3.14"
 
-      # Syncs the project plus the `dev` dependency group (ruff, ty, pre-commit)
+      # Syncs the project plus the `dev` dependency group (ruff, ty, pytest,
+      # pre-commit)
       # from uv.lock. Only the core runtime deps (all wheels) come along; the
       # gui/linux extras that need system build deps are not installed.
       - name: Install dev tooling
@@ -52,3 +52,6 @@ jobs:
 
       - name: Type check (ty)
         run: uv run ty check
+
+      - name: Test
+        run: uv run pytest
