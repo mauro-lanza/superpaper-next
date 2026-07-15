@@ -68,3 +68,24 @@ def test_grouped_profile_requires_one_selection_per_group(profile_modules, tmp_p
     assert profile.has_valid_selection() is False
     profile.set_selected_wallpaper([str(first), str(second)], persist=False)
     assert profile.has_valid_selection() is True
+
+
+def test_advance_replaces_duplicate_multi_selection(profile_modules, tmp_path):
+    data, _ = profile_modules
+    first = tmp_path / "a.png"
+    second = tmp_path / "b.png"
+    first.touch()
+    second.touch()
+    profile_path = write_profile(
+        tmp_path / "test.profile",
+        spanmode="multi",
+        sources=[tmp_path, tmp_path],
+        selected=[first, first],
+    )
+    profile = data.ProfileData(profile_path)
+
+    assert profile.next_wallpaper_files() == [str(first), str(first)]
+    advanced = profile.advance_wallpaper()
+
+    assert len(set(advanced)) == 2
+    assert "selected=" + ";".join(advanced) in profile_path.read_text(encoding="utf-8")

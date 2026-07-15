@@ -590,6 +590,7 @@ class ProfileData:
             self.all_files_in_paths = []
             self.paths_array = paths_array
             self.sortmode = sortmode
+            self._pending_batch = None
             for paths_list in paths_array:
                 list_of_images = []
                 for path in paths_list:
@@ -614,50 +615,99 @@ Use absolute paths for best reliabilty."
                                 for f in os.listdir(path)
                                 if f.lower().endswith(wpproc.G_SUPPORTED_IMAGE_EXTENSIONS)
                             ]
-                # Append the list of monitor_i specific files to the list of
-                # lists of images.
-                self.all_files_in_paths.append(list_of_images)
+                # The same file can be included through overlapping directories,
+                # explicit paths, or symlinks. Keep its first occurrence only.
+                unique_images = []
+                seen_images = set()
+                for image in list_of_images:
+                    identity = self._file_identity(image)
+                    if identity not in seen_images:
+                        seen_images.add(identity)
+                        unique_images.append(image)
+                self.all_files_in_paths.append(unique_images)
             self.iterators = []
             for diplay_image_list in self.all_files_in_paths:
                 self.iterators.append(self.ImageList(diplay_image_list, self.sortmode))
 
         def next_wallpaper_files(self, peek=False, _attempt=0):
-            """Calls its internal iterators to give the next image for each monitor."""
+            """Return a complete batch, avoiding cross-monitor duplicates when possible."""
             # Guard against unbounded recursion: a persistently invalid entry
             # (e.g. a dangling symlink that keeps being re-listed on reinit)
             # would otherwise loop forever. After this many reinit attempts,
-            # give up and return whatever valid files were gathered (issue #135).
+            # give up without returning a partial positional batch (issue #135).
             max_attempts = 20
             # Reject an incomplete positional batch before consuming any of
             # the other iterators.
             if any(not iterable.files for iterable in self.iterators):
                 return []
-            files = []
-            for iterable in self.iterators:
-                if peek:
-                    next_image = iterable.__peek__()
-                else:
-                    next_image = iterable.__next__()
-                if next_image is None:
-                    # Selections are positional. Returning later monitors here
-                    # would shift them onto the wrong displays.
+            if self._pending_batch is None:
+                self._pending_batch = self._plan_batch()
+            files, counters = self._pending_batch
+            if not all(os.path.isfile(path) for path in files):
+                if sp_logging.DEBUG:
+                    sp_logging.G_LOGGER.info("Ran into an invalid file, reinitializing..")
+                if _attempt >= max_attempts:
+                    sp_logging.G_LOGGER.info(
+                        "next_wallpaper_files: giving up after %d attempts due to persistently invalid files",
+                        max_attempts,
+                    )
+                    self._pending_batch = None
                     return []
-                if os.path.isfile(next_image):
-                    files.append(next_image)
-                else:
-                    # reload all files by initializing
-                    if sp_logging.DEBUG:
-                        sp_logging.G_LOGGER.info("Ran into an invalid file, reinitializing..")
-                    if _attempt >= max_attempts:
-                        sp_logging.G_LOGGER.info(
-                            "next_wallpaper_files: giving up after %d attempts due to a persistently invalid file: %s",
-                            max_attempts,
-                            next_image,
-                        )
-                        return files
-                    self.__init__(self.paths_array, self.sortmode)
-                    return self.next_wallpaper_files(peek=peek, _attempt=_attempt + 1)
-            return files
+                self.__init__(self.paths_array, self.sortmode)
+                return self.next_wallpaper_files(peek=peek, _attempt=_attempt + 1)
+            if peek:
+                return list(files)
+            for iterable, counter in zip(self.iterators, counters):
+                iterable.counter = counter
+            self._pending_batch = None
+            return list(files)
+
+        @staticmethod
+        def _file_identity(path):
+            return os.path.normcase(os.path.realpath(path))
+
+        def _plan_batch(self):
+            """Choose a maximum-distinct ordered assignment for all positions."""
+            candidates = []
+            for iterable in self.iterators:
+                iterable.prepare_cycle()
+                ordered_indices = list(range(iterable.counter, len(iterable.files))) + list(range(iterable.counter))
+                candidates.append(
+                    [
+                        (iterable.files[index], index + 1, self._file_identity(iterable.files[index]))
+                        for index in ordered_indices
+                    ]
+                )
+
+            image_to_position = {}
+            selected = [None] * len(candidates)
+
+            def assign(position, visited):
+                for path, counter, identity in candidates[position]:
+                    if identity in visited:
+                        continue
+                    visited.add(identity)
+                    previous = image_to_position.get(identity)
+                    if previous is None or assign(previous, visited):
+                        image_to_position[identity] = position
+                        selected[position] = (path, counter)
+                        return True
+                return False
+
+            # Reverse order preserves the earliest position's first choice when
+            # several maximum matchings are otherwise equivalent.
+            for position in reversed(range(len(candidates))):
+                assign(position, set())
+
+            # If uniqueness is impossible, duplicates are preferable to an
+            # incomplete positional batch that could shift monitor assignments.
+            for position, choices in enumerate(candidates):
+                if selected[position] is None:
+                    path, counter, _identity = choices[0]
+                    selected[position] = (path, counter)
+
+            completed = [choice for choice in selected if choice is not None]
+            return ([choice[0] for choice in completed], [choice[1] for choice in completed])
 
         class ImageList:
             """Image list iterable that can reinitialize itself once it has been gone through."""
@@ -679,6 +729,12 @@ Use absolute paths for best reliabilty."
                     self.counter = 0
                     self.arrange_list()
                 return self.files[self.counter]
+
+            def prepare_cycle(self):
+                """Arrange the next cycle once before coordinated batch planning."""
+                if self.counter >= len(self.files):
+                    self.counter = 0
+                    self.arrange_list()
 
             def __next__(self):
                 image = self._current_image()
