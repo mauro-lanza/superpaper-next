@@ -1,3 +1,4 @@
+import os
 import subprocess
 import sys
 from types import ModuleType, SimpleNamespace
@@ -5,7 +6,39 @@ from types import ModuleType, SimpleNamespace
 import pytest
 
 
-def test_import_cli_does_not_load_tray_or_gui():
+def cli_subprocess_env(tmp_path):
+    home = tmp_path / "home"
+    config = tmp_path / "config"
+    cache = tmp_path / "cache"
+    home.mkdir(exist_ok=True)
+    config.mkdir(exist_ok=True)
+    cache.mkdir(exist_ok=True)
+    env = dict(os.environ)
+    env.update(HOME=str(home), XDG_CONFIG_HOME=str(config), XDG_CACHE_HOME=str(cache))
+    for name in ("DESKTOP_SESSION", "KDE_FULL_SESSION", "XDG_SESSION_DESKTOP", "SNAP_USER_DATA", "SNAP_USER_COMMON"):
+        env.pop(name, None)
+    return env
+
+
+def run_module_cli(tmp_path, *args):
+    script = (
+        "import runpy, sys, types; "
+        "spanmode = types.ModuleType('superpaper.spanmode'); "
+        "spanmode.set_spanmode = lambda: None; "
+        "sys.modules['superpaper.spanmode'] = spanmode; "
+        f"sys.argv = {['superpaper', *args]!r}; "
+        "runpy.run_module('superpaper', run_name='__main__')"
+    )
+    return subprocess.run(
+        [sys.executable, "-c", script],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=cli_subprocess_env(tmp_path),
+    )
+
+
+def test_import_cli_does_not_load_tray_or_gui(tmp_path):
     result = subprocess.run(
         [
             sys.executable,
@@ -17,9 +50,33 @@ def test_import_cli_does_not_load_tray_or_gui():
         check=False,
         capture_output=True,
         text=True,
+        env=cli_subprocess_env(tmp_path),
     )
 
     assert result.returncode == 0, result.stderr
+
+
+def test_module_help_succeeds_headlessly(tmp_path):
+    result = run_module_cli(tmp_path, "--help")
+
+    assert result.returncode == 0
+    assert "usage:" in result.stdout
+    assert "--setimages" in result.stdout
+    assert "--profile" in result.stdout
+
+
+def test_module_unknown_argument_is_argparse_error(tmp_path):
+    result = run_module_cli(tmp_path, "--unknown-option")
+
+    assert result.returncode == 2
+    assert "unrecognized arguments" in result.stderr
+
+
+@pytest.mark.xfail(strict=True, reason="Known CLI bug: missing profiles currently exit with status 0")
+def test_module_missing_profile_exits_nonzero(tmp_path):
+    result = run_module_cli(tmp_path, "--profile", "missing")
+
+    assert result.returncode != 0
 
 
 def test_main_dispatches_cli_after_spanmode(monkeypatch):
@@ -145,6 +202,26 @@ def test_cli_help_exits_successfully(monkeypatch):
     assert error.value.code == 0
 
 
+@pytest.mark.xfail(strict=True, reason="Known CLI bug: profile launch falls through after the tray exits")
+def test_profile_launch_returns_after_tray_loop(monkeypatch, tmp_path):
+    from superpaper import cli
+
+    profiles = tmp_path / "profiles"
+    profiles.mkdir()
+    profile_path = profiles / "saved.profile"
+    profile_path.touch()
+    tray = ModuleType("superpaper.tray")
+    tray_calls = []
+    tray.tray_loop = lambda profile=None: tray_calls.append(profile)
+    monkeypatch.setitem(sys.modules, "superpaper.tray", tray)
+    monkeypatch.setattr(cli.sp_paths, "PROFILES_PATH", str(profiles))
+    monkeypatch.setattr(cli, "refresh_display_data", lambda: None)
+    monkeypatch.setattr(sys, "argv", ["superpaper", "--profile", "saved"])
+
+    assert cli.cli_logic() == 0
+    assert tray_calls == [str(profile_path)]
+
+
 @pytest.mark.xfail(strict=True, reason="Known CLI bug: validation failures currently exit with status 0")
 def test_missing_image_exits_nonzero(monkeypatch, tmp_path):
     from superpaper import cli
@@ -152,8 +229,10 @@ def test_missing_image_exits_nonzero(monkeypatch, tmp_path):
     missing = tmp_path / "missing.png"
     monkeypatch.setattr(sys, "argv", ["superpaper", "--setimages", str(missing)])
 
-    with pytest.raises(SystemExit) as error:
-        cli.cli_logic()
+    try:
+        status = cli.cli_logic()
+    except SystemExit as error:
+        status = error.code
 
-    assert isinstance(error.value.code, int)
-    assert error.value.code != 0
+    assert isinstance(status, int)
+    assert status != 0
