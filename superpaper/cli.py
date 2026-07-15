@@ -9,7 +9,6 @@ import superpaper.sp_logging as sp_logging
 import superpaper.sp_paths as sp_paths
 import superpaper.wallpaper_processing as wpproc
 from superpaper.data import CLIProfileData
-from superpaper.tray import tray_loop
 from superpaper.wallpaper_processing import change_wallpaper_job, refresh_display_data
 
 
@@ -89,6 +88,8 @@ def cli_logic():
         sp_logging.G_LOGGER.info(f"User defined command: {args.command}")
         sp_logging.G_LOGGER.info(f"Debugging: {args.debug}")
     if args.debug and len(sys.argv) == 2:
+        from superpaper.tray import tray_loop
+
         tray_loop()
     else:
         if args.setimages and not args.profile:
@@ -102,6 +103,8 @@ a file: (%s). Exiting.",
                     sys.exit()
         elif args.profile and not args.setimages:
             if os.path.isfile(os.path.join(sp_paths.PROFILES_PATH, args.profile + ".profile")):
+                from superpaper.tray import tray_loop
+
                 tray_loop(profile=os.path.join(sp_paths.PROFILES_PATH, args.profile + ".profile"))
             else:
                 sp_logging.G_LOGGER.error(
