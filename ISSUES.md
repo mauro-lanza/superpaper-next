@@ -10,6 +10,8 @@ Issue #162's original missing-`setuptools` failure was fixed before the packagin
 
 Issue #135's infinite retry is fixed. Persisted selections are also validated atomically now: deleted files fall back to configured sources, and incomplete per-monitor/group selections no longer shift images onto the wrong display.
 
+Issue #138 is resolved by coordinated slideshow selection. Each batch maximizes distinct canonical files across monitors or span groups, while allowing duplicates only when the configured pools do not contain enough unique images.
+
 ## Partial
 
 | Issue | Remaining work |
@@ -36,7 +38,6 @@ Issue #135's infinite retry is fixed. Persisted selections are also validated at
 | Issue | Request |
 |-------|---------|
 | [#124](https://github.com/hhannine/superpaper/issues/124) | Clear perspective setup guide with diagrams and examples. |
-| [#138](https://github.com/hhannine/superpaper/issues/138) | Prevent duplicate slideshow images across displays. |
 | [#143](https://github.com/hhannine/superpaper/issues/143) | Time-of-day wallpaper switching. |
 | [#139](https://github.com/hhannine/superpaper/issues/139) | Multiple independently configured regions per display. |
 | [#96](https://github.com/hhannine/superpaper/issues/96) | Per-workspace wallpapers; KDE Activities are supported but are not virtual desktops. |
