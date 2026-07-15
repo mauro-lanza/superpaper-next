@@ -61,32 +61,24 @@ def open_profile(profile):
 def read_active_profile():
     """Reads last active profile from file at startup."""
     fname = os.path.join(sp_paths.TEMP_PATH, "running_profile")
-    profname = ""
-    profile = None
     if os.path.isfile(fname):
         with open(fname, encoding="utf-8") as rp_file:
-            for line in rp_file:  # loop through line by line
-                line.rstrip("\r\n")
-                profname = line
-                # if sp_logging.DEBUG:
-                #     sp_logging.G_LOGGER.info("read profile name from 'running_profile': %s",
-                #                              profname)
-                prof_file = os.path.join(sp_paths.PROFILES_PATH, profname + ".profile")
-                if os.path.isfile(prof_file):
-                    profile = ProfileData(prof_file)
-                else:
-                    profile = None
-                    sp_logging.G_LOGGER.info(
-                        "Exception: Previously run profile configuration \
+            profname = rp_file.readline().rstrip("\r\n")
+        if not profname:
+            return None
+        prof_file = os.path.join(sp_paths.PROFILES_PATH, profname + ".profile")
+        if os.path.isfile(prof_file):
+            return ProfileData(prof_file)
+        sp_logging.G_LOGGER.info(
+            "Exception: Previously run profile configuration \
                         file not found. Is the filename same as the \
                         profile name: %s?",
-                        profname,
-                    )
+            profname,
+        )
     else:
         with open(fname, "x", encoding="utf-8"):
             pass
-        profile = None
-    return profile
+    return None
 
 
 def write_active_profile(profname):
@@ -112,11 +104,13 @@ class GeneralSettingsData:
 
     def parse_settings(self):
         """Parse general_settings file. Create it if it doesn't exists."""
+        # Re-reading settings must clear a command that was removed from disk.
+        self.set_command = ""
         fname = os.path.join(CONFIG_PATH, "general_settings")
         if os.path.isfile(fname):
             with open(fname) as general_settings_file:
                 for line in general_settings_file:
-                    words = line.strip().split("=")
+                    words = line.strip().split("=", 1)
                     if words[0] == "logging":
                         wrds1 = words[1].strip().lower()
                         if wrds1 == "true":
@@ -155,8 +149,7 @@ class GeneralSettingsData:
                         if sp_logging.DEBUG:
                             sp_logging.G_LOGGER.info("hk_binding_pause: %s", self.hk_binding_pause)
                     elif words[0] == "set_command":
-                        wpproc.G_SET_COMMAND_STRING = words[1].strip()
-                        self.set_command = wpproc.G_SET_COMMAND_STRING
+                        self.set_command = words[1].strip()
                     elif words[0].strip() == "show_help_at_start":
                         show_state = words[1].strip().lower()
                         if show_state == "false":
@@ -190,6 +183,7 @@ class GeneralSettingsData:
                 general_settings_file.write("set_command=\n")
                 general_settings_file.write("browse_default_dir=\n")
                 general_settings_file.write("warn_large_img=true")
+        wpproc.G_SET_COMMAND_STRING = self.set_command
 
     def save_settings(self):
         """Save the current state of the general settings object."""
