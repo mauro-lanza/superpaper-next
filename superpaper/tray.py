@@ -517,11 +517,8 @@ Check that it is formatted properly and valid keys."
                 with self.job_lock:
                     if self.repeating_timer is not None and self.repeating_timer.is_running:
                         self.repeating_timer.stop()
-                    if sp_logging.DEBUG:
-                        sp_logging.G_LOGGER.info("Running quick profile job with profile: %s", profile.name)
                     self.active_profile = profile
                     wpproc.G_ACTIVE_PROFILE = self.active_profile.name
-                    quick_profile_job(profile)
                     if sp_logging.DEBUG:
                         sp_logging.G_LOGGER.info("Starting timed profile job with profile: %s", profile.name)
                     self.repeating_timer, thrd = run_profile_job(profile)
@@ -534,11 +531,8 @@ Check that it is formatted properly and valid keys."
             with self.job_lock:
                 if self.repeating_timer is not None and self.repeating_timer.is_running:
                     self.repeating_timer.stop()
-                if sp_logging.DEBUG:
-                    sp_logging.G_LOGGER.info("Running quick profile job with profile: %s", profile.name)
                 self.active_profile = profile
                 wpproc.G_ACTIVE_PROFILE = self.active_profile.name
-                quick_profile_job(profile)
                 if sp_logging.DEBUG:
                     sp_logging.G_LOGGER.info("Starting timed profile job with profile: %s", profile.name)
                 self.repeating_timer, thrd = run_profile_job(profile)

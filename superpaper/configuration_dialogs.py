@@ -957,8 +957,11 @@ class PerspectiveConfig(wx.Dialog):
         # update and save data
         # check for large images
         if self.warn_large_img:
-            self.display_sys.update_perspectives("temp", toggle, is_ds_def, viewer_data, swivels, tilts)
-            too_large, canvas = self.check_for_large_image_size("temp")
+            scratch_name = "\0validation"
+            previous_use_perspective = self.display_sys.use_perspective
+            previous_default_perspective = self.display_sys.default_perspective
+            self.display_sys.update_perspectives(scratch_name, toggle, is_ds_def, viewer_data, swivels, tilts)
+            too_large, canvas = self.check_for_large_image_size(scratch_name)
             if too_large:
                 msg = (
                     "These perspective settings will produce large intermediate images "
@@ -976,19 +979,24 @@ class PerspectiveConfig(wx.Dialog):
                 res = show_message_dialog(msg, "Info", style="YES_NO")
                 if not res:
                     # Stop saving, remove temp
-                    self.persp_dict.pop("temp", None)
+                    self.persp_dict.pop(scratch_name, None)
+                    self.display_sys.use_perspective = previous_use_perspective
+                    self.display_sys.default_perspective = previous_default_perspective
                     return 0
                 else:
                     # Continue and write profile
-                    self.persp_dict.pop("temp", None)
+                    self.persp_dict.pop(scratch_name, None)
                     self.display_sys.update_perspectives(persp_name, toggle, is_ds_def, viewer_data, swivels, tilts)
             else:
                 # No large images, temp not needed
-                self.persp_dict.pop("temp", None)
+                self.persp_dict.pop(scratch_name, None)
                 self.display_sys.update_perspectives(persp_name, toggle, is_ds_def, viewer_data, swivels, tilts)
         else:
             self.display_sys.update_perspectives(persp_name, toggle, is_ds_def, viewer_data, swivels, tilts)
+        # Persist the perspective file first; save_system refreshes the active
+        # DisplaySystem, which must load both updated files as one generation.
         self.display_sys.save_perspectives()
+        self.display_sys.save_system()
 
         # update dialog profile list
         self.update_choiceprofile()
@@ -1003,9 +1011,9 @@ class PerspectiveConfig(wx.Dialog):
         persp_name = self.choice_profiles.GetString(selection)
         if self.display_sys.default_perspective == persp_name:
             self.display_sys.default_perspective = None
-            self.display_sys.save_system()
         self.persp_dict.pop(persp_name, None)
         self.display_sys.save_perspectives()
+        self.display_sys.save_system()
         # update dialog profile list
         self.update_choiceprofile()
         self.onCreateNewProfile(None)

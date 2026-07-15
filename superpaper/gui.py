@@ -2,6 +2,7 @@
 New wallpaper configuration GUI for Superpaper.
 """
 
+import copy
 import os
 import sys
 import tempfile
@@ -102,7 +103,9 @@ class WallpaperSettingsPanel(wx.Panel):
         # snapshot of the shared DisplaySystem as last saved/loaded; the system
         # Save/Revert enable only when the live DisplaySystem differs from it.
         self._system_clean = None
-        self.display_sys = wpproc.DisplaySystem()
+        # This is staged dialog state. Do not publish it until Apply/Save; live
+        # field edits must not alter the display system used by background jobs.
+        self.display_sys = wpproc.DisplaySystem(update_globals=False)
         # self.wpprev_pnl = WallpaperPreviewPanel(self.frame, self.display_sys)
         self.wpprev_pnl = WallpaperPreviewPanel(self, self.display_sys)
         self.sizer_top_half.Add(self.wpprev_pnl, 1, wx.CENTER | wx.EXPAND, 5)
@@ -1381,8 +1384,7 @@ class WallpaperSettingsPanel(wx.Panel):
             # display settings — bezels, sizes, positions — are reflected. This
             # deliberately does NOT reload from disk (refresh_display_data), which
             # lets the user test system tweaks via Apply before committing them.
-            wpproc.G_ACTIVE_DISPLAYSYSTEM = self.display_sys
-            thrd = change_wallpaper_job(preview_profile, force=True)
+            thrd = change_wallpaper_job(preview_profile, force=True, display_system=copy.deepcopy(self.display_sys))
             # Pump the event loop while rendering so the GUI stays responsive.
             while thrd is not None and thrd.is_alive():
                 wx.YieldIfNeeded()
