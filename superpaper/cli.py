@@ -10,11 +10,7 @@ import superpaper.sp_paths as sp_paths
 import superpaper.wallpaper_processing as wpproc
 from superpaper.data import CLIProfileData
 from superpaper.tray import tray_loop
-from superpaper.wallpaper_processing import (
-    change_wallpaper_job,
-    get_display_data,
-    refresh_display_data,
-)
+from superpaper.wallpaper_processing import change_wallpaper_job, refresh_display_data
 
 
 def cli_logic():
@@ -125,8 +121,10 @@ wallpaper with '-s' or '--setimages', or a profile \
 to start Superpaper with using '-p' or '--profile'. \
 Exiting.""")
             sys.exit()
+        display_data_loaded = False
         if args.perspective:
             refresh_display_data()
+            display_data_loaded = True
             if args.perspective not in wpproc.G_ACTIVE_DISPLAYSYSTEM.perspective_dict:
                 sp_logging.G_LOGGER.error(
                     f"Exception: Valid perspective profile names are: {list(wpproc.G_ACTIVE_DISPLAYSYSTEM.perspective_dict.keys())}."
@@ -162,8 +160,8 @@ custom command in quotes. Exiting."
                 sys.exit()
             wpproc.G_SET_COMMAND_STRING = args.command[0]
 
-        get_display_data()
-        refresh_display_data()
+        if not display_data_loaded:
+            refresh_display_data()
         profile = CLIProfileData(args.setimages, args.advanced, args.perspective, spangrp, args.offsets)
         job_thread = change_wallpaper_job(profile, force=True)
         if job_thread is not None:

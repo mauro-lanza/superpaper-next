@@ -14,6 +14,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 import traceback
 from operator import itemgetter
 from threading import Lock, Thread, Timer
@@ -75,11 +76,20 @@ DISPLAY_OFFSET_ARRAY = []
 G_ACTIVE_DISPLAYSYSTEM: DisplaySystem = None  # pyright: ignore[reportAssignmentType]  # ty:ignore[invalid-assignment]
 G_ACTIVE_PROFILE = None
 G_WALLPAPER_CHANGE_LOCK = Lock()
+G_WALLPAPER_CHANGE_PENDING = Lock()
 G_SUPPORTED_IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".bmp", ".gif", ".tiff", ".webp")
 G_SET_COMMAND_STRING: str = ""
 
 # global to take care that failure message is not shown more than once at launch
 USER_TOLD_OF_PHYS_FAIL = False
+
+
+class DisplayDetectionError(RuntimeError):
+    """Raised when monitor enumeration cannot produce a usable display list."""
+
+    def __init__(self, attempts):
+        super().__init__(f"Unable to detect any displays after {attempts} attempts.")
+        self.attempts = attempts
 
 
 class RepeatedTimer:
@@ -268,8 +278,12 @@ class DisplaySystem:
     in advanced mode.
     """
 
-    def __init__(self):
-        self.disp_list = get_display_data()
+    def __init__(self, *, max_attempts=3, retry_delay=0.25, update_globals=True):
+        self.disp_list = get_display_data(
+            max_attempts=max_attempts,
+            retry_delay=retry_delay,
+            update_globals=False,
+        )
         self.compute_ppinorm_resolutions()
 
         # Data
@@ -294,6 +308,8 @@ class DisplaySystem:
                     )
                     show_message_dialog(msg)
                     USER_TOLD_OF_PHYS_FAIL = True
+        if update_globals:
+            publish_display_system(self)
 
     def __eq__(self, other):
         # return bool(tuple(self.disp_list) == tuple(other.disp_list))
@@ -682,8 +698,6 @@ class DisplaySystem:
             self.default_perspective = persp_name
         elif not is_ds_def and self.default_perspective == persp_name:
             self.default_perspective = None
-        self.save_system()
-
         if persp_name is not None:
             if persp_name not in self.perspective_dict:
                 self.perspective_dict[persp_name] = {}
@@ -691,7 +705,7 @@ class DisplaySystem:
             self.perspective_dict[persp_name]["viewer_pos"] = viewer_pos
             self.perspective_dict[persp_name]["swivels"] = swivels
             self.perspective_dict[persp_name]["tilts"] = tilts
-        # trigger save afterwards (not here)
+        # Persistence is triggered by the dialog after temporary validation.
 
     def save_perspectives(self):
         """Save perspective data dict to file."""
@@ -804,7 +818,28 @@ def extract_global_vars(disp_list):
     return [res_arr, off_arr]
 
 
-def get_display_data():
+def update_display_globals(display_list):
+    """Publish legacy display globals while the wallpaper state is locked."""
+    resolution_array, display_offset_array = extract_global_vars(display_list)
+    global NUM_DISPLAYS, RESOLUTION_ARRAY, DISPLAY_OFFSET_ARRAY
+    with G_WALLPAPER_CHANGE_LOCK:
+        NUM_DISPLAYS = len(display_list)
+        RESOLUTION_ARRAY = resolution_array
+        DISPLAY_OFFSET_ARRAY = display_offset_array
+
+
+def publish_display_system(display_system):
+    """Publish an active display system and its legacy arrays as one locked generation."""
+    resolution_array, display_offset_array = extract_global_vars(display_system.disp_list)
+    global G_ACTIVE_DISPLAYSYSTEM, NUM_DISPLAYS, RESOLUTION_ARRAY, DISPLAY_OFFSET_ARRAY
+    with G_WALLPAPER_CHANGE_LOCK:
+        NUM_DISPLAYS = len(display_system.disp_list)
+        RESOLUTION_ARRAY = resolution_array
+        DISPLAY_OFFSET_ARRAY = display_offset_array
+        G_ACTIVE_DISPLAYSYSTEM = display_system
+
+
+def get_display_data(*, max_attempts=3, retry_delay=0.25, update_globals=False):
     """
     Updates global display variables: number of displays, resolutions and offsets.
 
@@ -812,14 +847,31 @@ def get_display_data():
     so that they are always non-negative.
     """
     # https://github.com/rr-/screeninfo
-    global NUM_DISPLAYS, RESOLUTION_ARRAY, DISPLAY_OFFSET_ARRAY
-    RESOLUTION_ARRAY = []
-    DISPLAY_OFFSET_ARRAY = []
-    monitors = get_monitors()
-    while not monitors:
-        monitors = get_monitors()
-        sp_logging.G_LOGGER.info("Had to re-query for display data.")
-    NUM_DISPLAYS = len(monitors)
+    if max_attempts < 1:
+        message = "max_attempts must be at least 1"
+        raise ValueError(message)
+    if retry_delay < 0:
+        message = "retry_delay cannot be negative"
+        raise ValueError(message)
+
+    monitors = None
+    last_error = None
+    for attempt in range(1, max_attempts + 1):
+        try:
+            monitors = get_monitors()
+        except Exception as error:
+            last_error = error
+            sp_logging.G_LOGGER.warning("Display detection attempt %d/%d failed: %s", attempt, max_attempts, error)
+        if monitors:
+            break
+        if attempt < max_attempts:
+            sp_logging.G_LOGGER.info("Display detection returned no displays; retrying.")
+            time.sleep(retry_delay)
+    else:
+        error = DisplayDetectionError(max_attempts)
+        if last_error is not None:
+            raise error from last_error
+        raise error
 
     display_list = []
     for monitor in monitors:
@@ -832,24 +884,28 @@ def get_display_data():
             disp.translate_offset((leftmost_offset, topmost_offset))
     # sort display list by digital offsets
     display_list.sort(key=lambda x: x.digital_offset)
-    # extract global variables for legacy compatibility
-    RESOLUTION_ARRAY, DISPLAY_OFFSET_ARRAY = extract_global_vars(display_list)
+    resolution_array, display_offset_array = extract_global_vars(display_list)
+
+    if update_globals:
+        update_display_globals(display_list)
 
     if sp_logging.DEBUG:
         sp_logging.G_LOGGER.info(
             "get_display_data output: NUM_DISPLAYS = %s, RES_ARR = %s, OFF_ARR = %s",
-            NUM_DISPLAYS,
-            RESOLUTION_ARRAY,
-            DISPLAY_OFFSET_ARRAY,
+            len(display_list),
+            resolution_array,
+            display_offset_array,
         )
         for disp in display_list:
             sp_logging.G_LOGGER.info(str(disp))
     return display_list
 
 
-def refresh_display_data():
-    global G_ACTIVE_DISPLAYSYSTEM
-    G_ACTIVE_DISPLAYSYSTEM = DisplaySystem()
+def refresh_display_data(*, max_attempts=3, retry_delay=0.25):
+    """Build and atomically publish a complete display-system generation."""
+    candidate = DisplaySystem(max_attempts=max_attempts, retry_delay=retry_delay, update_globals=False)
+    publish_display_system(candidate)
+    return candidate
 
 
 def compute_canvas(res_array, offset_array):
@@ -1482,6 +1538,7 @@ def set_wallpaper_linux(outputfile, force=False):
                 formatted_command.append(term.format(image=outputfile))
             sp_logging.G_LOGGER.info("Formatted custom command is: '%s'", formatted_command)
             subprocess.run(formatted_command, env=host_spawn_env())
+        return
     if desk_env:
         if desk_env in [
             "gnome",
@@ -1544,19 +1601,16 @@ def set_wallpaper_linux(outputfile, force=False):
         elif "i3" in desk_env or desk_env == "/usr/share/xsessions/bspwm":
             subprocess.run(["feh", "--bg-scale", "--no-xinerama", outputfile], env=host_spawn_env())
         else:
-            if set_command == "":
-                message = "Your DE could not be detected to set the wallpaper. \
+            message = "Your DE could not be detected to set the wallpaper. \
 You need to set the 'set_command' option in your \
 settings file superpaper/general_settings. Exiting."
-                sp_logging.G_LOGGER.info(message)
-                show_message_dialog(message, "Error")
-                sys.exit(1)
-            else:
-                subprocess.run(set_command.format(image=outputfile), shell=True, env=host_spawn_env())
+            sp_logging.G_LOGGER.info(message)
+            show_message_dialog(message, "Error")
+            sys.exit(1)
     else:
         if running_kde():
             kdeplasma_actions(outputfile, force=force, profile_name=G_ACTIVE_PROFILE)
-        elif set_command == "":
+        else:
             sp_logging.G_LOGGER.info(
                 "DESKTOP_SESSION variable is empty, \
 attempting to use feh to set the wallpaper."
@@ -2206,32 +2260,71 @@ def xfce_actions(outputfile):
         remove_old_temp_files(outputfile)
 
 
-def change_wallpaper_job(profile, force=False, advance=False):
+def _change_wallpaper(profile, force, advance, display_system=None):
+    """Resolve a selection and render it using already-locked display state."""
+    global G_ACTIVE_DISPLAYSYSTEM, NUM_DISPLAYS, RESOLUTION_ARRAY, DISPLAY_OFFSET_ARRAY
+    previous_display_system = G_ACTIVE_DISPLAYSYSTEM
+    previous_num_displays = NUM_DISPLAYS
+    previous_resolutions = RESOLUTION_ARRAY
+    previous_offsets = DISPLAY_OFFSET_ARRAY
+    if display_system is not None:
+        G_ACTIVE_DISPLAYSYSTEM = display_system
+        NUM_DISPLAYS = len(display_system.disp_list)
+        RESOLUTION_ARRAY, DISPLAY_OFFSET_ARRAY = extract_global_vars(display_system.disp_list)
+    try:
+        if (advance or not profile.has_valid_selection()) and not profile.advance_wallpaper():
+            sp_logging.G_LOGGER.error("Wallpaper change skipped: profile '%s' has no complete selection.", profile.name)
+            return
+        if profile.spanmode.startswith("single") and profile.ppimode is False:
+            span_single_image_simple(profile, force)
+        elif (profile.spanmode.startswith("single") and profile.ppimode is True) or profile.spanmode.startswith(
+            "advanced"
+        ):
+            span_single_image_advanced(profile, force)
+        elif profile.spanmode.startswith("multi"):
+            set_multi_image_wallpaper(profile, force)
+        else:
+            sp_logging.G_LOGGER.info("Unkown profile spanmode: %s", profile.spanmode)
+    finally:
+        G_ACTIVE_DISPLAYSYSTEM = previous_display_system
+        NUM_DISPLAYS = previous_num_displays
+        RESOLUTION_ARRAY = previous_resolutions
+        DISPLAY_OFFSET_ARRAY = previous_offsets
+
+
+def change_wallpaper_job(profile, force=False, advance=False, display_system=None, skip_if_busy=False):
     """Centralized wallpaper method that calls setter algorithm based on input prof settings.
     When force, skip the profile name check.
     When advance, cycle to the next image before rendering (slideshow / manual next).
     Otherwise the current persistent selection is rendered unchanged; if none has
     been established yet, the first image is picked once and saved as the selection.
     """
-    with G_WALLPAPER_CHANGE_LOCK:
-        if (advance or not profile.has_valid_selection()) and not profile.advance_wallpaper():
-            sp_logging.G_LOGGER.error("Wallpaper change skipped: profile '%s' has no complete selection.", profile.name)
+    if not (
+        profile.spanmode.startswith("single")
+        or profile.spanmode.startswith("advanced")
+        or profile.spanmode.startswith("multi")
+    ):
+        sp_logging.G_LOGGER.info("Unkown profile spanmode: %s", profile.spanmode)
+        return None
+    gate_acquired = False
+    if skip_if_busy:
+        gate_acquired = G_WALLPAPER_CHANGE_PENDING.acquire(blocking=False)
+        if not gate_acquired:
+            sp_logging.G_LOGGER.info("Wallpaper change skipped because another change is pending.")
             return None
-        if profile.spanmode.startswith("single") and profile.ppimode is False:
-            thrd = Thread(target=span_single_image_simple, args=(profile, force), daemon=True)
-            thrd.start()
-        elif (profile.spanmode.startswith("single") and profile.ppimode is True) or profile.spanmode.startswith(
-            "advanced"
-        ):
-            thrd = Thread(target=span_single_image_advanced, args=(profile, force), daemon=True)
-            thrd.start()
-        elif profile.spanmode.startswith("multi"):
-            thrd = Thread(target=set_multi_image_wallpaper, args=(profile, force), daemon=True)
-            thrd.start()
-        else:
-            sp_logging.G_LOGGER.info("Unkown profile spanmode: %s", profile.spanmode)
-            return None
-        return thrd
+
+    def run_change():
+        if not gate_acquired:
+            G_WALLPAPER_CHANGE_PENDING.acquire()
+        try:
+            with G_WALLPAPER_CHANGE_LOCK:
+                _change_wallpaper(profile, force, advance, display_system)
+        finally:
+            G_WALLPAPER_CHANGE_PENDING.release()
+
+    thrd = Thread(target=run_change, daemon=True)
+    thrd.start()
+    return thrd
 
 
 def run_profile_job(profile, startup=False):
@@ -2261,7 +2354,13 @@ def run_profile_job(profile, startup=False):
         #     sp_logging.G_LOGGER.info("Running wallpaper slideshow.")
         if not startup:
             thrd = change_wallpaper_job(profile)
-        repeating_timer = RepeatedTimer(profile.delay_list[0], change_wallpaper_job, profile, advance=True)
+        repeating_timer = RepeatedTimer(
+            profile.delay_list[0],
+            change_wallpaper_job,
+            profile,
+            advance=True,
+            skip_if_busy=True,
+        )
     return (repeating_timer, thrd)
 
 
@@ -2273,43 +2372,52 @@ def quick_profile_job(profile):
     out actions quickly at startup or at user request, set the old
     temp image of the requested profile as the wallpaper.
     """
-    with G_WALLPAPER_CHANGE_LOCK:
-        # Look for old temp image:
-        files = [
-            i
-            for i in os.listdir(TEMP_PATH)
-            if os.path.isfile(os.path.join(TEMP_PATH, i)) and (i.startswith((profile.name + "-a", profile.name + "-b")))
-        ]
-        if sp_logging.DEBUG:
-            sp_logging.G_LOGGER.info("quickswitch file lookup: %s", files)
-        if files:
-            image_pieces = [os.path.join(TEMP_PATH, i) for i in files if "-crop-" in i]
-            if use_image_pieces() and image_pieces:
-                image_pieces.sort()
-                if sp_logging.DEBUG:
-                    sp_logging.G_LOGGER.info("Use wallpaper crop pieces: %s", image_pieces)
-                thrd = Thread(target=set_wallpaper_piecewise, args=(image_pieces,), daemon=True)
-                thrd.start()
-            elif IS_WINDOWS:
-                # Skip quick switch on Windows if not using perspective corrections.
-                if profile.spanmode == "advanced" and G_ACTIVE_DISPLAYSYSTEM.use_perspective:
-                    if (
-                        profile.perspective == "default" and G_ACTIVE_DISPLAYSYSTEM.default_perspective is not None
-                    ) or profile.perspective not in ["default", "disabled"]:
-                        thrd = Thread(
-                            target=set_wallpaper,
-                            args=(os.path.join(TEMP_PATH, files[0]),),
-                            daemon=True,
-                        )
-                        thrd.start()
-                else:
-                    pass
-            else:
-                thrd = Thread(target=set_wallpaper, args=(os.path.join(TEMP_PATH, files[0]),), daemon=True)
-                thrd.start()
-        else:
+
+    def locked_setter(setter, *args):
+        with G_WALLPAPER_CHANGE_PENDING, G_WALLPAPER_CHANGE_LOCK:
+            setter(*args)
+
+    # Look for old temp image. The setter worker takes the render lock, so the
+    # UI thread never blocks behind an in-progress render.
+    files = [
+        i
+        for i in os.listdir(TEMP_PATH)
+        if os.path.isfile(os.path.join(TEMP_PATH, i)) and (i.startswith((profile.name + "-a", profile.name + "-b")))
+    ]
+    if sp_logging.DEBUG:
+        sp_logging.G_LOGGER.info("quickswitch file lookup: %s", files)
+    if files:
+        image_pieces = [os.path.join(TEMP_PATH, i) for i in files if "-crop-" in i]
+        if use_image_pieces() and image_pieces:
+            image_pieces.sort()
             if sp_logging.DEBUG:
-                sp_logging.G_LOGGER.info("Old file for quickswitch was not found. %s", files)
+                sp_logging.G_LOGGER.info("Use wallpaper crop pieces: %s", image_pieces)
+            thrd = Thread(target=locked_setter, args=(set_wallpaper_piecewise, image_pieces), daemon=True)
+            thrd.start()
+        elif IS_WINDOWS:
+            # Skip quick switch on Windows if not using perspective corrections.
+            if profile.spanmode == "advanced" and G_ACTIVE_DISPLAYSYSTEM.use_perspective:
+                if (
+                    profile.perspective == "default" and G_ACTIVE_DISPLAYSYSTEM.default_perspective is not None
+                ) or profile.perspective not in ["default", "disabled"]:
+                    thrd = Thread(
+                        target=locked_setter,
+                        args=(set_wallpaper, os.path.join(TEMP_PATH, files[0])),
+                        daemon=True,
+                    )
+                    thrd.start()
+            else:
+                pass
+        else:
+            thrd = Thread(
+                target=locked_setter,
+                args=(set_wallpaper, os.path.join(TEMP_PATH, files[0])),
+                daemon=True,
+            )
+            thrd.start()
+    else:
+        if sp_logging.DEBUG:
+            sp_logging.G_LOGGER.info("Old file for quickswitch was not found. %s", files)
 
 
 def use_image_pieces():
