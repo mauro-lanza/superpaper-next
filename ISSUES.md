@@ -12,6 +12,8 @@ Issue #135's infinite retry is fixed. Persisted selections are also validated at
 
 Issue #138 is resolved by coordinated slideshow selection. Each batch maximizes distinct canonical files across monitors or span groups, while allowing duplicates only when the configured pools do not contain enough unique images.
 
+Display detection is now bounded and transactional: transient enumeration failures are retried without corrupting active display state, and slow renders no longer overlap or accumulate slideshow ticks. Explicit Linux custom commands also run once as authoritative overrides.
+
 ## Partial
 
 | Issue | Remaining work |
