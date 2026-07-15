@@ -3,7 +3,7 @@
 
 ## The easy portable way
 
-AppImage packages are available on the [releases page](https://github.com/hhannine/superpaper/releases). The AppImage will run once you make it executable.
+AppImage packages for this fork are available on the [releases page](https://github.com/mauro-lanza/superpaper-next/releases). The AppImage will run once you make it executable.
 
 
 ## The recommended way
@@ -26,12 +26,13 @@ Using `pipx` simplifies management of the virtual environment in which Superpape
 You may use a manually created venv.
 
 
-### Step 2: Install superpaper from PyPI
+### Step 2: Install Superpaper Next
 
-Superpaper is available from [PyPI](https://pypi.org/project/superpaper), and needs `Python 3.14+`.
-To install, run in a terminal:
+The upstream `superpaper` package on PyPI is still version 2.2.1 and does not
+contain this fork's changes. Install this fork directly from GitHub; it needs
+Python 3.14+:
 
 ```sh
-pipx install --system-site-packages superpaper
+pipx install --system-site-packages git+https://github.com/mauro-lanza/superpaper-next.git
 ```
 On some Linux setups, you might need to log out and in, or restart to get the menu/launcher entry to show up.

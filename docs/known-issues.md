@@ -1,21 +1,14 @@
-### Linux
-- Ubuntu (or Gnome in general?): Tray icon does not show up:
-  - One workaround for now is to use the Gnome extension `TopIcons plus`.
-- Ubuntu (others?): gsettings memory back-end issue:
-  - Solution: run superpaper with
-  ```
-  GIO_EXTRA_MODULES=/usr/lib/x86_64-linux-gnu/gio/modules/ superpaper
-  ```
-- Doesn't run on PopOS
-  - This is fixed in upcoming release.
-  - Solution before then: run with
-  ```
-  DESKTOP_SESSION=gnome superpaper
-  ```
+# Known Issues
 
-### Windows
-- :)
+The maintained issue inventory is in [`ISSUES.md`](../ISSUES.md). The most important current limitations are:
 
-### Mac OS X
-- It is not known whether this works at all. If you try it, tell me how it goes!
-- The library implementing global hotkeys does not support Mac OS X at this time unfortunately.
+- Display connection and disconnection are not detected automatically.
+- Perspective-corrected rendering does not yet include outer bezels.
+- The native Wayland tray has been verified on KDE Plasma, but not across GNOME configurations.
+- Deepin/DDE has no current tested wallpaper backend.
+- macOS support is source-only and still needs packaging and multi-display reliability work.
+- Windows build tooling needs validation on a Windows host.
+
+Python 3.14 is required for source installations after v2.3.2. Use the v2.3.2 AppImage when an older system Python must remain supported.
+
+The AppImage intentionally isolates GIO modules, GSettings schemas, and font configuration from the host. Do not apply older `GIO_EXTRA_MODULES` or `XDG_DATA_DIRS` workarounds to it; those can reintroduce the library mismatches that isolation prevents.
