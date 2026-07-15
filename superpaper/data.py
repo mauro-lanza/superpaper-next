@@ -510,17 +510,40 @@ class ProfileData:
         an explicit cycle (advance_wallpaper) moves to the next image, so the
         wallpaper never changes merely because the profile is rendered again.
         """
+        if self.has_valid_selection():
+            return list(self.selected or [])
         if self.selected:
-            return self.selected
+            self.selected = None
+            self._write_selected()
         return self.file_handler.next_wallpaper_files(peek=peek)
+
+    def selection_target_count(self):
+        """Return how many positional image choices this profile requires."""
+        if self.spanmode == "multi":
+            return wpproc.NUM_DISPLAYS
+        if self.spanmode == "advanced" and self.spangroups:
+            return len(self.spangroups)
+        return 1
+
+    def has_valid_selection(self):
+        """Check that the complete positional selection can still be rendered."""
+        return bool(
+            self.selected
+            and len(self.selected) == self.selection_target_count()
+            and all(
+                os.path.isfile(path) and path.lower().endswith(wpproc.G_SUPPORTED_IMAGE_EXTENSIONS)
+                for path in self.selected
+            )
+        )
 
     def advance_wallpaper(self):
         """Cycle to the next image(s) and make the result the current selection."""
         files = self.file_handler.next_wallpaper_files()
-        if files:
+        if len(files) == self.selection_target_count():
             self.selected = files
             self._write_selected()
-        return files
+            return list(files)
+        return []
 
     def set_selected_wallpaper(self, files, persist=True):
         """Pin the given file(s) as the current selection.
@@ -536,14 +559,15 @@ class ProfileData:
 
     def _write_selected(self):
         """Persist the current selection into the profile file."""
-        if not self.selected or not self.file:
+        if not self.file:
             return
         try:
             with open(self.file, encoding="utf-8") as prof_f:
                 lines = [ln for ln in prof_f if not ln.startswith("selected=")]
             if lines and not lines[-1].endswith("\n"):
                 lines[-1] += "\n"
-            lines.append("selected=" + ";".join(self.selected) + "\n")
+            if self.selected:
+                lines.append("selected=" + ";".join(self.selected) + "\n")
             with open(self.file, "w", encoding="utf-8") as prof_f:
                 prof_f.writelines(lines)
         except OSError as err:
@@ -604,6 +628,10 @@ Use absolute paths for best reliabilty."
             # would otherwise loop forever. After this many reinit attempts,
             # give up and return whatever valid files were gathered (issue #135).
             max_attempts = 20
+            # Reject an incomplete positional batch before consuming any of
+            # the other iterators.
+            if any(not iterable.files for iterable in self.iterators):
+                return []
             files = []
             for iterable in self.iterators:
                 if peek:
@@ -611,8 +639,9 @@ Use absolute paths for best reliabilty."
                 else:
                     next_image = iterable.__next__()
                 if next_image is None:
-                    # No images available for this monitor, skip it.
-                    continue
+                    # Selections are positional. Returning later monitors here
+                    # would shift them onto the wrong displays.
+                    return []
                 if os.path.isfile(next_image):
                     files.append(next_image)
                 else:
