@@ -10,17 +10,19 @@ __author__ = "Henri Hänninen"
 
 import sys
 
-from superpaper.cli import cli_logic
 from superpaper.spanmode import set_spanmode
-from superpaper.tray import tray_loop
 
 
 def main():
     """Runs tray applet if no command line arguments are passed, CLI parsing otherwise."""
     set_spanmode()
     if len(sys.argv) <= 1:
+        from superpaper.tray import tray_loop
+
         tray_loop()
     else:
+        from superpaper.cli import cli_logic
+
         cli_logic()
 
 

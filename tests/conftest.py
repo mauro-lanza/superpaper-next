@@ -1,4 +1,5 @@
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -34,3 +35,47 @@ def write_profile(path: Path, *, spanmode="single", sources=(), selected=()):
         lines.append("selected=" + ";".join(map(str, selected)))
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return path
+
+
+class ManualTimer:
+    def __init__(self, clock, interval, callback):
+        self.clock = clock
+        self.interval = interval
+        self.callback = callback
+        self.daemon = False
+        self.started = False
+        self.cancelled = False
+
+    def start(self):
+        self.started = True
+
+    def cancel(self):
+        self.cancelled = True
+
+    def fire(self, *, even_if_cancelled=False):
+        if not self.cancelled or even_if_cancelled:
+            self.callback()
+
+
+class ManualClock:
+    def __init__(self):
+        self.timers = []
+
+    def timer(self, interval, callback):
+        timer = ManualTimer(self, interval, callback)
+        self.timers.append(timer)
+        return timer
+
+
+@pytest.fixture
+def manual_clock(monkeypatch):
+    from superpaper import wallpaper_processing as wpproc
+
+    clock = ManualClock()
+    monkeypatch.setattr(wpproc, "Timer", clock.timer)
+    return clock
+
+
+@pytest.fixture
+def slideshow_profile():
+    return SimpleNamespace(name="slides", slideshow=True, delay_list=[12.5])
