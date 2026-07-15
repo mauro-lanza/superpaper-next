@@ -15,12 +15,17 @@
 #   isolates the app from the host so version skew can never break it again.
 FROM ubuntu:22.04
 
+ARG PYTHON_VERSION=3.14.6
+ARG PYTHON_SHA256=143b1dddefaec3bd2e21e3b839b34a2b7fb9842272883c576420d605e9f30c63
+ARG WXPYTHON_SHA256=a67a6976f61e1af4eacfe5ffdb3dbae4b9c4422111144689848a139c6515497e
+
 ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         # Python + build toolchain (some deps like dbus-python build from sdist)
-        python3 python3-venv python3-dev python3-pip \
-        build-essential pkg-config \
+        build-essential pkg-config xz-utils \
+        libssl-dev zlib1g-dev libbz2-dev libreadline-dev libsqlite3-dev \
+        libncursesw5-dev libffi-dev liblzma-dev libzstd-dev libmpdec-dev uuid-dev \
         libglib2.0-dev libdbus-1-dev libdbus-glib-1-dev \
         wget ca-certificates file desktop-file-utils \
         # GTK 3 stack + the auxiliary data/tools we stage into the AppDir
@@ -42,6 +47,24 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libxcb1 libxcb-render0 libxcb-shm0 \
         libx11-6 libxext6 libxtst6 libxi6 libsm6 libice6 libxrandr2 libxinerama1 \
     && rm -rf /var/lib/apt/lists/*
+
+# Jammy's system Python is 3.10. Build the project's supported Python floor
+# against Jammy so the finished binary retains its glibc 2.35 compatibility.
+RUN wget -q -O /tmp/python.tar.xz \
+        "https://www.python.org/ftp/python/${PYTHON_VERSION}/Python-${PYTHON_VERSION}.tar.xz" \
+    && echo "${PYTHON_SHA256}  /tmp/python.tar.xz" | sha256sum -c - \
+    && mkdir /tmp/python-src \
+    && tar -xJf /tmp/python.tar.xz -C /tmp/python-src --strip-components=1 \
+    && cd /tmp/python-src \
+    && LDFLAGS="-Wl,-rpath,/opt/python/${PYTHON_VERSION}/lib" \
+       ./configure --prefix="/opt/python/${PYTHON_VERSION}" \
+         --enable-shared --disable-test-modules --with-ensurepip=install \
+    && make -j"$(nproc)" \
+    && make install \
+    && rm -rf /tmp/python-src /tmp/python.tar.xz
+
+ENV PATH="/opt/python/${PYTHON_VERSION}/bin:${PATH}"
+ENV LD_LIBRARY_PATH="/opt/python/${PYTHON_VERSION}/lib"
 
 # --- Python build environment (cached image layer) -------------------------
 # Install the heavy Python build/runtime dependencies into a venv at IMAGE
@@ -67,13 +90,15 @@ COPY pyproject.toml README.md LICENSE /tmp/superpaper-deps/
 COPY superpaper/__init__.py superpaper/__version__.py /tmp/superpaper-deps/superpaper/
 COPY superpaper/resources /tmp/superpaper-deps/superpaper/resources
 COPY superpaper/profiles /tmp/superpaper-deps/superpaper/profiles
-RUN python3 -m venv "${VIRTUAL_ENV}" \
+RUN python3.14 -m venv "${VIRTUAL_ENV}" \
     && pip install --no-cache-dir --upgrade pip wheel \
-    && pip install --no-cache-dir \
-        -f "https://extras.wxpython.org/wxPython4/extras/linux/gtk3/ubuntu-22.04" \
-        "wxPython==4.2.5" \
+    && wget -q -O /tmp/wxPython-4.2.5-cp314-cp314-linux_x86_64.whl \
+        "https://extras.wxpython.org/wxPython4/extras/linux/gtk3/ubuntu-22.04/wxpython-4.2.5-cp314-cp314-linux_x86_64.whl" \
+    && echo "${WXPYTHON_SHA256}  /tmp/wxPython-4.2.5-cp314-cp314-linux_x86_64.whl" | sha256sum -c - \
+    && pip install --no-cache-dir --no-deps /tmp/wxPython-4.2.5-cp314-cp314-linux_x86_64.whl \
     && pip install --no-cache-dir "/tmp/superpaper-deps[linux]" \
-    && pip install --no-cache-dir pyinstaller
+    && pip install --no-cache-dir "pyinstaller==6.21.0" \
+    && rm /tmp/wxPython-4.2.5-cp314-cp314-linux_x86_64.whl
 
 # appimagetool packages the finished AppDir into a single-file AppImage.
 # APPIMAGE_EXTRACT_AND_RUN lets it run without FUSE inside the container.
