@@ -7,6 +7,8 @@ This fork focuses on KDE Plasma 6 support and improving the wallpaper selection 
 ![](https://raw.githubusercontent.com/hhannine/Superpaper/branch-resources/readme-banner.jpg)
 ![](https://raw.githubusercontent.com/hhannine/Superpaper/branch-resources/gui-screenshot.png)
 
+## Whatever the hell i was doing to make this fork of a fork work on windows
+Grubhub copilot
 
 ## What's new in this fork
 
