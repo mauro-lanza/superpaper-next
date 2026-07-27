@@ -45,3 +45,16 @@ python release-tooling/make-windows-release.py
 
 This builds the PyInstaller one-file exe, assembles the portable zip, and
 compiles the Inno Setup installer (`iscc` must be on `PATH`).
+
+Note: Windows packaging requires the GUI dependencies to be installed in the
+build environment. Install them before building with:
+
+```sh
+python -m pip install -e .[gui]
+```
+
+or at minimum:
+
+```sh
+python -m pip install wxPython>=4.2.5
+```

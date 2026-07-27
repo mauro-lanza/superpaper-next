@@ -8,7 +8,7 @@ from superpaper.sp_platform import IS_LINUX, IS_WINDOWS
 
 # Set path to binary / script
 if getattr(sys, "frozen", False):
-    PATH = os.path.dirname(os.path.dirname(os.path.realpath(sys.executable)))
+    PATH = os.path.dirname(os.path.realpath(sys.executable))
 else:
     PATH = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 
@@ -122,8 +122,7 @@ def test_git_path(path):
 # Derivative paths
 CONFIG_PATH = setup_config_path()  # Save profiles and settings here.
 TEMP_PATH = setup_cache_path()  # Save adjusted wallpapers in here.
-if not os.path.isdir(TEMP_PATH):
-    os.mkdir(TEMP_PATH)
+os.makedirs(TEMP_PATH, exist_ok=True)
 PROFILES_PATH = os.path.join(CONFIG_PATH, "profiles")
 if not os.path.isdir(PROFILES_PATH):
     # Profiles folder didn't exist, so create it and copy example
