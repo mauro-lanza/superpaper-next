@@ -76,7 +76,6 @@ def test_module_unknown_argument_is_argparse_error(tmp_path):
     assert "unrecognized arguments" in result.stderr
 
 
-@pytest.mark.xfail(strict=True, reason="Known CLI bug: missing profiles currently exit with status 0")
 def test_module_missing_profile_exits_nonzero(tmp_path):
     result = run_module_cli(tmp_path, "--profile", "missing")
 

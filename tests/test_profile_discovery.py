@@ -124,15 +124,18 @@ def test_delete_uses_loaded_identity_and_rejects_replacement(profile_modules, mo
     data, _ = profile_modules
     profiles = prepare(data, monkeypatch, tmp_path)
     path = profiles / "Work.profile"
-    path.write_bytes(profile_bytes("Work"))
+    original = profile_bytes("Work", b"hotkey=control+x\n")
+    replacement = profile_bytes("Work", b"hotkey=control+y\n")
+    path.write_bytes(original)
+    original_stat = path.stat()
     loaded = data.open_profile(ProfileId("Work"))
-    path.unlink()
-    path.write_bytes(profile_bytes("Work", b"hotkey=control+x\n"))
+    path.write_bytes(replacement)
+    os.utime(path, ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns))
 
     with pytest.raises(data.ManagedPathError):
         data.delete_managed_profile(loaded)
 
-    assert path.exists()
+    assert path.read_bytes() == replacement
 
 
 def test_delete_rejects_symlink_replacement_without_touching_target(profile_modules, monkeypatch, tmp_path):

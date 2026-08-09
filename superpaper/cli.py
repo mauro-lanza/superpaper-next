@@ -126,7 +126,7 @@ a file: (%s). Exiting.",
 (%s)",
                     [entry.profile_id.value for entry in inventory.entries],
                 )
-                sys.exit()
+                sys.exit(1)
         else:
             sp_logging.G_LOGGER.info("""Exception: You must pass either image(s) to set as \
 wallpaper with '-s' or '--setimages', or a profile \

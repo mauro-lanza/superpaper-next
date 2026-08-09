@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import datetime
 import errno
+import hashlib
 import logging
 import math
 import os
@@ -62,10 +63,19 @@ class ProfileDiscoveryEntry:
 class FileIdentity:
     device: int
     inode: int
+    size: int
+    modified_ns: int
+    digest: bytes
 
     @classmethod
-    def from_stat(cls, result: os.stat_result) -> FileIdentity:
-        return cls(result.st_dev, result.st_ino)
+    def from_content(cls, result: os.stat_result, content: bytes) -> FileIdentity:
+        return cls(
+            result.st_dev,
+            result.st_ino,
+            result.st_size,
+            result.st_mtime_ns,
+            hashlib.sha256(content).digest(),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -218,17 +228,26 @@ def _read_managed_profile(path: Path, expected_identity: FileIdentity | None = N
         if not stat.S_ISREG(opened.st_mode):
             message = f"Managed profile paths must be regular files: {path}"
             raise ManagedPathError(message)
-        identity = FileIdentity.from_stat(opened)
-        if before is not None and FileIdentity.from_stat(before) != identity:
+        if before is not None and (before.st_dev, before.st_ino) != (opened.st_dev, opened.st_ino):
             message = f"Managed profile changed while being opened: {path}"
-            raise ManagedPathError(message)
-        if expected_identity is not None and identity != expected_identity:
-            message = f"Managed profile changed since it was loaded: {path}"
             raise ManagedPathError(message)
         chunks = []
         while chunk := os.read(fd, 64 * 1024):
             chunks.append(chunk)
-        return b"".join(chunks), identity
+        content = b"".join(chunks)
+        after = os.fstat(fd)
+        if (opened.st_size, opened.st_mtime_ns, opened.st_ctime_ns) != (
+            after.st_size,
+            after.st_mtime_ns,
+            after.st_ctime_ns,
+        ):
+            message = f"Managed profile changed while being read: {path}"
+            raise ManagedPathError(message)
+        identity = FileIdentity.from_content(after, content)
+        if expected_identity is not None and identity != expected_identity:
+            message = f"Managed profile changed since it was loaded: {path}"
+            raise ManagedPathError(message)
+        return content, identity
     finally:
         os.close(fd)
 
@@ -236,37 +255,66 @@ def _read_managed_profile(path: Path, expected_identity: FileIdentity | None = N
 def _regular_destination_identity(path: Path, *, allow_missing: bool) -> FileIdentity | None:
     """Return a regular destination's identity, rejecting symlinks and special files."""
     try:
-        destination = path.lstat()
+        _content, identity = _read_managed_profile(path)
     except FileNotFoundError:
         if allow_missing:
             return None
         message = f"Managed file does not exist: {path}"
         raise ManagedPathError(message) from None
-    if stat.S_ISLNK(destination.st_mode):
+    except OSError as error:
+        if error.errno != errno.ELOOP:
+            raise
         message = f"Managed file paths cannot be symbolic links: {path}"
-        raise ManagedPathError(message)
-    if not stat.S_ISREG(destination.st_mode):
-        message = f"Managed file paths must be regular files: {path}"
-        raise ManagedPathError(message)
-    return FileIdentity.from_stat(destination)
+        raise ManagedPathError(message) from error
+    return identity
 
 
 def _regular_destination_identity_at(directory_fd: int, path: Path, *, allow_missing: bool) -> FileIdentity | None:
     """Inspect a direct leaf relative to an already trusted directory."""
+    flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0)
     try:
-        destination = os.stat(path.name, dir_fd=directory_fd, follow_symlinks=False)
+        fd = os.open(path.name, flags, dir_fd=directory_fd)
     except FileNotFoundError:
         if allow_missing:
             return None
         message = f"Managed file does not exist: {path}"
         raise ManagedPathError(message) from None
-    if stat.S_ISLNK(destination.st_mode):
+    except OSError as error:
+        if error.errno != errno.ELOOP:
+            raise
         message = f"Managed file paths cannot be symbolic links: {path}"
-        raise ManagedPathError(message)
-    if not stat.S_ISREG(destination.st_mode):
+        raise ManagedPathError(message) from error
+    try:
+        return _identity_from_fd(fd, path)
+    finally:
+        os.close(fd)
+
+
+def _identity_from_fd(fd: int, path: Path, content: bytes | None = None) -> FileIdentity:
+    """Capture metadata and bytes from an already-open regular file."""
+    opened = os.fstat(fd)
+    if not stat.S_ISREG(opened.st_mode):
         message = f"Managed file paths must be regular files: {path}"
         raise ManagedPathError(message)
-    return FileIdentity.from_stat(destination)
+    if content is None:
+        chunks = []
+        original_offset = os.lseek(fd, 0, os.SEEK_CUR)
+        try:
+            os.lseek(fd, 0, os.SEEK_SET)
+            while chunk := os.read(fd, 64 * 1024):
+                chunks.append(chunk)
+        finally:
+            os.lseek(fd, original_offset, os.SEEK_SET)
+        content = b"".join(chunks)
+    after = os.fstat(fd)
+    if (opened.st_size, opened.st_mtime_ns, opened.st_ctime_ns) != (
+        after.st_size,
+        after.st_mtime_ns,
+        after.st_ctime_ns,
+    ):
+        message = f"Managed file changed while being read: {path}"
+        raise ManagedPathError(message)
+    return FileIdentity.from_content(after, content)
 
 
 _HAS_DIR_FD_MUTATIONS = all(
@@ -284,7 +332,7 @@ def _open_verified_managed_at(directory_fd: int, path: Path, expected_identity: 
     fd = os.open(path.name, flags, dir_fd=directory_fd)
     try:
         opened = os.fstat(fd)
-        if stat.S_ISREG(opened.st_mode) and FileIdentity.from_stat(opened) == expected_identity:
+        if stat.S_ISREG(opened.st_mode) and _identity_from_fd(fd, path) == expected_identity:
             return fd
     except Exception:
         os.close(fd)
@@ -345,7 +393,7 @@ def _atomic_write_regular(
             output.write(content)
             output.flush()
             os.fsync(output.fileno())
-            published_identity = FileIdentity.from_stat(os.fstat(output.fileno()))
+            published_identity = _identity_from_fd(output.fileno(), temporary, content)
 
         if may_replace and original_identity is not None:
             verified_fd = (
@@ -354,7 +402,7 @@ def _atomic_write_regular(
                 else _open_verified_managed(path, original_identity)
             )
             try:
-                if identity_reader(allow_missing=True) != FileIdentity.from_stat(os.fstat(verified_fd)):
+                if identity_reader(allow_missing=True) != _identity_from_fd(verified_fd, path):
                     message = f"Managed file changed while being saved: {path}"
                     raise FileExistsError(message)
                 if directory_fd is not None:
@@ -577,7 +625,7 @@ def _remove_managed_path(path: Path, expected_identity: FileIdentity) -> None:
             if directory_fd is not None
             else _regular_destination_identity(path, allow_missing=False)
         )
-        if current_identity != FileIdentity.from_stat(os.fstat(fd)):
+        if current_identity != _identity_from_fd(fd, path):
             message = f"Managed profile changed while being deleted: {path}"
             raise ManagedPathError(message)
         if directory_fd is not None:
@@ -595,7 +643,7 @@ def _open_verified_managed(path: Path, expected_identity: FileIdentity) -> int:
     fd = os.open(path, flags)
     try:
         opened = os.fstat(fd)
-        if stat.S_ISREG(opened.st_mode) and FileIdentity.from_stat(opened) == expected_identity:
+        if stat.S_ISREG(opened.st_mode) and _identity_from_fd(fd, path) == expected_identity:
             return fd
     except Exception:
         os.close(fd)
