@@ -4,6 +4,8 @@ from unittest.mock import Mock, call
 
 import pytest
 
+from superpaper.profile_id import ProfileId
+
 
 class RecordingTimer:
     def __init__(self, events, running=True):
@@ -30,7 +32,7 @@ def controller(tray, active_profile=None, timer=None):
 
 
 def profile(name):
-    return SimpleNamespace(name=name, slideshow=True, delay_list=[30])
+    return SimpleNamespace(name=name, profile_id=ProfileId(name), slideshow=True, delay_list=[30])
 
 
 def test_start_profile_activates_and_persists(headless_tray_module, monkeypatch):
@@ -47,7 +49,7 @@ def test_start_profile_activates_and_persists(headless_tray_module, monkeypatch)
     assert icon.active_profile is active
     assert icon.repeating_timer is replacement_timer
     assert tray.wpproc.G_ACTIVE_PROFILE == "active"
-    assert writes == ["active"]
+    assert writes == [ProfileId("active")]
 
 
 def test_switch_profile_stops_old_timer_first(headless_tray_module, monkeypatch):
@@ -66,7 +68,7 @@ def test_switch_profile_stops_old_timer_first(headless_tray_module, monkeypatch)
     icon = controller(tray, old_profile, old_timer)
 
     assert icon.start_profile(None, new_profile) == "worker"
-    assert events == ["stop", ("run", "new"), ("write", "new")]
+    assert events == ["stop", ("run", "new"), ("write", ProfileId("new"))]
 
 
 def test_selecting_active_profile_means_next(headless_tray_module):
@@ -148,6 +150,44 @@ def test_rearm_replaces_running_timer_without_rendering(headless_tray_module, mo
     assert icon.repeating_timer is new_timer
     assert tray.wpproc.G_ACTIVE_PROFILE == "renamed"
     assert run.call_args == call(active, startup=True)
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [ProfileId("Work"), "Work", "/outside/profiles/Work.profile", r"C:\outside\Work.profile"],
+)
+def test_startup_profile_compatibility_extracts_identity_only(headless_tray_module, raw):
+    assert headless_tray_module._startup_profile_id(raw) == ProfileId("Work")
+
+
+def test_startup_outside_path_cannot_select_by_path(headless_tray_module):
+    tray = headless_tray_module
+    managed = profile("Work")
+    icon = controller(tray)
+    icon.list_of_profiles = [managed]
+
+    startup_id = tray._startup_profile_id("/outside/not-the-managed-file/Work.profile")
+
+    assert icon.get_profile_by_id(startup_id) is managed
+    assert tray._startup_profile_id("/outside/Other.profile") == ProfileId("Other")
+    assert icon.get_profile_by_id(ProfileId("Other")) is None
+
+
+@pytest.mark.parametrize("timer_running", [True, False])
+def test_reload_clears_active_profile_missing_from_inventory(headless_tray_module, monkeypatch, timer_running):
+    tray = headless_tray_module
+    events = []
+    timer = RecordingTimer(events, running=timer_running)
+    icon = controller(tray, profile("removed"), timer)
+    tray.wpproc.G_ACTIVE_PROFILE = "removed"
+    monkeypatch.setattr(tray, "list_profiles", lambda: [profile("other")])
+
+    icon.reload_profiles(None)
+
+    assert icon.active_profile is None
+    assert icon.repeating_timer is None
+    assert tray.wpproc.G_ACTIVE_PROFILE is None
+    assert events == (["stop"] if timer_running else [])
 
 
 @pytest.mark.xfail(strict=True, reason="Known timer bug: rearming an active profile does not preserve pause state")
