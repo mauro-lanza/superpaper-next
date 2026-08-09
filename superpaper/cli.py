@@ -6,9 +6,9 @@ import os
 import sys
 
 import superpaper.sp_logging as sp_logging
-import superpaper.sp_paths as sp_paths
 import superpaper.wallpaper_processing as wpproc
-from superpaper.data import CLIProfileData
+from superpaper.data import CLIProfileData, discover_profile_inventory
+from superpaper.profile_id import ProfileId, ProfileIdError
 from superpaper.wallpaper_processing import change_wallpaper_job, refresh_display_data
 
 
@@ -102,10 +102,19 @@ a file: (%s). Exiting.",
                     )
                     sys.exit()
         elif args.profile and not args.setimages:
-            if os.path.isfile(os.path.join(sp_paths.PROFILES_PATH, args.profile + ".profile")):
+            try:
+                profile_id = ProfileId.parse(args.profile)
+            except ProfileIdError as error:
+                sp_logging.G_LOGGER.error("Invalid profile name: %s", error)
+                sys.exit()
+            refresh_display_data()
+            inventory = discover_profile_inventory()
+            entry = inventory.find(profile_id)
+            if entry is not None:
                 from superpaper.tray import tray_loop
 
-                tray_loop(profile=os.path.join(sp_paths.PROFILES_PATH, args.profile + ".profile"))
+                tray_loop(profile=profile_id)
+                return 0
             else:
                 sp_logging.G_LOGGER.error(
                     "Exception: No profile was found by the given name: \
@@ -115,9 +124,9 @@ a file: (%s). Exiting.",
                 sp_logging.G_LOGGER.error(
                     "Valid profile names are: \
 (%s)",
-                    sorted([os.path.splitext(fname)[0] for fname in os.listdir(sp_paths.PROFILES_PATH)]),
+                    [entry.profile_id.value for entry in inventory.entries],
                 )
-                sys.exit()
+                sys.exit(1)
         else:
             sp_logging.G_LOGGER.info("""Exception: You must pass either image(s) to set as \
 wallpaper with '-s' or '--setimages', or a profile \

@@ -5,6 +5,8 @@ from types import ModuleType, SimpleNamespace
 
 import pytest
 
+from tests.conftest import write_profile
+
 
 def cli_subprocess_env(tmp_path):
     home = tmp_path / "home"
@@ -43,9 +45,11 @@ def test_import_cli_does_not_load_tray_or_gui(tmp_path):
         [
             sys.executable,
             "-c",
-            "import sys; import superpaper.cli; assert 'superpaper.tray' not in sys.modules; "
-            "assert 'superpaper.gui' not in sys.modules; "
-            "assert 'superpaper.configuration_dialogs' not in sys.modules",
+            (
+                "import sys; import superpaper.cli; assert 'superpaper.tray' not in sys.modules; "
+                "assert 'superpaper.gui' not in sys.modules; "
+                "assert 'superpaper.configuration_dialogs' not in sys.modules"
+            ),
         ],
         check=False,
         capture_output=True,
@@ -72,7 +76,6 @@ def test_module_unknown_argument_is_argparse_error(tmp_path):
     assert "unrecognized arguments" in result.stderr
 
 
-@pytest.mark.xfail(strict=True, reason="Known CLI bug: missing profiles currently exit with status 0")
 def test_module_missing_profile_exits_nonzero(tmp_path):
     result = run_module_cli(tmp_path, "--profile", "missing")
 
@@ -202,24 +205,144 @@ def test_cli_help_exits_successfully(monkeypatch):
     assert error.value.code == 0
 
 
-@pytest.mark.xfail(strict=True, reason="Known CLI bug: profile launch falls through after the tray exits")
 def test_profile_launch_returns_after_tray_loop(monkeypatch, tmp_path):
     from superpaper import cli
 
     profiles = tmp_path / "profiles"
     profiles.mkdir()
-    profile_path = profiles / "saved.profile"
-    profile_path.touch()
+    profile_path = write_profile(profiles / "saved.profile")
+    profile_path.write_text(
+        profile_path.read_text(encoding="utf-8").replace("name=test", "name=saved"), encoding="utf-8"
+    )
     tray = ModuleType("superpaper.tray")
     tray_calls = []
     tray.tray_loop = lambda profile=None: tray_calls.append(profile)
     monkeypatch.setitem(sys.modules, "superpaper.tray", tray)
-    monkeypatch.setattr(cli.sp_paths, "PROFILES_PATH", str(profiles))
+    monkeypatch.setattr("superpaper.data.sp_paths.PROFILES_PATH", str(profiles))
+    monkeypatch.setattr(cli.wpproc, "NUM_DISPLAYS", 2)
+    monkeypatch.setattr(cli.wpproc, "RESOLUTION_ARRAY", [(1920, 1080), (1280, 1024)])
     monkeypatch.setattr(cli, "refresh_display_data", lambda: None)
     monkeypatch.setattr(sys, "argv", ["superpaper", "--profile", "saved"])
 
     assert cli.cli_logic() == 0
-    assert tray_calls == [str(profile_path)]
+    assert [profile_id.value for profile_id in tray_calls] == ["saved"]
+
+
+@pytest.mark.parametrize("profile_name", ["../saved", "/tmp/saved", r"folder\saved"])
+def test_profile_lookup_rejects_path_input(monkeypatch, tmp_path, profile_name):
+    from superpaper import cli
+
+    profiles = tmp_path / "profiles"
+    profiles.mkdir()
+    monkeypatch.setattr("superpaper.data.sp_paths.PROFILES_PATH", str(profiles))
+    monkeypatch.setattr(sys, "argv", ["superpaper", "--profile", profile_name])
+
+    with pytest.raises(SystemExit) as error:
+        cli.cli_logic()
+
+    assert error.value.code is None
+
+
+def test_invalid_profile_id_fails_before_inventory_or_display_data(monkeypatch, tmp_path):
+    from superpaper import cli
+
+    profiles = tmp_path / "profiles"
+    profiles.mkdir()
+    (profiles / "existing.profile").write_text("name=existing\n", encoding="utf-8")
+    monkeypatch.setattr("superpaper.data.sp_paths.PROFILES_PATH", str(profiles))
+    monkeypatch.setattr(cli.wpproc, "NUM_DISPLAYS", 0)
+    monkeypatch.setattr(cli.wpproc, "RESOLUTION_ARRAY", [])
+    monkeypatch.setattr(cli, "refresh_display_data", lambda: pytest.fail("display data was requested"))
+    monkeypatch.setattr(cli, "discover_profile_inventory", lambda: pytest.fail("inventory was constructed"))
+    monkeypatch.setattr(sys, "argv", ["superpaper", "--profile", "../invalid"])
+
+    with pytest.raises(SystemExit):
+        cli.cli_logic()
+
+
+def test_profile_lookup_accepts_valid_unicode(monkeypatch, tmp_path):
+    from superpaper import cli
+
+    profiles = tmp_path / "profiles"
+    profiles.mkdir()
+    profile_path = write_profile(profiles / "Työ.profile")
+    profile_path.write_text(profile_path.read_text(encoding="utf-8").replace("name=test", "name=Työ"), encoding="utf-8")
+    tray = ModuleType("superpaper.tray")
+    calls = []
+
+    def tray_loop(profile=None):
+        calls.append(profile)
+        raise SystemExit
+
+    tray.tray_loop = tray_loop
+    monkeypatch.setitem(sys.modules, "superpaper.tray", tray)
+    monkeypatch.setattr("superpaper.data.sp_paths.PROFILES_PATH", str(profiles))
+    monkeypatch.setattr(cli.wpproc, "NUM_DISPLAYS", 2)
+    monkeypatch.setattr(cli.wpproc, "RESOLUTION_ARRAY", [(1920, 1080), (1280, 1024)])
+    monkeypatch.setattr(cli, "refresh_display_data", lambda: None)
+    monkeypatch.setattr(sys, "argv", ["superpaper", "--profile", "Työ"])
+
+    with pytest.raises(SystemExit):
+        cli.cli_logic()
+    assert [profile_id.value for profile_id in calls] == ["Työ"]
+
+
+@pytest.mark.parametrize("failure", ["mismatch", "symlink", "collision"])
+def test_profile_lookup_rejects_undiscoverable_target(monkeypatch, tmp_path, failure):
+    from superpaper import cli
+
+    profiles = tmp_path / "profiles"
+    profiles.mkdir()
+    saved = profiles / "saved.profile"
+    if failure == "mismatch":
+        saved.write_text("name=other\n", encoding="utf-8")
+    elif failure == "symlink":
+        target = tmp_path / "target.profile"
+        target.write_text("name=saved\n", encoding="utf-8")
+        saved.symlink_to(target)
+    else:
+        saved.write_text("name=saved\n", encoding="utf-8")
+        (profiles / "Saved.profile").write_text("name=Saved\n", encoding="utf-8")
+    tray = ModuleType("superpaper.tray")
+    calls = []
+    tray.tray_loop = lambda profile=None: calls.append(profile)
+    monkeypatch.setitem(sys.modules, "superpaper.tray", tray)
+    monkeypatch.setattr("superpaper.data.sp_paths.PROFILES_PATH", str(profiles))
+    monkeypatch.setattr(cli.wpproc, "NUM_DISPLAYS", 2)
+    monkeypatch.setattr(cli.wpproc, "RESOLUTION_ARRAY", [(1920, 1080), (1280, 1024)])
+    monkeypatch.setattr(cli, "refresh_display_data", lambda: None)
+    monkeypatch.setattr(sys, "argv", ["superpaper", "--profile", "saved"])
+
+    with pytest.raises(SystemExit):
+        cli.cli_logic()
+
+    assert calls == []
+
+
+@pytest.mark.parametrize(
+    "setting",
+    ["delay=not-a-number", "ppi=0;0", "diagonal_inches=0;24", "zoom=", "align="],
+)
+def test_profile_lookup_rejects_malformed_content_before_tray(monkeypatch, tmp_path, setting):
+    from superpaper import cli
+
+    profiles = tmp_path / "profiles"
+    profiles.mkdir()
+    (profiles / "saved.profile").write_text(f"name=saved\n{setting}\n", encoding="utf-8")
+    tray = ModuleType("superpaper.tray")
+    calls = []
+    tray.tray_loop = lambda profile=None: calls.append(profile)
+    monkeypatch.setitem(sys.modules, "superpaper.tray", tray)
+    monkeypatch.setattr("superpaper.data.sp_paths.PROFILES_PATH", str(profiles))
+    monkeypatch.setattr(cli.wpproc, "NUM_DISPLAYS", 2)
+    monkeypatch.setattr(cli.wpproc, "RESOLUTION_ARRAY", [(1920, 1080), (1280, 1024)])
+    monkeypatch.setattr(cli, "refresh_display_data", lambda: None)
+    monkeypatch.setattr(sys, "argv", ["superpaper", "--profile", "saved"])
+
+    with pytest.raises(SystemExit):
+        cli.cli_logic()
+
+    assert calls == []
 
 
 @pytest.mark.xfail(strict=True, reason="Known CLI bug: validation failures currently exit with status 0")

@@ -24,13 +24,16 @@ from superpaper.configuration_dialogs import (
 from superpaper.data import (
     CLIProfileData,
     GeneralSettingsData,
-    ProfileData,
     TempProfileData,
+    delete_managed_profile,
+    managed_profile_for_selection,
     open_profile,
-    write_active_profile,
+    parse_profile_file,
+    save_managed_profile,
 )
 from superpaper.message_dialog import show_message_dialog
-from superpaper.sp_paths import PROFILES_PATH, RESOURCES_PATH, TRAY_ICON
+from superpaper.profile_id import ProfileId, ProfileIdError
+from superpaper.sp_paths import RESOURCES_PATH, TRAY_ICON
 from superpaper.wallpaper_processing import (
     change_wallpaper_job,
     resize_to_fill,
@@ -68,6 +71,9 @@ class WallpaperSettingsPanel(wx.Panel):
         wx.Panel.__init__(self, parent)
         self.frame = parent
         self.parent_tray_obj = parent_tray_obj
+        self.current_profile_id = None
+        self.expected_source_identity = None
+        self.loaded_profile = None
         self.sizer_main = wx.BoxSizer(wx.VERTICAL)
         self.sizer_top_half = wx.BoxSizer(wx.HORIZONTAL)  # wallpaper/monitor preview
         self.sizer_bottom_half = wx.BoxSizer(wx.VERTICAL)  # settings, buttons etc
@@ -595,6 +601,9 @@ class WallpaperSettingsPanel(wx.Panel):
     def populate_fields(self, profile):
         """Populates config dialog fields with data from a profile."""
         self._loading = True
+        self.current_profile_id = profile.profile_id
+        self.expected_source_identity = profile.source_identity
+        self.loaded_profile = profile
         self.tc_name.ChangeValue(profile.name)
 
         self.show_advanced_settings = False
@@ -1366,7 +1375,7 @@ class WallpaperSettingsPanel(wx.Panel):
         profile are left untouched. Use Save to persist the changes.
         """
         tmp_profile, _groups = self._collect_temp_profile(resolve_selection=True)
-        if not tmp_profile.test_save():
+        if not tmp_profile.test_save(managed=False):
             sp_logging.G_LOGGER.info("onApply: validation failed, nothing applied.")
             return
         busy = wx.BusyCursor()
@@ -1378,7 +1387,7 @@ class WallpaperSettingsPanel(wx.Panel):
         os.close(fd)
         try:
             tmp_profile.save(filename=temp_file)
-            preview_profile = ProfileData(temp_file)
+            preview_profile = parse_profile_file(temp_file)
             sp_logging.G_LOGGER.info("onApply preview (unsaved): %s", preview_profile.name)
             # Render with the dialog's live DisplaySystem so staged (unsaved)
             # display settings — bezels, sizes, positions — are reflected. This
@@ -1426,13 +1435,7 @@ class WallpaperSettingsPanel(wx.Panel):
         persistent wallpaper selection. Prefers the live tray instance so an
         updated selection is visible without a reload.
         """
-        sel = self.choice_profiles.GetSelection()
-        if sel == wx.NOT_FOUND:
-            return None
-        name = self.choice_profiles.GetString(sel)
-        if not name or name == "Create a new profile":
-            return None
-        return self.parent_tray_obj.get_profile_by_name(name) or open_profile(name)
+        return self.loaded_profile
 
     def _collect_temp_profile(self, resolve_selection=False):
         """Builds a TempProfileData from the current dialog fields.
@@ -1578,26 +1581,28 @@ class WallpaperSettingsPanel(wx.Panel):
         sp_logging.G_LOGGER.info(tmp_profile.paths_array)
 
         # test collected data and save if it is valid, otherwise pass
-        if tmp_profile.test_save():
-            old_profile = open_profile(tmp_profile.name)
-            old_profile_binding = None
-            if old_profile:
-                old_profile_binding = old_profile.hk_binding
-            saved_file = tmp_profile.save()
-            # If the profile was renamed, remove the file stored under the old
-            # name so a rename moves the profile instead of leaving a duplicate.
-            sel = self.choice_profiles.GetSelection()
-            old_name = self.choice_profiles.GetString(sel) if sel != wx.NOT_FOUND else ""
-            if old_name and old_name not in ("Create a new profile", tmp_profile.name):
-                old_fname = os.path.join(PROFILES_PATH, old_name + ".profile")
-                if os.path.isfile(old_fname):
-                    os.remove(old_fname)
-                # If the renamed profile was the running/active one, update the
-                # persisted "running profile" pointer so a restart resumes under
-                # the new name instead of failing to find the removed old file.
-                active = self.parent_tray_obj.active_profile
-                if active is not None and active.name == old_name:
-                    write_active_profile(tmp_profile.name)
+        current_profile_id = self.current_profile_id
+        if tmp_profile.test_save(current_profile_id=current_profile_id):
+            old_profile_binding = self.loaded_profile.hk_binding if self.loaded_profile is not None else None
+            active = self.parent_tray_obj.active_profile
+            update_active = (
+                current_profile_id is not None
+                and active is not None
+                and active.profile_id == current_profile_id
+                and tmp_profile.name != current_profile_id.value
+            )
+            try:
+                saved_file = save_managed_profile(
+                    tmp_profile,
+                    current_profile_id=current_profile_id,
+                    expected_source_identity=self.expected_source_identity,
+                    update_active=update_active,
+                )
+            except OSError as error:
+                sp_logging.G_LOGGER.warning("Could not save profile: %s", error)
+                show_message_dialog(str(error), "Error")
+                del busy
+                return None
             self.parent_tray_obj.reload_profiles(event)
             # The just-saved profile becomes the active one so reopening the
             # dialog shows the saved state (span mode, etc.) instead of a stale
@@ -1612,12 +1617,19 @@ class WallpaperSettingsPanel(wx.Panel):
             self.choice_profiles.SetSelection(self.choice_profiles.FindString(tmp_profile.name))
             # Update wallpaper preview from selected profile. The profile's
             # persistent selection (if any) is what next_wallpaper_files returns.
-            saved_profile = ProfileData(saved_file)
+            saved_profile = open_profile(ProfileId.parse(tmp_profile.name))
+            if saved_profile is None:
+                show_message_dialog("The saved profile could not be reloaded.", "Error")
+                del busy
+                return None
+            self.current_profile_id = saved_profile.profile_id
+            self.expected_source_identity = saved_profile.source_identity
+            self.loaded_profile = saved_profile
             if self.show_advanced_settings:
                 display_data = self.display_sys.get_disp_list(True)
             else:
                 display_data = self.display_sys.get_disp_list(False)
-            preview_files = self.parent_tray_obj.get_profile_by_name(saved_profile.name).next_wallpaper_files(peek=True)
+            preview_files = saved_profile.next_wallpaper_files(peek=True)
             self.wpprev_pnl.preview_wallpaper(
                 preview_files,
                 self.show_advanced_settings,
@@ -1638,6 +1650,9 @@ class WallpaperSettingsPanel(wx.Panel):
     def onCreateNewProfile(self, event):
         """Empties the wallpaper profile config fields."""
         self._loading = True
+        self.current_profile_id = None
+        self.expected_source_identity = None
+        self.loaded_profile = None
         self.choice_profiles.SetSelection(self.choice_profiles.FindString("Create a new profile"))
 
         self.tc_name.ChangeValue("")
@@ -1672,27 +1687,38 @@ class WallpaperSettingsPanel(wx.Panel):
 
     def onDeleteProfile(self, event):
         """Deletes the currently selected profile after getting confirmation."""
-        profname = self.tc_name.GetLineText(0)
-        fname = os.path.join(PROFILES_PATH, profname + ".profile")
-        file_exists = os.path.isfile(fname)
-        if not file_exists:
+        selection = self.choice_profiles.GetSelection()
+        selected_name = self.choice_profiles.GetString(selection) if selection != wx.NOT_FOUND else ""
+        try:
+            selected_id = ProfileId.parse(selected_name)
+        except ProfileIdError:
+            selected_id = None
+        profile = managed_profile_for_selection(self.list_of_profiles, selected_id) if selected_id is not None else None
+        if profile is None:
             msg = "Selected profile is not saved."
             show_message_dialog(msg, "Error")
             return
         # Open confirmation dialog
         dlg = wx.MessageDialog(
             None,
-            f"Do you want to delete profile: {profname}?",
+            f"Do you want to delete profile: {selected_name}?",
             "Confirm Delete",
             wx.YES_NO | wx.ICON_QUESTION,
         )
         result = dlg.ShowModal()
-        if result == wx.ID_YES and file_exists:
-            os.remove(fname)
+        if result == wx.ID_YES:
+            try:
+                delete_managed_profile(profile)
+            except (OSError, ValueError) as error:
+                show_message_dialog(str(error), "Error")
+                return
             # Refresh tray state so the deleted profile disappears from the
             # dropdown and is no longer active; otherwise it lingers in memory
             # and a later save can recreate it.
-            if self.parent_tray_obj.active_profile is not None and self.parent_tray_obj.active_profile.name == profname:
+            if (
+                self.parent_tray_obj.active_profile is not None
+                and self.parent_tray_obj.active_profile.profile_id == profile.profile_id
+            ):
                 self.parent_tray_obj.active_profile = None
             self.parent_tray_obj.reload_profiles(event)
             self.update_choiceprofile()
