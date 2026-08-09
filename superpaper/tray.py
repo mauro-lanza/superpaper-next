@@ -19,6 +19,7 @@ from superpaper.data import (
 )
 from superpaper.gui import ConfigFrame
 from superpaper.message_dialog import show_message_dialog
+from superpaper.profile_id import ProfileId, ProfileIdError
 from superpaper.sni_tray import build_tray, sni_supported
 from superpaper.sp_paths import TRAY_ICON
 from superpaper.sp_platform import IS_MACOS, IS_WINDOWS, host_spawn_env
@@ -39,10 +40,21 @@ except ImportError as import_e:
 
 # Constants
 TRAY_TOOLTIP = "Superpaper"
-STARTUP_PROFILE = None
+STARTUP_PROFILE: ProfileId | None = None
 
 
-def tray_loop(profile=None):
+def _startup_profile_id(profile: ProfileId | str | os.PathLike[str]) -> ProfileId:
+    """Extract a managed identity from a legacy path or a direct profile ID."""
+    if isinstance(profile, ProfileId):
+        return profile
+    value = os.fspath(profile)
+    leaf = value.replace("\\", "/").rsplit("/", 1)[-1]
+    if leaf.endswith(".profile"):
+        leaf = leaf.removesuffix(".profile")
+    return ProfileId.parse(leaf)
+
+
+def tray_loop(profile: ProfileId | str | os.PathLike[str] | None = None):
     """Runs the tray applet."""
     global STARTUP_PROFILE
     if not os.path.isdir(sp_paths.PROFILES_PATH):
@@ -54,7 +66,10 @@ def tray_loop(profile=None):
         # to a clean application name before the wx.App is created.
         sys.argv[0] = "Superpaper"
         if profile:
-            STARTUP_PROFILE = profile
+            try:
+                STARTUP_PROFILE = _startup_profile_id(profile)
+            except ProfileIdError:
+                STARTUP_PROFILE = None
             sp_logging.G_LOGGER.info(f"Startup profile: {profile}")
         if sys.platform == "linux":
             # Route incoming D-Bus calls (native SNI tray) through wxGTK's own
@@ -122,12 +137,11 @@ class TaskBarIcon(wx.adv.TaskBarIcon):
         # Should now return an object if a previous profile was written or
         # None if no previous data was found
         if STARTUP_PROFILE:
-            # STARTUP_PROFILE may be a bare profile name or a full path to a
-            # .profile file (the CLI passes a path). Normalize to the profile
-            # name so it matches the entries in list_of_profiles; otherwise the
-            # lookup silently fails and no profile is applied (issue #140).
-            startup_name = os.path.splitext(os.path.basename(STARTUP_PROFILE))[0]
-            self.active_profile = self.get_profile_by_name(startup_name)
+            try:
+                startup_id = _startup_profile_id(STARTUP_PROFILE)
+            except ProfileIdError:
+                startup_id = None
+            self.active_profile = self.get_profile_by_id(startup_id) if startup_id is not None else None
             if self.active_profile is None:
                 sp_logging.G_LOGGER.error(
                     "Startup profile '%s' could not be matched to a saved profile.",
@@ -136,7 +150,7 @@ class TaskBarIcon(wx.adv.TaskBarIcon):
         else:
             prev_active_prof = read_active_profile()
             if prev_active_prof:
-                self.active_profile = self.get_profile_by_name(prev_active_prof.name)
+                self.active_profile = self.get_profile_by_id(prev_active_prof.profile_id)
             else:
                 self.active_profile = None
         if self.active_profile:
@@ -347,8 +361,14 @@ Check that it is formatted properly and valid keys."
                     show_message_dialog(msg, "Error")
 
     def get_profile_by_name(self, name):
+        try:
+            return self.get_profile_by_id(ProfileId.parse(name))
+        except ProfileIdError:
+            return None
+
+    def get_profile_by_id(self, profile_id):
         for prof in self.list_of_profiles:
-            if prof.name == name:
+            if prof.profile_id == profile_id:
                 return prof
         return None
 
@@ -439,13 +459,20 @@ Check that it is formatted properly and valid keys."
         """Reloads profiles from disk."""
         self.list_of_profiles = list_profiles()
         # Re-point active_profile at the freshly loaded instance (matched by
-        # name) so consumers that read tray.active_profile -- e.g. the settings
+        # identity) so consumers that read tray.active_profile -- e.g. the settings
         # dialog when it reopens -- see the saved state instead of a stale
         # detached object (was causing edits like span mode to appear reverted).
         if self.active_profile is not None:
-            refreshed = self.get_profile_by_name(self.active_profile.name)
+            refreshed = self.get_profile_by_id(self.active_profile.profile_id)
             if refreshed is not None:
                 self.active_profile = refreshed
+            else:
+                with self.job_lock:
+                    if self.repeating_timer is not None and self.repeating_timer.is_running:
+                        self.repeating_timer.stop()
+                    self.repeating_timer = None
+                    self.active_profile = None
+                    wpproc.G_ACTIVE_PROFILE = None
 
     def rearm_active_timer(self):
         """Re-arm the slideshow timer for the active profile.
@@ -522,7 +549,7 @@ Check that it is formatted properly and valid keys."
                     if sp_logging.DEBUG:
                         sp_logging.G_LOGGER.info("Starting timed profile job with profile: %s", profile.name)
                     self.repeating_timer, thrd = run_profile_job(profile)
-                    write_active_profile(profile.name)
+                    write_active_profile(profile.profile_id)
                     # if sp_logging.DEBUG:
                     #     sp_logging.G_LOGGER.info("Wrote active profile: %s",
                     #                              profile.name)
@@ -536,7 +563,7 @@ Check that it is formatted properly and valid keys."
                 if sp_logging.DEBUG:
                     sp_logging.G_LOGGER.info("Starting timed profile job with profile: %s", profile.name)
                 self.repeating_timer, thrd = run_profile_job(profile)
-                write_active_profile(profile.name)
+                write_active_profile(profile.profile_id)
                 # if sp_logging.DEBUG:
                 #     sp_logging.G_LOGGER.info("Wrote active profile: %s",
                 #                              profile.name)

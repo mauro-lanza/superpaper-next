@@ -4,88 +4,727 @@ Data storage classes for Superpaper.
 Written by Henri Hänninen.
 """
 
+from __future__ import annotations
+
 import datetime
+import errno
 import logging
 import math
 import os
 import random
+import stat
 import sys
+import tempfile
+from contextlib import ExitStack
+from dataclasses import dataclass
+from enum import Enum, auto
+from io import StringIO
+from pathlib import Path
 
 import superpaper.sp_logging as sp_logging
 import superpaper.sp_paths as sp_paths
 import superpaper.wallpaper_processing as wpproc
 from superpaper.message_dialog import show_message_dialog
-from superpaper.sp_paths import CONFIG_PATH, PROFILES_PATH, TEMP_PATH
+from superpaper.profile_id import ManagedPathError, ProfileId, ProfileIdError, profile_path
+from superpaper.sp_paths import CONFIG_PATH, TEMP_PATH
 from superpaper.sp_platform import IS_MACOS
 
 
-# Profile and data handling, back-end interface.
-def list_profiles():
-    """Lists profiles as initiated objects from the sp_paths.PROFILES_PATH."""
-    files = sorted(os.listdir(sp_paths.PROFILES_PATH))
-    profile_list = []
-    for pfle in files:
+class ProfileDiagnosticKind(Enum):
+    INVALID_FILENAME = auto()
+    NOT_REGULAR_FILE = auto()
+    SYMLINK = auto()
+    PORTABLE_COLLISION = auto()
+    NAME_MISMATCH = auto()
+    MALFORMED_CONTENT = auto()
+    IO_ERROR = auto()
+
+
+@dataclass(frozen=True, slots=True)
+class ProfileDiscoveryDiagnostic:
+    path: Path
+    kind: ProfileDiagnosticKind
+    detail: str
+    profile_id: ProfileId | None = None
+    identity: FileIdentity | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ProfileDiscoveryEntry:
+    profile_id: ProfileId
+    path: Path
+    text: str
+    identity: FileIdentity
+    profile: ProfileData
+
+
+@dataclass(frozen=True, slots=True)
+class FileIdentity:
+    device: int
+    inode: int
+
+    @classmethod
+    def from_stat(cls, result: os.stat_result) -> FileIdentity:
+        return cls(result.st_dev, result.st_ino)
+
+
+@dataclass(frozen=True, slots=True)
+class ProfileInventory:
+    entries: tuple[ProfileDiscoveryEntry, ...]
+    diagnostics: tuple[ProfileDiscoveryDiagnostic, ...]
+
+    def find(self, profile_id: ProfileId) -> ProfileDiscoveryEntry | None:
+        return next((entry for entry in self.entries if entry.profile_id == profile_id), None)
+
+
+class ProfileTransactionError(OSError):
+    """A managed save failed, possibly with bounded rollback failures."""
+
+    def __init__(self, stage: str, error: OSError | ValueError, rollback_errors: tuple[OSError, ...] = ()):
+        message = f"Profile save failed during {stage}: {error}"
+        if rollback_errors:
+            message += "; rollback also failed: " + "; ".join(map(str, rollback_errors))
+        super().__init__(getattr(error, "errno", None), message)
+        self.stage = stage
+        self.original_error = error
+        self.rollback_errors = rollback_errors
+
+
+_DESTINATION_WRITE = "destination write"
+_SOURCE_VERIFICATION = "source verification"
+_SOURCE_REMOVAL = "source removal"
+_ACTIVE_POINTER_UPDATE = "active pointer update"
+
+
+def discover_profile_inventory() -> ProfileInventory:
+    """Inspect managed profile leaves and capture each file from one descriptor.
+
+    ``O_NOFOLLOW`` closes the leaf-symlink race on platforms that provide it.
+    The portable fallback compares ``lstat`` and ``fstat`` identities, which
+    still has a residual race if an attacker replaces a leaf and reuses its
+    inode between those calls.
+    """
+    root = Path(sp_paths.PROFILES_PATH).resolve()
+    candidates: list[ProfileDiscoveryEntry] = []
+    diagnostics: list[ProfileDiscoveryDiagnostic] = []
+    try:
+        leaves = sorted(root.iterdir(), key=lambda path: path.name)
+    except OSError as error:
+        diagnostics.append(ProfileDiscoveryDiagnostic(root, ProfileDiagnosticKind.NOT_REGULAR_FILE, str(error)))
+        return ProfileInventory((), tuple(diagnostics))
+
+    identified: list[tuple[Path, ProfileId]] = []
+    by_collision: dict[str, list[tuple[Path, ProfileId]]] = {}
+    for path in leaves:
+        if path.suffix != ".profile":
+            continue
         try:
-            if pfle.endswith(".profile"):
-                profile_list.append(ProfileData(os.path.join(sp_paths.PROFILES_PATH, pfle)))
-        except Exception as exep:  # TODO implement proper error catching for ProfileData init
-            msg = (
-                f"There was an error when loading profile '{pfle}'.\n"
-                "Would you like to delete it? Choosing 'No' will just ignore the profile."
+            profile_id = ProfileId.parse(path.stem)
+        except ProfileIdError as error:
+            diagnostics.append(ProfileDiscoveryDiagnostic(path, ProfileDiagnosticKind.INVALID_FILENAME, str(error)))
+            continue
+        identified.append((path, profile_id))
+        by_collision.setdefault(profile_id.collision_key, []).append((path, profile_id))
+
+    colliding = {key for key, collision_entries in by_collision.items() if len(collision_entries) > 1}
+    for path, profile_id in identified:
+        if profile_id.collision_key in colliding:
+            diagnostics.append(
+                ProfileDiscoveryDiagnostic(
+                    path,
+                    ProfileDiagnosticKind.PORTABLE_COLLISION,
+                    "Profile filename has a portable collision.",
+                    profile_id,
+                )
             )
-            sp_logging.G_LOGGER.info(msg)
-            sp_logging.G_LOGGER.info(exep)
-            res = show_message_dialog(msg, "Error", style="YES_NO")
-            if res:
-                # remove pfle
-                sp_logging.G_LOGGER.info("Removing profile: %s", os.path.join(sp_paths.PROFILES_PATH, pfle))
-                os.remove(os.path.join(sp_paths.PROFILES_PATH, pfle))
-                continue
+
+    for path, profile_id in identified:
+        try:
+            content, identity = _read_managed_profile(path)
+        except ManagedPathError as error:
+            kind = ProfileDiagnosticKind.SYMLINK if path.is_symlink() else ProfileDiagnosticKind.NOT_REGULAR_FILE
+            diagnostics.append(ProfileDiscoveryDiagnostic(path, kind, str(error), profile_id))
+            continue
+        except OSError as error:
+            kind = ProfileDiagnosticKind.SYMLINK if error.errno == errno.ELOOP else ProfileDiagnosticKind.IO_ERROR
+            diagnostics.append(ProfileDiscoveryDiagnostic(path, kind, str(error), profile_id))
+            continue
+        try:
+            text = content.decode("utf-8")
+        except UnicodeError as error:
+            diagnostics.append(
+                ProfileDiscoveryDiagnostic(
+                    path, ProfileDiagnosticKind.MALFORMED_CONTENT, str(error), profile_id, identity
+                )
+            )
+            continue
+        try:
+            _validate_profile_syntax(text)
+        except (IndexError, ValueError) as error:
+            diagnostics.append(
+                ProfileDiscoveryDiagnostic(
+                    path, ProfileDiagnosticKind.MALFORMED_CONTENT, str(error), profile_id, identity
+                )
+            )
+            continue
+        if profile_id.collision_key in colliding:
+            continue
+        lines = text.splitlines()
+        names = [line[5:] for line in lines if line.startswith("name=")]
+        if names != [profile_id.value]:
+            diagnostics.append(
+                ProfileDiscoveryDiagnostic(
+                    path,
+                    ProfileDiagnosticKind.NAME_MISMATCH,
+                    "Profile must contain exactly one name matching its filename stem.",
+                    profile_id,
+                    identity,
+                )
+            )
+            continue
+        try:
+            profile = ProfileData(
+                os.fspath(path),
+                profile_id,
+                profile_text=text,
+                source_identity=identity,
+            )
+        except Exception as error:
+            diagnostics.append(
+                ProfileDiscoveryDiagnostic(
+                    path, ProfileDiagnosticKind.MALFORMED_CONTENT, str(error), profile_id, identity
+                )
+            )
+            continue
+        candidates.append(ProfileDiscoveryEntry(profile_id, path, text, identity, profile))
+
+    return ProfileInventory(tuple(candidates), tuple(diagnostics))
+
+
+def _read_managed_profile(path: Path, expected_identity: FileIdentity | None = None) -> tuple[bytes, FileIdentity]:
+    flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0)
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    before = None
+    if nofollow:
+        flags |= nofollow
+    else:
+        before = path.lstat()
+        if stat.S_ISLNK(before.st_mode):
+            message = f"Managed profile paths cannot be symbolic links: {path}"
+            raise ManagedPathError(message)
+    fd = os.open(path, flags)
+    try:
+        opened = os.fstat(fd)
+        if not stat.S_ISREG(opened.st_mode):
+            message = f"Managed profile paths must be regular files: {path}"
+            raise ManagedPathError(message)
+        identity = FileIdentity.from_stat(opened)
+        if before is not None and FileIdentity.from_stat(before) != identity:
+            message = f"Managed profile changed while being opened: {path}"
+            raise ManagedPathError(message)
+        if expected_identity is not None and identity != expected_identity:
+            message = f"Managed profile changed since it was loaded: {path}"
+            raise ManagedPathError(message)
+        chunks = []
+        while chunk := os.read(fd, 64 * 1024):
+            chunks.append(chunk)
+        return b"".join(chunks), identity
+    finally:
+        os.close(fd)
+
+
+def _regular_destination_identity(path: Path, *, allow_missing: bool) -> FileIdentity | None:
+    """Return a regular destination's identity, rejecting symlinks and special files."""
+    try:
+        destination = path.lstat()
+    except FileNotFoundError:
+        if allow_missing:
+            return None
+        message = f"Managed file does not exist: {path}"
+        raise ManagedPathError(message) from None
+    if stat.S_ISLNK(destination.st_mode):
+        message = f"Managed file paths cannot be symbolic links: {path}"
+        raise ManagedPathError(message)
+    if not stat.S_ISREG(destination.st_mode):
+        message = f"Managed file paths must be regular files: {path}"
+        raise ManagedPathError(message)
+    return FileIdentity.from_stat(destination)
+
+
+def _regular_destination_identity_at(directory_fd: int, path: Path, *, allow_missing: bool) -> FileIdentity | None:
+    """Inspect a direct leaf relative to an already trusted directory."""
+    try:
+        destination = os.stat(path.name, dir_fd=directory_fd, follow_symlinks=False)
+    except FileNotFoundError:
+        if allow_missing:
+            return None
+        message = f"Managed file does not exist: {path}"
+        raise ManagedPathError(message) from None
+    if stat.S_ISLNK(destination.st_mode):
+        message = f"Managed file paths cannot be symbolic links: {path}"
+        raise ManagedPathError(message)
+    if not stat.S_ISREG(destination.st_mode):
+        message = f"Managed file paths must be regular files: {path}"
+        raise ManagedPathError(message)
+    return FileIdentity.from_stat(destination)
+
+
+_HAS_DIR_FD_MUTATIONS = all(
+    operation in os.supports_dir_fd for operation in (os.open, os.stat, os.unlink, os.link, os.rename)
+)
+
+
+def _open_managed_directory(path: Path) -> int:
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    return os.open(path, flags)
+
+
+def _open_verified_managed_at(directory_fd: int, path: Path, expected_identity: FileIdentity) -> int:
+    flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(path.name, flags, dir_fd=directory_fd)
+    try:
+        opened = os.fstat(fd)
+        if stat.S_ISREG(opened.st_mode) and FileIdentity.from_stat(opened) == expected_identity:
+            return fd
+    except Exception:
+        os.close(fd)
+        raise
+    os.close(fd)
+    message = f"Managed profile changed since it was loaded: {path}"
+    raise ManagedPathError(message)
+
+
+def _atomic_write_regular(
+    path: Path,
+    content: bytes,
+    *,
+    may_replace: bool,
+    expected_identity: FileIdentity | None = None,
+) -> FileIdentity:
+    """Atomically write a direct leaf without following the destination.
+
+    Exclusive hard-link publication makes creates fail if the destination
+    appears concurrently. Replacing an existing file remains subject to the
+    unavoidable portable race between the final identity check and rename;
+    directory-relative operations constrain that race to a trusted root and
+    all observed destinations are rejected unless regular and non-symlinks.
+    """
+    directory_fd = _open_managed_directory(path.parent) if _HAS_DIR_FD_MUTATIONS else None
+
+    def identity_reader(*, allow_missing: bool) -> FileIdentity | None:
+        if directory_fd is not None:
+            return _regular_destination_identity_at(directory_fd, path, allow_missing=allow_missing)
+        return _regular_destination_identity(path, allow_missing=allow_missing)
+
+    try:
+        original_identity = identity_reader(allow_missing=True)
+    except Exception:
+        if directory_fd is not None:
+            os.close(directory_fd)
+        raise
+    if original_identity is not None and not may_replace:
+        if directory_fd is not None:
+            os.close(directory_fd)
+        message = f"Managed file already exists: {path}"
+        raise FileExistsError(message)
+    if expected_identity is not None and original_identity != expected_identity:
+        if directory_fd is not None:
+            os.close(directory_fd)
+        message = f"Managed file changed since it was loaded: {path}"
+        raise ManagedPathError(message)
+
+    try:
+        fd, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    except Exception:
+        if directory_fd is not None:
+            os.close(directory_fd)
+        raise
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(fd, "wb") as output:
+            output.write(content)
+            output.flush()
+            os.fsync(output.fileno())
+            published_identity = FileIdentity.from_stat(os.fstat(output.fileno()))
+
+        if may_replace and original_identity is not None:
+            verified_fd = (
+                _open_verified_managed_at(directory_fd, path, original_identity)
+                if directory_fd is not None
+                else _open_verified_managed(path, original_identity)
+            )
+            try:
+                if identity_reader(allow_missing=True) != FileIdentity.from_stat(os.fstat(verified_fd)):
+                    message = f"Managed file changed while being saved: {path}"
+                    raise FileExistsError(message)
+                if directory_fd is not None:
+                    os.replace(
+                        temporary.name,
+                        path.name,
+                        src_dir_fd=directory_fd,
+                        dst_dir_fd=directory_fd,
+                    )
+                else:
+                    os.replace(temporary, path)
+            finally:
+                os.close(verified_fd)
+        else:
+            # Publishing with a hard link is an atomic create-if-absent. Unlike
+            # os.replace, it cannot overwrite a destination created by a race.
+            if directory_fd is not None:
+                if identity_reader(allow_missing=True) is not None:
+                    message = f"Managed file already exists: {path}"
+                    raise FileExistsError(message)
+                os.link(
+                    temporary.name,
+                    path.name,
+                    src_dir_fd=directory_fd,
+                    dst_dir_fd=directory_fd,
+                    follow_symlinks=False,
+                )
+                os.unlink(temporary.name, dir_fd=directory_fd)
             else:
-                continue
+                os.link(temporary, path)
+                temporary.unlink()
+        if identity_reader(allow_missing=False) != published_identity:
+            message = f"Managed file changed immediately after publication: {path}"
+            raise FileExistsError(message)
+        return published_identity
+    finally:
+        try:
+            if directory_fd is not None:
+                os.unlink(temporary.name, dir_fd=directory_fd)
+            else:
+                temporary.unlink()
+        except FileNotFoundError:
+            pass
+        if directory_fd is not None:
+            os.close(directory_fd)
+
+
+def _validate_profile_syntax(text: str) -> None:
+    """Check conversions that can make the legacy parser fail."""
+    for line in text.splitlines():
+        key, separator, value = line.partition("=")
+        if key in {
+            "name",
+            "spanmode",
+            "spangroups",
+            "slideshow",
+            "sortmode",
+            "offsets",
+            "hotkey",
+            "perspective",
+            "selected",
+            "zoom",
+            "align",
+        } or key.startswith("display"):
+            if not separator:
+                message = f"Missing '=' after profile setting '{key}'."
+                raise ValueError(message)
+            if key == "zoom":
+                float(value.strip())
+            elif key == "align":
+                parts = value.strip().split(",")
+                if len(parts) != 2:
+                    message = "Profile setting 'align' requires two values."
+                    raise ValueError(message)
+                float(parts[0])
+                float(parts[1])
+        elif key in {"delay", "bezels", "diagonal_inches"}:
+            if not separator:
+                message = f"Missing '=' after profile setting '{key}'."
+                raise ValueError(message)
+            for item in value.strip().split(";"):
+                float(item)
+        elif key == "ppi":
+            if not separator:
+                message = "Missing '=' after profile setting 'ppi'."
+                raise ValueError(message)
+            for item in value.strip().split(";"):
+                int(item)
+
+
+# Profile and data handling, back-end interface.
+def list_profiles() -> list[ProfileData]:
+    """List discoverable profiles, retaining the legacy malformed-content prompt."""
+    profile_list = []
+    inventory = discover_profile_inventory()
+    for entry in inventory.entries:
+        profile_list.append(entry.profile)
+    identity_diagnostic_paths = {
+        diagnostic.path
+        for diagnostic in inventory.diagnostics
+        if diagnostic.kind
+        in {
+            ProfileDiagnosticKind.INVALID_FILENAME,
+            ProfileDiagnosticKind.NOT_REGULAR_FILE,
+            ProfileDiagnosticKind.SYMLINK,
+            ProfileDiagnosticKind.PORTABLE_COLLISION,
+            ProfileDiagnosticKind.NAME_MISMATCH,
+            ProfileDiagnosticKind.IO_ERROR,
+        }
+    }
+    for diagnostic in inventory.diagnostics:
+        if (
+            diagnostic.kind is ProfileDiagnosticKind.MALFORMED_CONTENT
+            and diagnostic.path not in identity_diagnostic_paths
+        ):
+            _prompt_to_delete_malformed_profile(diagnostic.path, diagnostic.identity, diagnostic.detail)
     return profile_list
 
 
-def open_profile(profile):
-    """Returns a ProfileData object."""
-    prof_file = os.path.join(sp_paths.PROFILES_PATH, profile + ".profile")
-    if os.path.isfile(prof_file):
-        prof = ProfileData(prof_file)
-    elif os.path.isfile(profile):
-        prof = ProfileData(profile)
-    else:
-        prof = None
-    return prof
+def _prompt_to_delete_malformed_profile(path: Path, identity: FileIdentity | None, error: object) -> None:
+    msg = (
+        f"There was an error when loading profile '{path.name}'.\n"
+        "Would you like to delete it? Choosing 'No' will just ignore the profile."
+    )
+    sp_logging.G_LOGGER.info(msg)
+    sp_logging.G_LOGGER.info(error)
+    if show_message_dialog(msg, "Error", style="YES_NO"):
+        if identity is None:
+            sp_logging.G_LOGGER.info("Retaining malformed profile without a captured file identity: %s", path)
+            return
+        sp_logging.G_LOGGER.info("Removing profile: %s", path)
+        try:
+            _remove_managed_path(path, identity)
+        except OSError as unlink_error:
+            sp_logging.G_LOGGER.info("Retaining malformed profile because verified removal failed: %s", unlink_error)
+        except ManagedPathError as identity_error:
+            sp_logging.G_LOGGER.info("Retaining malformed profile because its identity changed: %s", identity_error)
 
 
-def read_active_profile():
+def open_profile(profile: ProfileId | str):
+    """Return a discoverable managed profile by validated identity."""
+    try:
+        profile_id = profile if isinstance(profile, ProfileId) else ProfileId.parse(profile)
+    except ProfileIdError:
+        return None
+    entry = discover_profile_inventory().find(profile_id)
+    if entry is None:
+        return None
+    try:
+        profile_path(Path(sp_paths.PROFILES_PATH), profile_id, allow_missing=False)
+        _read_managed_profile(entry.path, entry.identity)
+        return _profile_from_entry(entry)
+    except ManagedPathError, OSError, ProfileDataException, ValueError, ZeroDivisionError:
+        return None
+
+
+def parse_profile_file(path: str | os.PathLike[str]):
+    """Explicitly parse an arbitrary profile file, such as a GUI preview."""
+    return ProfileData(path, persist_selection=False)
+
+
+def _profile_from_entry(entry: ProfileDiscoveryEntry):
+    return entry.profile
+
+
+def validate_managed_profile_id(name: object, current_profile_id: ProfileId | None = None) -> ProfileId:
+    """Validate a save identity and reject portable collisions with managed leaves."""
+    profile_id = ProfileId.parse(name)
+    root = Path(sp_paths.PROFILES_PATH)
+    try:
+        leaves = root.iterdir()
+        for path in leaves:
+            if path.suffix != ".profile":
+                continue
+            try:
+                existing_id = ProfileId.parse(path.stem)
+            except ProfileIdError:
+                continue
+            if current_profile_id is not None and existing_id == current_profile_id == profile_id:
+                continue
+            if existing_id.collision_key == profile_id.collision_key:
+                message = f"Profile name collides with existing profile '{existing_id.value}'."
+                raise ValueError(message)
+    except FileNotFoundError:
+        pass
+    return profile_id
+
+
+def delete_managed_profile(profile: ProfileData) -> None:
+    """Delete the managed regular file represented by a loaded profile."""
+    if profile.profile_id is None or profile.source_identity is None:
+        message = "Only a loaded managed profile can be deleted."
+        raise ManagedPathError(message)
+    path = profile_path(Path(sp_paths.PROFILES_PATH), profile.profile_id, allow_missing=False)
+    _remove_managed_path(path, profile.source_identity)
+
+
+def managed_profile_for_selection(profiles: list[ProfileData], profile_id: ProfileId) -> ProfileData | None:
+    """Resolve a GUI selection by managed identity, independent of editable fields."""
+    return next((profile for profile in profiles if profile.profile_id == profile_id), None)
+
+
+def _remove_managed_path(path: Path, expected_identity: FileIdentity) -> None:
+    """Unlink a regular leaf only while its captured identity still matches.
+
+    The opened descriptor and directory-relative stat verify identity directly
+    before unlink. Kernels without compare-and-unlink still leave a residual
+    replacement race between that check and unlink; the path-based fallback
+    additionally has an inode-reuse race.
+    """
+    directory_fd = _open_managed_directory(path.parent) if _HAS_DIR_FD_MUTATIONS else None
+    fd = (
+        _open_verified_managed_at(directory_fd, path, expected_identity)
+        if directory_fd is not None
+        else _open_verified_managed(path, expected_identity)
+    )
+    try:
+        current_identity = (
+            _regular_destination_identity_at(directory_fd, path, allow_missing=False)
+            if directory_fd is not None
+            else _regular_destination_identity(path, allow_missing=False)
+        )
+        if current_identity != FileIdentity.from_stat(os.fstat(fd)):
+            message = f"Managed profile changed while being deleted: {path}"
+            raise ManagedPathError(message)
+        if directory_fd is not None:
+            os.unlink(path.name, dir_fd=directory_fd)
+        else:
+            path.unlink()
+    finally:
+        os.close(fd)
+        if directory_fd is not None:
+            os.close(directory_fd)
+
+
+def _open_verified_managed(path: Path, expected_identity: FileIdentity) -> int:
+    flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(path, flags)
+    try:
+        opened = os.fstat(fd)
+        if stat.S_ISREG(opened.st_mode) and FileIdentity.from_stat(opened) == expected_identity:
+            return fd
+    except Exception:
+        os.close(fd)
+        raise
+    os.close(fd)
+    message = f"Managed profile changed since it was loaded: {path}"
+    raise ManagedPathError(message)
+
+
+def read_active_profile() -> ProfileData | None:
     """Reads last active profile from file at startup."""
-    fname = os.path.join(sp_paths.TEMP_PATH, "running_profile")
-    if os.path.isfile(fname):
-        with open(fname, encoding="utf-8") as rp_file:
-            profname = rp_file.readline().rstrip("\r\n")
-        if not profname:
+    path = Path(sp_paths.TEMP_PATH) / "running_profile"
+    try:
+        content, _identity = _read_managed_profile(path)
+    except FileNotFoundError:
+        try:
+            _atomic_write_regular(path, b"", may_replace=False)
+        except OSError, ManagedPathError:
+            pass
+        return None
+    except OSError, ManagedPathError:
+        return None
+    try:
+        profname = content.decode("utf-8").splitlines()[0].rstrip("\r\n")
+    except IndexError, UnicodeError:
+        return None
+    if profname:
+        try:
+            profile_id = ProfileId.parse(profname)
+        except ProfileIdError:
             return None
-        prof_file = os.path.join(sp_paths.PROFILES_PATH, profname + ".profile")
-        if os.path.isfile(prof_file):
-            return ProfileData(prof_file)
+        profile = open_profile(profile_id)
+        if profile is not None:
+            return profile
         sp_logging.G_LOGGER.info(
             "Exception: Previously run profile configuration \
                         file not found. Is the filename same as the \
                         profile name: %s?",
             profname,
         )
-    else:
-        with open(fname, "x", encoding="utf-8"):
-            pass
     return None
 
 
-def write_active_profile(profname):
+def write_active_profile(profile: ProfileId | str) -> None:
     """Writes active profile name to file after profile has changed."""
-    fname = os.path.join(sp_paths.TEMP_PATH, "running_profile")
-    with open(fname, "w", encoding="utf-8") as rp_file:
-        rp_file.write(profname)
+    profile_id = profile if isinstance(profile, ProfileId) else ProfileId.parse(profile)
+    path = Path(sp_paths.TEMP_PATH) / "running_profile"
+    _atomic_write_regular(path, profile_id.value.encode("utf-8"), may_replace=True)
+
+
+def save_managed_profile(
+    profile: TempProfileData,
+    *,
+    current_profile_id: ProfileId | None = None,
+    expected_source_identity: FileIdentity | None = None,
+    update_active: bool = False,
+) -> Path:
+    """Create, update, or rename a managed profile with bounded rollback."""
+    try:
+        destination_id = validate_managed_profile_id(profile.name, current_profile_id)
+        destination = profile_path(Path(sp_paths.PROFILES_PATH), destination_id)
+    except (OSError, ManagedPathError, ProfileIdError, ValueError) as error:
+        raise ProfileTransactionError(_DESTINATION_WRITE, error) from error
+    content = profile._serialize().encode("utf-8")
+
+    if current_profile_id is None:
+        try:
+            _atomic_write_regular(destination, content, may_replace=False)
+        except (OSError, ManagedPathError, ValueError) as error:
+            raise ProfileTransactionError(_DESTINATION_WRITE, error) from error
+        return destination
+
+    if expected_source_identity is None:
+        error = ManagedPathError("The save source has no captured managed-file identity.")
+        raise ProfileTransactionError(_SOURCE_VERIFICATION, error) from error
+    try:
+        source_path = profile_path(Path(sp_paths.PROFILES_PATH), current_profile_id, allow_missing=False)
+        source_content, source_identity = _read_managed_profile(source_path, expected_source_identity)
+    except (OSError, ManagedPathError) as error:
+        raise ProfileTransactionError(_SOURCE_VERIFICATION, error) from error
+
+    if destination_id == current_profile_id:
+        try:
+            _atomic_write_regular(
+                source_path,
+                content,
+                may_replace=True,
+                expected_identity=source_identity,
+            )
+        except (OSError, ManagedPathError) as error:
+            raise ProfileTransactionError(_DESTINATION_WRITE, error) from error
+        return source_path
+
+    try:
+        destination_identity = _atomic_write_regular(destination, content, may_replace=False)
+    except (OSError, ManagedPathError) as error:
+        raise ProfileTransactionError(_DESTINATION_WRITE, error) from error
+
+    try:
+        _remove_managed_path(source_path, source_identity)
+    except (OSError, ManagedPathError) as error:
+        rollback_errors = _rollback_destination(destination, destination_identity)
+        raise ProfileTransactionError(_SOURCE_REMOVAL, error, rollback_errors) from error
+
+    if update_active:
+        try:
+            write_active_profile(destination_id)
+        except (OSError, ManagedPathError) as error:
+            rollback_errors = []
+            source_restored = False
+            try:
+                _atomic_write_regular(source_path, source_content, may_replace=False)
+                source_restored = True
+            except (OSError, ManagedPathError) as rollback_error:
+                rollback_errors.append(
+                    rollback_error if isinstance(rollback_error, OSError) else OSError(str(rollback_error))
+                )
+            if source_restored:
+                rollback_errors.extend(_rollback_destination(destination, destination_identity))
+            raise ProfileTransactionError(_ACTIVE_POINTER_UPDATE, error, tuple(rollback_errors)) from error
+    return destination
+
+
+def _rollback_destination(path: Path, identity: FileIdentity) -> tuple[OSError, ...]:
+    try:
+        _remove_managed_path(path, identity)
+    except (OSError, ManagedPathError) as error:
+        return (error if isinstance(error, OSError) else OSError(str(error)),)
+    return ()
 
 
 class GeneralSettingsData:
@@ -241,7 +880,15 @@ class ProfileData:
     .profile files and parsed when creating a profile data object.
     """
 
-    def __init__(self, profile_file):
+    def __init__(
+        self,
+        profile_file,
+        profile_id: ProfileId | None = None,
+        *,
+        profile_text: str | None = None,
+        source_identity: FileIdentity | None = None,
+        persist_selection: bool = True,
+    ):
         if not wpproc.RESOLUTION_ARRAY:
             msg = "Cannot parse profile, monitor resolution data is missing."
             show_message_dialog(msg)
@@ -270,7 +917,13 @@ class ProfileData:
         self.paths_array = []
         self.selected = None
 
-        self.parse_profile(self.file)
+        self.parse_profile(StringIO(profile_text) if profile_text is not None else self.file)
+        if profile_id is not None and self.name != profile_id.value:
+            message = "Profile name does not match its managed filename."
+            raise ProfileDataException(message, self.name, self.file, profile_id.value)
+        self.profile_id: ProfileId | None = profile_id
+        self.source_identity = source_identity
+        self.persist_selection = persist_selection
         if self.ppimode is True:
             self.compute_relative_densities()
             if self.bezels:
@@ -280,7 +933,12 @@ class ProfileData:
     def parse_profile(self, parse_file):
         """Read wallpaper profile settings from file."""
         try:
-            with open(parse_file, encoding="utf-8") as profile_file:
+            with ExitStack() as stack:
+                profile_file = (
+                    parse_file
+                    if hasattr(parse_file, "read")
+                    else stack.enter_context(open(parse_file, encoding="utf-8"))
+                )
                 for line in profile_file:
                     line.strip()
                     words = line.split("=")
@@ -553,19 +1211,43 @@ class ProfileData:
 
     def _write_selected(self):
         """Persist the current selection into the profile file."""
-        if not self.file:
+        if not self.persist_selection:
+            return
+        if self.profile_id is None or self.source_identity is None:
+            self._write_selected_unmanaged()
             return
         try:
-            with open(self.file, encoding="utf-8") as prof_f:
-                lines = [ln for ln in prof_f if not ln.startswith("selected=")]
+            path = profile_path(Path(sp_paths.PROFILES_PATH), self.profile_id, allow_missing=False)
+            content, identity = _read_managed_profile(path, self.source_identity)
+            lines = [ln for ln in content.decode("utf-8").splitlines(keepends=True) if not ln.startswith("selected=")]
             if lines and not lines[-1].endswith("\n"):
                 lines[-1] += "\n"
             if self.selected:
                 lines.append("selected=" + ";".join(self.selected) + "\n")
-            with open(self.file, "w", encoding="utf-8") as prof_f:
-                prof_f.writelines(lines)
-        except OSError as err:
+            self.source_identity = _atomic_write_regular(
+                path,
+                "".join(lines).encode("utf-8"),
+                may_replace=True,
+                expected_identity=identity,
+            )
+        except (OSError, UnicodeError, ManagedPathError) as err:
             sp_logging.G_LOGGER.info("Failed to persist wallpaper selection: %s", err)
+
+    def _write_selected_unmanaged(self):
+        """Retain explicit arbitrary-file parser behavior outside managed storage."""
+        if not self.file:
+            return
+        try:
+            with open(self.file, encoding="utf-8") as profile_file:
+                lines = [line for line in profile_file if not line.startswith("selected=")]
+            if lines and not lines[-1].endswith("\n"):
+                lines[-1] += "\n"
+            if self.selected:
+                lines.append("selected=" + ";".join(self.selected) + "\n")
+            with open(self.file, "w", encoding="utf-8") as profile_file:
+                profile_file.writelines(lines)
+        except OSError as error:
+            sp_logging.G_LOGGER.info("Failed to persist wallpaper selection: %s", error)
 
     class Filehandler:
         """
@@ -822,7 +1504,7 @@ class TempProfileData:
         self.selected: list | None = None
         self.paths_array = []
 
-    def save(self, filename=None):
+    def save(self, filename=None, *, current_profile_id: ProfileId | None = None):
         """Saves the TempProfile into a file.
 
         By default the profile is written to ``<name>.profile`` in
@@ -833,7 +1515,18 @@ class TempProfileData:
         if self.name is None:
             sp_logging.G_LOGGER.info("tmp.Save(): name is not set.")
             return None
-        fname = filename or os.path.join(PROFILES_PATH, self.name + ".profile")
+        if filename is None:
+            try:
+                profile_id = validate_managed_profile_id(self.name, current_profile_id)
+                fname = profile_path(Path(sp_paths.PROFILES_PATH), profile_id)
+                may_replace = current_profile_id == profile_id
+                _atomic_write_regular(fname, self._serialize().encode("utf-8"), may_replace=may_replace)
+            except (ManagedPathError, OSError, ProfileIdError, ValueError) as error:
+                show_message_dialog(str(error), "Error")
+                return None
+            return fname
+        else:
+            fname = filename
         try:
             with open(fname, "w", encoding="utf-8") as tpfile:
                 tpfile.write(self._serialize())
@@ -883,19 +1576,16 @@ class TempProfileData:
             )
         return "\n".join(lines) + "\n"
 
-    def test_save(self):
+    def test_save(self, *, current_profile_id: ProfileId | None = None, managed: bool = True):
         """Tests whether the user input for profile settings is valid."""
         valid_profile = False
         if self.name is not None and self.name.strip() != "":
-            fname = os.path.join(PROFILES_PATH, self.name + ".deleteme")
-            try:
-                with open(fname, "w", encoding="utf-8"):
-                    pass
-                os.remove(fname)
-            except OSError:
-                msg = f"Cannot write to file {fname}"
-                show_message_dialog(msg, "Error")
-                return False
+            if managed:
+                try:
+                    validate_managed_profile_id(self.name, current_profile_id)
+                except (OSError, ProfileIdError, ValueError) as error:
+                    show_message_dialog(str(error), "Error")
+                    return False
             if self.spanmode == "single" and len(self.paths_array) > 1:
                 msg = "When spanning a single image across all monitors, \
 only one paths field is needed."
