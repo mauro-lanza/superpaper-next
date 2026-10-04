@@ -3,8 +3,10 @@ GUI dialogs for Superpaper.
 """
 
 import os
-import sys
 import time
+
+import wx  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-import]
+import wx.adv  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-import]
 
 import superpaper.perspective as persp
 import superpaper.wallpaper_processing as wpproc
@@ -16,11 +18,33 @@ from superpaper.message_dialog import show_message_dialog
 from superpaper.sp_paths import RESOURCES_PATH, TRAY_ICON
 from superpaper.wallpaper_processing import change_wallpaper_job
 
-try:
-    import wx  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-import]
-    import wx.adv  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-import]
-except ImportError:
-    sys.exit()
+
+def source_icon(path, size):
+    """Return the list icon of an image source: a folder, a thumbnail, or "missing image".
+
+    A source can be unavailable (an unmounted drive) or unreadable; that must not stop
+    the editor from listing it.
+    """
+    if os.path.isdir(path):
+        return wx.ArtProvider.GetBitmap(wx.ART_FOLDER, wx.ART_TOOLBAR, wx.Size(*size))
+    image = wx.Image()
+    if os.path.isfile(path):
+        with wx.LogNull():  # an unreadable file gets the icon below, not an error popup
+            image.LoadFile(path, wx.BITMAP_TYPE_ANY)
+    if not image.IsOk():
+        return wx.ArtProvider.GetBitmap(wx.ART_MISSING_IMAGE, wx.ART_TOOLBAR, wx.Size(*size))
+    width, height = image.GetSize()
+    if width > height:
+        target_w, target_h = size[0], max(1, round(size[0] * height / width))
+        pos = (0, round((size[0] - target_h) / 2))
+    else:
+        target_w, target_h = max(1, round(size[1] * width / height)), size[1]
+        pos = (round((size[1] - target_w) / 2), 0)
+    return (
+        image.Scale(target_w, target_h, quality=wx.IMAGE_QUALITY_BOX_AVERAGE)
+        .Resize(wx.Size(*size), wx.Point(pos))
+        .ConvertToBitmap()
+    )
 
 
 class BrowsePaths(wx.Dialog):
@@ -177,33 +201,7 @@ class BrowsePaths(wx.Dialog):
             # self.paths_listctrl.SetItem(index, 1, data[1])
 
     def add_to_imagelist(self, path):
-        folder_bmp = wx.ArtProvider.GetBitmap(wx.ART_FOLDER, wx.ART_TOOLBAR, wx.Size(*self.tsize))
-        # file_bmp =  wx.ArtProvider.GetBitmap(wx.ART_NORMAL_FILE, wx.ART_TOOLBAR, self.tsize)
-        if os.path.isdir(path):
-            img_id = self.il.Add(folder_bmp)
-        else:
-            thumb_bmp = self.create_thumb_bmp(path)
-            img_id = self.il.Add(thumb_bmp)
-        return img_id
-
-    def create_thumb_bmp(self, filename):
-        wximg = wx.Image(filename, type=wx.BITMAP_TYPE_ANY)
-        imgsize = wximg.GetSize()
-        w2h_ratio = imgsize[0] / imgsize[1]
-        if w2h_ratio > 1:
-            target_w = self.tsize[0]
-            target_h = target_w / w2h_ratio
-            pos = (0, round((target_w - target_h) / 2))
-        else:
-            target_h = self.tsize[1]
-            target_w = target_h * w2h_ratio
-            pos = (round((target_h - target_w) / 2), 0)
-        bmp = (
-            wximg.Scale(round(target_w), round(target_h), quality=wx.IMAGE_QUALITY_BOX_AVERAGE)
-            .Resize(wx.Size(*self.tsize), wx.Point(pos))
-            .ConvertToBitmap()
-        )
-        return bmp
+        return self.il.Add(source_icon(path, self.tsize))
 
     #
     # BUTTON methods
@@ -810,7 +808,16 @@ class PerspectiveConfig(wx.Dialog):
 
     def populate_fields(self, persp_name):
         """Populate config fields from DisplaySystem perspective dict."""
-        persd = self.persp_dict[persp_name]
+        persd = self.persp_dict.get(persp_name)
+        if persd is None:
+            # The display system's default names a perspective with no stored settings
+            # (its .persp file is gone, say). Offer it as a new profile to fill in:
+            # inventing settings here would let the next save of any perspective
+            # persist them.
+            self.onCreateNewProfile(None)
+            self.tc_name.SetValue(persp_name)
+            self.cb_dispsys_def.SetValue(True)
+            return
         self.cb_master.SetValue(self.display_sys.use_perspective)
         self.tc_name.SetValue(persp_name)
         self.cb_dispsys_def.SetValue(persp_name == self.display_sys.default_perspective)

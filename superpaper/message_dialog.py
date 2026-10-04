@@ -1,9 +1,13 @@
 """Error etc. info dialog."""
 
+from typing import Any
+
+# wxPython is optional (the CLI runs without it); the name stays bound either way.
+wx: Any = None
 try:
     import wx  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-import]
 except ImportError:
-    wx = None
+    pass
 
 
 def show_message_dialog(message, msg_type="Info", parent=None, style="OK"):

@@ -31,7 +31,11 @@ def test_repeated_timer_stop_and_restart(profile_modules, manual_clock):
     assert len(manual_clock.timers) == 2
 
 
-@pytest.mark.xfail(strict=True, reason="Known timer race: a dispatched callback can rearm after stop")
+@pytest.mark.xfail(
+    strict=True,
+    reason="U17 in docs/restructuring-plan.md: a dispatched tick can rearm a stopped timer; "
+    "the Phase D session worker removes the separate timer thread",
+)
 def test_dispatched_tick_cannot_resurrect_stopped_timer(profile_modules, manual_clock):
     _, wpproc = profile_modules
     callbacks = []

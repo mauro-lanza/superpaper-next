@@ -14,12 +14,16 @@ from superpaper.spanmode import set_spanmode
 
 
 def main():
-    """Runs tray applet if no command line arguments are passed, CLI parsing otherwise."""
-    set_spanmode()
-    if len(sys.argv) <= 1:
-        from superpaper.tray import tray_loop
+    """Runs tray applet if no command line arguments are passed, CLI parsing otherwise.
 
-        tray_loop()
+    Desktop span mode is configured only on the way to setting a wallpaper, so that
+    `--help` or a mistyped option changes nothing on the system.
+    """
+    if len(sys.argv) <= 1:
+        from superpaper.cli import start_tray
+
+        set_spanmode()
+        start_tray()
     else:
         from superpaper.cli import cli_logic
 

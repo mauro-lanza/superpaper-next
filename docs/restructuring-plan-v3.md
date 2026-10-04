@@ -7,6 +7,9 @@ v2 is left untouched so the two can be compared. Delete v2 once this is accepted
 Written 2026-10-04 against `98ba753` plus the uncommitted WIP in
 `superpaper/configuration_dialogs.py`.
 
+**Status (2026-10-04):** all recommendations in §9 were accepted, and Phase A is done;
+see §7 for what it contains and for the two decisions that moved into it.
+
 ---
 
 ## 0. How this was produced
@@ -266,51 +269,94 @@ async, no DI framework, no plugin system.
 Every step leaves the suite green, has no shims, and leaves every module name true to its
 contents. **Each phase boundary is a genuine stopping point.**
 
-### Phase A — Fix what users hit now
+### Phase A — Fix what users hit now (done)
 
-In place, in small PRs, each with a regression test where the code is headless. This is
-not restructuring. It comes first because these fixes are cheap, user-visible, and each
-one documents the structural cause it came from.
+These fixes were made in place, not as restructuring. They come first because they are
+cheap, user-visible, and each one documents the structural cause it came from.
+Decisions 2 and 3 were pulled forward from C4 because A1 and A2 depend on them. Doing
+them here also means the persistence code is rewritten once, not twice.
 
 - **A0 Trustworthy test gate.**
   - `[tool.pytest.ini_options]`: `testpaths`, `xfail_strict`, `--strict-markers`,
     `--strict-config`.
-  - Add the **headless-import test** (§8). It fails today and pins U3.
-  - Fix U3: import dbus at use, inside the KDE path.
-  - Fix the three defective assertions.
-  - Link each xfail to an `ISSUES.md` entry.
-- **A1 U1 — editor save conflicts.** Compare a digest of the profile's *configuration*
-  (all lines except `selected=`) instead of whole-file identity. Carry the current
-  on-disk selection through the save unless the editor supplies one. About 20 lines in
-  `data.py`, plus tests for the three U1 scenarios (Apply, tick, and a Save that clears a
-  stale selection). This is format-neutral. The root fix is Decision 3.
-- **A2 U2 — stop silently dropping existing profiles**, according to Decision 1. At
-  minimum, surface identity diagnostics; recommended, restore loading.
-- **A3 U4 — hotkeys by id.** Register `profile_id` instead of the object, resolve it at
-  activation, and guard the `hk2` attribute. A few lines in `tray.py`.
-- **A4 U5 — Save does not change the running profile.** Rearm only if the saved profile
-  *is* the active one.
-- **A5 Small fixes, one test each:**
-  - U9: case-insensitive extension check.
-  - U10: `split("=", 1)`.
-  - U12: non-zero CLI exits, messages at WARNING, and a clear "wxPython is required"
-    message plus exit 1.
-  - U13: pass sources as separate argv entries and keep arg 1.
-  - U16: `os.makedirs(exist_ok=True)`.
-  - `--help` no longer calls `set_spanmode`.
-  - U14a: `exif_transpose` in the preview.
-- **A6 Delete verified dead code:**
+  - `tests/test_headless_import.py` (§8): it failed before the U3 fix.
+  - U3 is fixed. `_plasma_shell()` imports dbus where KDE scripting needs it, and the
+    three places that connected to PlasmaShell now share that function.
+  - The three defective assertions are fixed.
+  - The remaining xfail names its U-id and the phase that fixes it.
+- **A1 U1 — editor save conflicts (Decisions 2 and 3).**
+  - Profile I/O is now `files.write_atomically` (temp file + fsync + `os.replace`,
+    writing through symlinks and keeping permissions) plus a content digest. About 330
+    lines of descriptor-level race defence are gone.
+  - Managed selections live in `<cache>/selections/<id>.json`. A legacy `selected=` line
+    is still read and is carried over by the next editor save, so slideshow ticks and
+    Apply no longer touch the profile file.
+  - The editor's whole-file digest is therefore correct by construction; the
+    "configuration digest" interim was never needed.
+  - Tests cover all three U1 scenarios.
+- **A2 U2 — profiles from older versions load again (Decision 1).**
+  - `ProfileId.parse` applies safety rules only. `ProfileId.parse_new` adds portability,
+    for names the editor creates or renames to.
+  - Symlinks are followed; the filename wins over a disagreeing `name=`; case variants
+    both load.
+  - The remaining diagnostics are logged instead of dropped silently.
+- **A3 U4 — hotkeys by id.**
+  - Hotkeys bind `ProfileId`s and resolve them at activation.
+  - Every hotkey callback is handed to the wx main loop (`wx.CallAfter`), so the hotkey
+    thread no longer mutates tray state.
+  - `update_hotkey` tolerates hotkeys being disabled, and removing a profile's hotkey
+    now unbinds it.
+- **A4 U5 — saving doesn't change the running profile.** Only saving the running profile
+  rearms its timer. The rearm keeps a paused slideshow paused, which resolves the second
+  timer xfail. Behaviour change: saving a new profile while nothing runs no longer
+  half-starts it; start it from the tray.
+- **A5 Small fixes, with tests:**
+  - U9: one `is_supported_image()` now serves all five call sites that check extensions.
+  - U10: parse `key=value` at the first `=`.
+  - U12: CLI errors exit 1 with a message, and a missing wxPython is explained.
+  - U13: the hook gets separate arguments, and a missing `python3` is logged.
+  - U16: `os.makedirs`.
+  - `--help` no longer configures span mode.
+  - U14a: the preview applies EXIF orientation and closes the image file.
+  - U8: a peek no longer erases a selection whose files are missing, and an empty
+    preview no longer raises.
+  - `serialize` numbers duplicate source lines correctly.
+- **A6 Dead code deleted:**
   - `compute_crop_tuples` and its five helpers;
   - `compute_ppi_corrected_res_array`;
   - `compute_relative_densities` with `ppi_array_relative_density`;
-  - the stored-but-never-read `bezel_px_offsets` attribute;
+  - the never-read `bezel_px_offsets`;
   - `XYPlaneRectangle.corners_2d`.
 
-  Keep `ppi_array` and `compute_bezel_px_offsets`' effect on `manual_offsets`: legacy
-  profiles with `bezels=` still depend on it. Characterise it first.
+  `ppi_array` and `compute_bezel_px_offsets` stay, because legacy `bezels=` profiles
+  depend on them. A side effect: a profile with `ppi=0;0` now loads instead of being
+  reported as malformed.
+- **WIP:** `PerspectiveConfig.populate_fields` takes the shape §10 suggests.
 
-**Exit:** U1–U5, U9, U10, U12, U13 and U16 have regression tests or are verified by hand
-on KDE. The headless-import test passes.
+**Not in Phase A, by design:**
+
+| Item | Phase |
+|---|---|
+| U6 (UI waits on renders) | D |
+| U7 (discovery enumerates images) | C4 |
+| U11 (logging handlers) | B2 |
+| U14b (preview decode cache) | E |
+| U15 (cache keyed by label) | C2 |
+| U17a (timer resurrection) | D |
+
+**Exit (met):**
+- 252 tests pass, 1 xfail (U17a). ruff, the formatter and ty are clean, both with and
+  without wx/dbus installed. `unused-ignore-comment` is off because the optional-import
+  ignores are needed only where those packages are absent.
+- `superpaper --help` works in a KDE session without dbus-python.
+- The wx code paths were then exercised against a real `wx.App` with wxPython 4.2.5: 18
+  scripted checks covering U1 (both flows), U4, U5, pause, U8, U14a and the perspective
+  dialog. This found that U8 also crashed earlier, in the path-list thumbnails. One
+  `source_icon()` now replaces the two identical thumbnail implementations (editor and
+  Browse dialog), and handles missing, corrupt and very wide images.
+- An AppImage built from this tree freezes every module, including the function-level
+  imports. Its CLI exit codes and its render are correct, and its tray starts over SNI
+  on KDE.
 
 ### Phase B — Make state explicit
 
@@ -382,13 +428,15 @@ There are no shims, and each subject is finished when its PR merges.
   - Names are keyed by `ProfileId` with **exact** matching, drafts go in `preview/`, and a
     startup sweep removes files for ids that no longer exist (U15).
 - **C3 `displays.py` + `display_store.py`.** Atomic writes; key and format pinned by B3.
-- **C4 `profiles.py` + `profile_store.py` + `selection.py` + `files.py` (S1, S7).**
+- **C4 `profiles.py` + `profile_store.py` + `selection.py` (S1).**
   - One `Profile` value replaces `ProfileData`/`TempProfileData`/`CLIProfileData`; one
     parser; `validate` returns problems; `_validate_profile_syntax` is deleted.
   - Image enumeration is lazy, so discovery never touches source directories (U7). It
     runs only for the profile being rendered or previewed, off the UI thread.
   - `ProfileStore` keeps one record per id.
-  - Persistence follows Decision 2 and selection storage follows Decision 3.
+  - The persistence (Decision 2), `files.py`, and the selection store (Decision 3)
+    already exist since Phase A; C4 moves them into `profile_store.py`. Add a sweep that
+    drops `selections/*.json` for profiles deleted outside the app.
 
 **Exit:** `wallpaper_processing.py` and `data.py` no longer exist. Every module's subject
 can be stated in one sentence. No module outside `ui/` exceeds ~600 lines.
@@ -451,7 +499,8 @@ per module as each is carved out.
 
   It asserts success and that the tmp tree is still empty. Together with a 5-line grep for
   `import wx` outside `ui/`, it guards the properties that actually broke (U3, S3, S4) in
-  about 25 lines.
+  about 25 lines. Since Phase A it exists as `tests/test_headless_import.py`; the
+  "creates no files" assertion is added in B1, when imports stop creating directories.
 - **Characterise before every move** (B3). Golden-pixel renders stay; note the Pillow
   version, and treat a bump as a deliberate re-baseline.
 - **Tests follow their subject.** Each C-step rewrites its subject's tests against the new
@@ -461,44 +510,44 @@ per module as each is carved out.
   - the `CLIProfileData` signature;
   - `is` identity on display globals;
   - Filehandler cursors;
-  - the `object.__new__(TaskBarIcon)` controllers, which are replaced by `Session` tests;
-  - the TOCTOU private-function tests, if Decision 2 removes them.
+  - the `object.__new__(TaskBarIcon)` controllers, which are replaced by `Session` tests.
+
+  The TOCTOU private-function tests went with Decision 2 in Phase A.
 - **No GUI test harness.** wx is not in the venv, and building one would cost more than it
   returns. After Phase E the logic worth testing lives outside `ui/`. UI changes carry a
   manual checklist in the PR: KDE Wayland, GNOME, Windows when available.
 
 ---
 
-## 9. Decisions for you
+## 9. Decisions (accepted 2026-10-04)
 
-1. **Profile-loading compatibility (U2).** Recommended:
-   - Apply ProfileId's *portability* rules only when creating or renaming in the GUI.
-   - Apply *safety* rules (no separators, NUL or `.`/`..`) always.
-   - Follow leaf symlinks.
-   - On a name/filename mismatch, the filename is the identity and the internal `name=` is
-     corrected on the next save.
+1. **Profile-loading compatibility (U2), implemented in A2.**
+   - ProfileId's *portability* rules apply only when creating or renaming in the GUI, and
+     on Windows, whose filesystem enforces them anyway.
+   - *Safety* rules apply always: no separators, NUL, control characters or `.`/`..`,
+     and no names that shadow Superpaper's own UI entries.
+   - Leaf symlinks are followed.
+   - On a name/filename mismatch, the filename is the identity and the internal `name=`
+     is corrected on the next save.
 
    This restores everything v2.3.2 loaded without bringing back the dual-identity bugs.
-   The alternative is to keep #21's strict policy and only surface the dropped files.
-2. **Persistence hardening (S7).** Recommended: replace the ~330 lines with `files.py`:
-   - same-dir tempfile + fsync + `os.replace`;
+2. **Persistence hardening (S7), implemented in A1.** The ~330 lines were replaced by
+   `files.write_atomically`:
+   - same-dir temp file + fsync + `os.replace`;
    - `ProfileId` containment;
-   - the configuration-digest conflict check from A1;
-   - for a symlinked leaf, write to the **resolved target**, so the dotfile link survives
-     (`os.replace` on the link itself would destroy it).
+   - a content-digest conflict check;
+   - a symlinked leaf is written through to its **resolved target**, so the dotfile link
+     survives (`os.replace` on the link itself would destroy it).
 
-   This deletes ~20 private-function tests. You lose protection against a local attacker
-   racing symlinks inside your own `~/.config`, an attacker who can already edit your
-   shell rc. Keeping it costs ongoing coupling and is where U1/U2 came from.
-3. **Where the slideshow selection lives.** It is runtime state written on every tick into
-   a config file. Recommended:
-   - Store it next to `running_profile` in the cache dir.
-   - Read legacy `selected=` as a fallback and stop writing it.
+   This removed protection against a local attacker racing symlinks inside the user's
+   own `~/.config`, an attacker who can already edit the shell rc.
+3. **Where the slideshow selection lives, implemented in A1.**
+   - It is stored next to `running_profile`, as `<cache>/selections/<id>.json`.
+   - A legacy `selected=` line is still read and carried over by the next editor save;
+     the app no longer writes the line.
 
-   The profile file then has one writer, the editor. #21's identity check becomes correct
-   as designed, and dotfile repos stop churning every minute. The cost: downgrading to
-   v2.3.2 restarts selections from the first image. Alternatively keep it in `.profile`,
-   in which case A1's semantic check stays permanent.
+   The profile file has one writer, the editor, and dotfile repos stop churning every
+   minute. The cost: downgrading to v2.3.2 restarts selections from the first image.
 4. **Profile-name length.** Keep ProfileId at 200 UTF-8 bytes / 200 UTF-16 units. v2's 120
    rests on `<name>-b-crop-99.png`, but crop files are produced only on KDE and macOS;
    Windows writes `<name>-a.jpg`. Windows `MAX_PATH` counts UTF-16 units, not UTF-8 bytes,
@@ -506,13 +555,11 @@ per module as each is carved out.
    the cap makes existing 121–200-byte profiles invalid, which is U2 again. If Windows
    cache paths matter, bound the *cache stem* in `render_cache` (for example the first 48
    characters plus a 12-hex-digit hash when longer than 64) without touching identity.
-   Replace the GUI's `SetMaxLength(14)` with a 64-character soft limit, or none.
-5. **Image size cap.** Recommended: a `max_pixels` check inside `open_source_image()` with
-   a user-readable error (header-only `Image.open` gives the size before decoding). Leave
-   Pillow's global alone. 250 Mpx is generous for wallpapers; you choose the number.
-6. **KDE activity matching.** It maps activities to profiles *by name* and guesses
-   desktop→activity via a cache file. Keep it as is (behind the single JS template), or
-   simplify it. I'd keep it; #96 users rely on it.
+   Replace the GUI's `SetMaxLength(14)` with a 64-character soft limit, or none (Phase E).
+5. **Image size cap.** A `max_pixels` check inside `open_source_image()` with a
+   user-readable error (header-only `Image.open` gives the size before decoding). Leave
+   Pillow's global alone. 250 Mpx unless you pick another number (C2).
+6. **KDE activity matching.** Keep it, behind the single JS template (C1).
 7. **Module renames.** `sp_paths` → `paths` and the like happen during the carve-outs
    anyway. Don't rename modules that aren't being carved out.
 
@@ -520,8 +567,13 @@ per module as each is carved out.
 
 ## 10. The uncommitted WIP in `PerspectiveConfig.populate_fields`
 
-It guards a `KeyError` when `default_perspective` names a perspective missing from the
-dict. Four problems:
+**Resolved in Phase A:** the method now uses
+`persd = self.persp_dict.get(persp_name)`. A missing entry is shown as a new profile,
+with the name prefilled and "default for this display setup" ticked, and nothing is
+inserted. Your version is still in the git index if you want to compare.
+
+The original change guarded a `KeyError` when `default_perspective` names a perspective
+missing from the dict. It had four problems:
 
 - **It mutates shared state in a read path.** `self.persp_dict` *is* the editor's staged
   `DisplaySystem.perspective_dict` (`configuration_dialogs.py:587`). Merely opening the
@@ -535,11 +587,10 @@ dict. Four problems:
   `self.display_sys`.
 - **It fails `ruff format --check`** (missing trailing comma).
 
-**Suggested shape.** Use `persd = self.persp_dict.get(persp_name)`. If it is `None`, call
-`onCreateNewProfile(None)` and prefill the name, inserting nothing. Separately, find out
-how the default came to dangle. Candidates:
+Still open: find out how the default came to dangle. Candidates:
 
-- `display_systems.dat` and `.persp` are written as two non-atomic files;
+- `display_systems.dat` and `.persp` are written as two non-atomic files (fixed by C3's
+  atomic writes);
 - `onSave` temporarily sets the default to the `"\0validation"` scratch name, and an
   exception inside `check_for_large_image_size` would leave it there.
 
@@ -559,8 +610,8 @@ how the default came to dangle. Candidates:
 | User messages | `Notifier` port (info/error/confirm) | Problems/results returned; one `on_status` callable | All 27 sites map to a return value (§5.3) |
 | Platform setters | `WallpaperApplier` protocol | Dispatch function + `run()` helper | Your worked example; KDE/GNOME/feh differ in shape |
 | Session | `session/` package with commands, handle, generations | One `session.py`: one thread, deadline-in-queue | Serial processing removes the races by construction; no handle type needed |
-| Persistence hardening | Relocate verbatim | Decision 2 (recommended: replace with atomic replace + semantic conflict check) | It caused U1/U2; threat model is the user's own account |
-| Selection storage | Unchanged | Decision 3 (recommended: move out of `.profile`) | Removes the second writer to config files |
+| Persistence hardening | Relocate verbatim | Replaced by atomic replace + content-digest conflict check (Decision 2, done in Phase A) | It caused U1/U2; threat model is the user's own account |
+| Selection storage | Unchanged | Moved out of `.profile` into the cache dir (Decision 3, done in Phase A) | Removes the second writer to config files |
 | ProfileId limit | 200 → 120 bytes | Keep 200 | v2's arithmetic was wrong, and lowering it drops existing profiles |
 | PEP 758 | Normalise in its own PR | Dropped | `ruff format` reverts it |
 | PyInstaller `.spec` | Required | Not needed | Function-level imports are already bundled |
@@ -571,6 +622,9 @@ how the default came to dangle. Candidates:
 ---
 
 ## Appendix A — Reproductions
+
+These ran against `98ba753`, before Phase A. Each U-item fixed in Phase A now has a
+regression test in `tests/` instead.
 
 All runs use `env -u KDE_FULL_SESSION -u XDG_SESSION_DESKTOP -u DESKTOP_SESSION` (except
 U3) with `HOME`, `XDG_CONFIG_HOME` and `XDG_CACHE_HOME` pointing at a scratch directory,

@@ -40,8 +40,7 @@ def setup_config_path() -> str:
             # if it is not writable, use %LOCALAPPDATA%\Superpaper
             local_appdata = os.getenv("LOCALAPPDATA") or PATH
             config_path = os.path.join(local_appdata, "Superpaper")
-            if not os.path.isdir(config_path):
-                os.mkdir(config_path)
+            os.makedirs(config_path, exist_ok=True)
         return config_path
     else:
         # Mac & other default to the old portable config behavior
@@ -73,8 +72,7 @@ def setup_cache_path() -> str:
             # if it is not writable, use %LOCALAPPDATA%\Superpaper\temp
             local_appdata = os.getenv("LOCALAPPDATA") or PATH
             temp_path = os.path.join(local_appdata, os.path.join("Superpaper", "temp"))
-            if not os.path.isdir(temp_path):
-                os.mkdir(temp_path)
+            os.makedirs(temp_path, exist_ok=True)
         return temp_path
     else:
         # Mac & other keep the old portable config behavior for now.
@@ -94,13 +92,9 @@ def xdg_path_setup(xdg_var, fallback_path) -> str:
         xdg_path = os.path.join(xdg_home, "superpaper")
     else:
         xdg_path = os.path.join(fallback_path, "superpaper")
-    # Check that the path exists and otherwise make it.
-    if os.path.isdir(xdg_path):
-        return xdg_path
-    else:
-        # default path didn't exist
-        os.mkdir(xdg_path)
-        return xdg_path
+    # A fresh account may not have ~/.config or ~/.cache yet.
+    os.makedirs(xdg_path, exist_ok=True)
+    return xdg_path
 
 
 def test_full_write_access(path):
@@ -122,13 +116,12 @@ def test_git_path(path):
 # Derivative paths
 CONFIG_PATH = setup_config_path()  # Save profiles and settings here.
 TEMP_PATH = setup_cache_path()  # Save adjusted wallpapers in here.
-if not os.path.isdir(TEMP_PATH):
-    os.mkdir(TEMP_PATH)
+os.makedirs(TEMP_PATH, exist_ok=True)
 PROFILES_PATH = os.path.join(CONFIG_PATH, "profiles")
 if not os.path.isdir(PROFILES_PATH):
     # Profiles folder didn't exist, so create it and copy example
     # profiles in there assuming it's a first time run.
-    os.mkdir(PROFILES_PATH)
+    os.makedirs(PROFILES_PATH)
     example_src = os.path.join(PATH, "superpaper/profiles")
     if os.path.isdir(example_src):
         for example_file in os.listdir(example_src):

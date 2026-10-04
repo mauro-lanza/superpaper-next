@@ -1,8 +1,10 @@
 import os
+import sys
+import unicodedata
 
 import pytest
 
-from superpaper.profile_id import ProfileId
+from superpaper.profile_id import ProfileId, ProfileIdError
 
 
 def profile_bytes(name, extra=b""):
@@ -30,20 +32,12 @@ def test_discovery_returns_valid_profiles_in_filename_order(profile_modules, mon
     assert [profile.profile_id for profile in data.list_profiles()] == [ProfileId("Alpha"), ProfileId("Zulu")]
 
 
-@pytest.mark.parametrize(
-    ("filename", "internal_name", "kind"),
-    [
-        ("bad=name.profile", "bad=name", "INVALID_FILENAME"),
-        ("saved.profile", "other", "NAME_MISMATCH"),
-    ],
-)
-def test_identity_failures_are_quarantined_without_prompt(
-    profile_modules, monkeypatch, tmp_path, filename, internal_name, kind
-):
+@pytest.mark.parametrize("stem", ["back\\slash", "bell\x07", "cli", "Create a new profile"])
+def test_unsafe_filenames_are_ignored_without_prompt(profile_modules, monkeypatch, tmp_path, stem):
     data, _ = profile_modules
     profiles = prepare(data, monkeypatch, tmp_path)
-    path = profiles / filename
-    original = profile_bytes(internal_name)
+    path = profiles / f"{stem}.profile"
+    original = profile_bytes(stem)
     path.write_bytes(original)
     prompts = []
     monkeypatch.setattr(data, "show_message_dialog", lambda *args, **kwargs: prompts.append(args) or True)
@@ -51,62 +45,96 @@ def test_identity_failures_are_quarantined_without_prompt(
     inventory = data.discover_profile_inventory()
 
     assert inventory.entries == ()
-    assert [diagnostic.kind.name for diagnostic in inventory.diagnostics] == [kind]
+    assert [diagnostic.kind.name for diagnostic in inventory.diagnostics] == ["INVALID_FILENAME"]
     assert data.list_profiles() == []
     assert prompts == []
     assert path.read_bytes() == original
 
 
-def test_portable_collision_quarantines_every_entry(profile_modules, monkeypatch, tmp_path):
+@pytest.mark.skipif(sys.platform == "win32", reason="these filenames cannot exist on Windows")
+@pytest.mark.parametrize(
+    ("stem", "name_line"),
+    [
+        ("bad=name", "bad=name"),
+        ("Work: dual", "Work: dual"),
+        ("saved", "renamed by hand"),
+        ("Work", "work"),
+    ],
+)
+def test_profiles_saved_by_older_versions_keep_loading(profile_modules, monkeypatch, tmp_path, stem, name_line):
     data, _ = profile_modules
     profiles = prepare(data, monkeypatch, tmp_path)
-    upper = profiles / "Work.profile"
-    lower = profiles / "work.profile"
-    upper.write_bytes(profile_bytes("Work"))
-    lower.write_bytes(profile_bytes("work"))
+    path = profiles / f"{stem}.profile"
+    original = profile_bytes(name_line)
+    path.write_bytes(original)
+
+    (profile,) = data.list_profiles()
+
+    assert profile.profile_id == ProfileId(stem)
+    assert profile.name == stem
+    assert path.read_bytes() == original
+
+
+def test_case_variant_profiles_both_load(profile_modules, monkeypatch, tmp_path):
+    data, _ = profile_modules
+    profiles = prepare(data, monkeypatch, tmp_path)
+    (profiles / "Work.profile").write_bytes(profile_bytes("Work"))
+    (profiles / "work.profile").write_bytes(profile_bytes("work"))
+    if len(list(profiles.iterdir())) == 1:
+        pytest.skip("the filesystem is case-insensitive")
 
     inventory = data.discover_profile_inventory()
 
-    assert inventory.entries == ()
-    assert [item.kind for item in inventory.diagnostics] == [
-        data.ProfileDiagnosticKind.PORTABLE_COLLISION,
-        data.ProfileDiagnosticKind.PORTABLE_COLLISION,
-    ]
-    assert data.open_profile("Work") is None
-    assert upper.read_bytes() == profile_bytes("Work")
-    assert lower.read_bytes() == profile_bytes("work")
+    assert [entry.profile_id.value for entry in inventory.entries] == ["Work", "work"]
+    assert data.open_profile("Work").name == "Work"
+    assert data.open_profile("work").name == "work"
 
 
 @pytest.mark.parametrize("outside", [False, True])
-def test_symlink_profiles_are_never_discovered(profile_modules, monkeypatch, tmp_path, outside):
+def test_symlinked_profiles_load(profile_modules, monkeypatch, tmp_path, outside):
     data, _ = profile_modules
     profiles = prepare(data, monkeypatch, tmp_path)
     target = (tmp_path if outside else profiles) / "target"
     target.write_bytes(profile_bytes("linked"))
-    link = profiles / "linked.profile"
-    link.symlink_to(target)
-    original = target.read_bytes()
+    (profiles / "linked.profile").symlink_to(target)
+
+    inventory = data.discover_profile_inventory()
+
+    assert [entry.profile_id.value for entry in inventory.entries] == ["linked"]
+    assert data.open_profile("linked").profile_id == ProfileId("linked")
+
+
+def test_broken_symlink_is_a_diagnostic(profile_modules, monkeypatch, tmp_path):
+    data, _ = profile_modules
+    profiles = prepare(data, monkeypatch, tmp_path)
+    (profiles / "gone.profile").symlink_to(tmp_path / "missing")
 
     inventory = data.discover_profile_inventory()
 
     assert inventory.entries == ()
-    assert inventory.diagnostics[0].kind is data.ProfileDiagnosticKind.SYMLINK
-    assert data.open_profile("linked") is None
-    assert target.read_bytes() == original
+    assert [diagnostic.kind for diagnostic in inventory.diagnostics] == [data.ProfileDiagnosticKind.NOT_REGULAR_FILE]
 
 
-def test_safe_open_rejects_paths_and_accepts_unicode_id(profile_modules, monkeypatch, tmp_path):
+def test_open_rejects_paths_and_accepts_unicode_names(profile_modules, monkeypatch, tmp_path):
     data, _ = profile_modules
     profiles = prepare(data, monkeypatch, tmp_path)
-    path = profiles / "Työ.profile"
-    path.write_bytes(profile_bytes("Työ"))
-    unicode_path = profiles / "Työ.profile"
-    unicode_path.write_bytes(profile_bytes("Työ"))
+    composed = unicodedata.normalize("NFC", "Työ")
+    path = profiles / f"{composed}.profile"
+    path.write_bytes(profile_bytes(composed))
 
     assert data.open_profile("../outside") is None
-    assert data.open_profile(str(unicode_path)) is None
-    assert data.open_profile("Työ") is None
-    assert data.open_profile(ProfileId("Työ")).profile_id == ProfileId("Työ")
+    assert data.open_profile(str(path)) is None
+    assert data.open_profile(composed).profile_id == ProfileId(composed)
+    assert data.open_profile(ProfileId(composed)).profile_id == ProfileId(composed)
+
+
+def test_decomposed_unicode_filename_loads(profile_modules, monkeypatch, tmp_path):
+    data, _ = profile_modules
+    profiles = prepare(data, monkeypatch, tmp_path)
+    decomposed = unicodedata.normalize("NFD", "Työ")
+    (profiles / f"{decomposed}.profile").write_bytes(profile_bytes(decomposed))
+
+    assert [profile.name for profile in data.list_profiles()] == [decomposed]
 
 
 def test_rename_source_lookup_uses_original_id(profile_modules, monkeypatch, tmp_path):
@@ -120,7 +148,7 @@ def test_rename_source_lookup_uses_original_id(profile_modules, monkeypatch, tmp
     assert data.open_profile(ProfileId("Renamed")) is None
 
 
-def test_delete_uses_loaded_identity_and_rejects_replacement(profile_modules, monkeypatch, tmp_path):
+def test_delete_uses_loaded_content_and_rejects_replacement(profile_modules, monkeypatch, tmp_path):
     data, _ = profile_modules
     profiles = prepare(data, monkeypatch, tmp_path)
     path = profiles / "Work.profile"
@@ -138,21 +166,20 @@ def test_delete_uses_loaded_identity_and_rejects_replacement(profile_modules, mo
     assert path.read_bytes() == replacement
 
 
-def test_delete_rejects_symlink_replacement_without_touching_target(profile_modules, monkeypatch, tmp_path):
+def test_deleting_a_symlinked_profile_removes_only_the_link(profile_modules, monkeypatch, tmp_path):
     data, _ = profile_modules
     profiles = prepare(data, monkeypatch, tmp_path)
-    path = profiles / "Work.profile"
-    path.write_bytes(profile_bytes("Work"))
+    dotfile = tmp_path / "dotfiles" / "Work.profile"
+    dotfile.parent.mkdir()
+    dotfile.write_bytes(profile_bytes("Work"))
+    link = profiles / "Work.profile"
+    link.symlink_to(dotfile)
     loaded = data.open_profile(ProfileId("Work"))
-    path.unlink()
-    sentinel = tmp_path / "sentinel.profile"
-    sentinel.write_bytes(profile_bytes("Work"))
-    path.symlink_to(sentinel)
 
-    with pytest.raises((data.ManagedPathError, OSError)):
-        data.delete_managed_profile(loaded)
+    data.delete_managed_profile(loaded)
 
-    assert sentinel.read_bytes() == profile_bytes("Work")
+    assert not link.is_symlink()
+    assert dotfile.read_bytes() == profile_bytes("Work")
 
 
 def test_delete_selection_ignores_editable_traversal_and_deletes_selected_profile(
@@ -167,10 +194,11 @@ def test_delete_selection_ignores_editable_traversal_and_deletes_selected_profil
     other_path.write_bytes(profile_bytes("Other"))
     outside.write_bytes(b"sentinel")
     loaded = data.list_profiles()
-    editable_name = "../outside"
 
+    # The editable name field can hold anything; it never becomes an identity.
+    with pytest.raises(ProfileIdError):
+        ProfileId.parse("../outside")
     selected = data.managed_profile_for_selection(loaded, ProfileId("Work"))
-    assert editable_name == "../outside"
     data.delete_managed_profile(selected)
 
     assert not selected_path.exists()
@@ -191,6 +219,17 @@ def test_malformed_content_keeps_legacy_deletion_prompt(profile_modules, monkeyp
     assert path.exists()
 
 
+def test_malformed_profile_is_deleted_when_confirmed(profile_modules, monkeypatch, tmp_path):
+    data, _ = profile_modules
+    profiles = prepare(data, monkeypatch, tmp_path)
+    path = profiles / "broken.profile"
+    path.write_bytes(profile_bytes("broken", b"delay=not-a-number\n"))
+    monkeypatch.setattr(data, "show_message_dialog", lambda *args, **kwargs: True)
+
+    assert data.list_profiles() == []
+    assert not path.exists()
+
+
 def test_malformed_prompt_retains_replacement_made_during_confirmation(profile_modules, monkeypatch, tmp_path):
     data, _ = profile_modules
     profiles = prepare(data, monkeypatch, tmp_path)
@@ -209,7 +248,7 @@ def test_malformed_prompt_retains_replacement_made_during_confirmation(profile_m
     assert path.read_bytes() == replacement
 
 
-def test_read_only_identity_failure_is_byte_for_byte_untouched(profile_modules, monkeypatch, tmp_path):
+def test_loading_a_read_only_profile_never_writes(profile_modules, monkeypatch, tmp_path):
     data, _ = profile_modules
     profiles = prepare(data, monkeypatch, tmp_path)
     path = profiles / "saved.profile"
@@ -219,41 +258,36 @@ def test_read_only_identity_failure_is_byte_for_byte_untouched(profile_modules, 
     prompts = []
     monkeypatch.setattr(data, "show_message_dialog", lambda *args, **kwargs: prompts.append(args) or True)
 
-    assert data.list_profiles() == []
-    assert data.open_profile("saved") is None
+    assert [profile.name for profile in data.list_profiles()] == ["saved"]
+    assert data.open_profile("saved").name == "saved"
     assert prompts == []
     assert path.read_bytes() == original
 
 
-def test_io_failure_is_diagnostic_without_deletion_prompt(profile_modules, monkeypatch, tmp_path):
+@pytest.mark.skipif(sys.platform == "win32" or os.geteuid() == 0, reason="needs POSIX permissions, not root")
+def test_unreadable_profile_is_diagnostic_without_deletion_prompt(profile_modules, monkeypatch, tmp_path):
     data, _ = profile_modules
     profiles = prepare(data, monkeypatch, tmp_path)
     path = profiles / "saved.profile"
     path.write_bytes(profile_bytes("saved"))
+    path.chmod(0)
     prompts = []
-    real_open = data.os.open
-
-    def fail_open(candidate, flags):
-        if candidate == path:
-            message = "denied"
-            raise PermissionError(message)
-        return real_open(candidate, flags)
-
-    monkeypatch.setattr(data.os, "open", fail_open)
     monkeypatch.setattr(data, "show_message_dialog", lambda *args, **kwargs: prompts.append(args) or True)
 
     inventory = data.discover_profile_inventory()
+    profiles_listed = data.list_profiles()
+    path.chmod(0o644)
 
     assert inventory.entries == ()
     assert inventory.diagnostics[0].kind is data.ProfileDiagnosticKind.IO_ERROR
-    assert data.list_profiles() == []
+    assert profiles_listed == []
     assert prompts == []
     assert path.read_bytes() == profile_bytes("saved")
 
 
 @pytest.mark.parametrize(
     "setting",
-    [b"ppi=0;0\n", b"diagonal_inches=0;24\n", b"zoom=\n", b"align=\n"],
+    [b"diagonal_inches=0;24\n", b"zoom=\n", b"align=\n"],
 )
 def test_construction_failure_is_malformed_and_prompted(profile_modules, monkeypatch, tmp_path, setting):
     data, _ = profile_modules
@@ -281,47 +315,4 @@ def test_fifo_profile_is_diagnostic_without_blocking_or_prompt(profile_modules, 
 
     assert inventory.entries == ()
     assert inventory.diagnostics[0].kind is data.ProfileDiagnosticKind.NOT_REGULAR_FILE
-    assert prompts == []
-
-
-@pytest.mark.parametrize("invalid_kind", ["malformed", "symlink", "fifo"])
-def test_invalid_entry_reserves_collision_key(profile_modules, monkeypatch, tmp_path, invalid_kind):
-    if invalid_kind == "fifo" and not hasattr(os, "mkfifo"):
-        pytest.skip("FIFOs are unavailable")
-    data, _ = profile_modules
-    profiles = prepare(data, monkeypatch, tmp_path)
-    prompts = []
-    monkeypatch.setattr(data, "show_message_dialog", lambda *args, **kwargs: prompts.append(args) or True)
-    valid = profiles / "Work.profile"
-    invalid = profiles / "work.profile"
-    valid.write_bytes(profile_bytes("Work"))
-    if invalid_kind == "malformed":
-        invalid.write_bytes(profile_bytes("work", b"delay=not-a-number\n"))
-    elif invalid_kind == "symlink":
-        target = tmp_path / "target.profile"
-        target.write_bytes(profile_bytes("work"))
-        invalid.symlink_to(target)
-    else:
-        os.mkfifo(invalid)
-
-    inventory = data.discover_profile_inventory()
-
-    assert inventory.entries == ()
-    collision_paths = {
-        diagnostic.path
-        for diagnostic in inventory.diagnostics
-        if diagnostic.kind is data.ProfileDiagnosticKind.PORTABLE_COLLISION
-    }
-    assert collision_paths == {valid, invalid}
-    assert any(
-        diagnostic.path == invalid
-        and diagnostic.kind
-        in {
-            data.ProfileDiagnosticKind.MALFORMED_CONTENT,
-            data.ProfileDiagnosticKind.SYMLINK,
-            data.ProfileDiagnosticKind.NOT_REGULAR_FILE,
-        }
-        for diagnostic in inventory.diagnostics
-    )
-    assert data.list_profiles() == []
     assert prompts == []

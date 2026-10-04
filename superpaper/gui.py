@@ -4,13 +4,14 @@ New wallpaper configuration GUI for Superpaper.
 
 import copy
 import os
-import sys
 import tempfile
 import time
 from operator import itemgetter
 from typing import Literal, overload
 
-from PIL import Image, ImageEnhance, UnidentifiedImageError
+import wx  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-import]
+import wx.adv  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-import]
+from PIL import Image, ImageEnhance, ImageOps
 
 import superpaper.sp_logging as sp_logging
 import superpaper.wallpaper_processing as wpproc
@@ -20,6 +21,7 @@ from superpaper.configuration_dialogs import (
     HelpFrame,
     HelpPopup,
     PerspectiveConfig,
+    source_icon,
 )
 from superpaper.data import (
     CLIProfileData,
@@ -38,12 +40,6 @@ from superpaper.wallpaper_processing import (
     change_wallpaper_job,
     resize_to_fill,
 )
-
-try:
-    import wx  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-import]
-    import wx.adv  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-import]
-except ImportError:
-    sys.exit()
 
 
 class ConfigFrame(wx.Frame):
@@ -72,7 +68,7 @@ class WallpaperSettingsPanel(wx.Panel):
         self.frame = parent
         self.parent_tray_obj = parent_tray_obj
         self.current_profile_id = None
-        self.expected_source_identity = None
+        self.expected_source_digest = None
         self.loaded_profile = None
         self.sizer_main = wx.BoxSizer(wx.VERTICAL)
         self.sizer_top_half = wx.BoxSizer(wx.HORIZONTAL)  # wallpaper/monitor preview
@@ -602,7 +598,7 @@ class WallpaperSettingsPanel(wx.Panel):
         """Populates config dialog fields with data from a profile."""
         self._loading = True
         self.current_profile_id = profile.profile_id
-        self.expected_source_identity = profile.source_identity
+        self.expected_source_digest = profile.source_digest
         self.loaded_profile = profile
         self.tc_name.ChangeValue(profile.name)
 
@@ -709,9 +705,10 @@ class WallpaperSettingsPanel(wx.Panel):
             display_data = self.display_sys.get_disp_list(True)
         else:
             display_data = self.display_sys.get_disp_list(False)
+        # Preview the tray's instance when it has one: its selection follows the slideshow.
+        live_profile = self.parent_tray_obj.get_profile_by_name(profile.name) or profile
         self.wpprev_pnl.preview_wallpaper(
-            # profile.next_wallpaper_files(peek=True),
-            self.parent_tray_obj.get_profile_by_name(profile.name).next_wallpaper_files(peek=True),
+            live_profile.next_wallpaper_files(peek=True),
             self.show_advanced_settings,
             self.use_multi_image,
             display_data,
@@ -755,7 +752,7 @@ class WallpaperSettingsPanel(wx.Panel):
         selection), so dirtiness tracks real persisted differences.
         """
         tmp_profile, _groups = self._collect_temp_profile(resolve_selection=False)
-        return tmp_profile._serialize()
+        return tmp_profile.serialize()
 
     def _set_clean_baseline(self):
         """Record the current field state as the saved/clean baseline."""
@@ -1214,32 +1211,7 @@ class WallpaperSettingsPanel(wx.Panel):
             sp_logging.G_LOGGER.info("UseMultImg: %s. Bad data_row: %s", self.use_multi_image, data_row)
 
     def add_to_imagelist(self, path):
-        folder_bmp = wx.ArtProvider.GetBitmap(wx.ART_FOLDER, wx.ART_TOOLBAR, wx.Size(*self.tsize))
-        if os.path.isdir(path):
-            img_id = self.image_list.Add(folder_bmp)
-        else:
-            thumb_bmp = self.create_thumb_bmp(path)
-            img_id = self.image_list.Add(thumb_bmp)
-        return img_id
-
-    def create_thumb_bmp(self, filename):
-        wximg = wx.Image(filename, type=wx.BITMAP_TYPE_ANY)
-        imgsize = wximg.GetSize()
-        w2h_ratio = imgsize[0] / imgsize[1]
-        if w2h_ratio > 1:
-            target_w = self.tsize[0]
-            target_h = target_w / w2h_ratio
-            pos = (0, round((target_w - target_h) / 2))
-        else:
-            target_h = self.tsize[1]
-            target_w = target_h * w2h_ratio
-            pos = (round((target_h - target_w) / 2), 0)
-        bmp = (
-            wximg.Scale(round(target_w), round(target_h), quality=wx.IMAGE_QUALITY_BOX_AVERAGE)
-            .Resize(wx.Size(*self.tsize), wx.Point(pos))
-            .ConvertToBitmap()
-        )
-        return bmp
+        return self.image_list.Add(source_icon(path, self.tsize))
 
     def populate_lc_browse(self, pathslist, imglist):
         for path_item in pathslist:
@@ -1265,7 +1237,7 @@ class WallpaperSettingsPanel(wx.Panel):
         preview_file = None
         if os.path.isdir(path):
             for f in sorted(os.listdir(path)):
-                if f.lower().endswith(wpproc.G_SUPPORTED_IMAGE_EXTENSIONS):
+                if wpproc.is_supported_image(f):
                     preview_file = os.path.join(path, f)
                     break
         elif os.path.isfile(path):
@@ -1585,18 +1557,15 @@ class WallpaperSettingsPanel(wx.Panel):
         if tmp_profile.test_save(current_profile_id=current_profile_id):
             old_profile_binding = self.loaded_profile.hk_binding if self.loaded_profile is not None else None
             active = self.parent_tray_obj.active_profile
-            update_active = (
-                current_profile_id is not None
-                and active is not None
-                and active.profile_id == current_profile_id
-                and tmp_profile.name != current_profile_id.value
+            saving_active_profile = (
+                current_profile_id is not None and active is not None and active.profile_id == current_profile_id
             )
             try:
                 saved_file = save_managed_profile(
                     tmp_profile,
                     current_profile_id=current_profile_id,
-                    expected_source_identity=self.expected_source_identity,
-                    update_active=update_active,
+                    expected_source_digest=self.expected_source_digest,
+                    update_active=saving_active_profile and tmp_profile.name != current_profile_id.value,
                 )
             except OSError as error:
                 sp_logging.G_LOGGER.warning("Could not save profile: %s", error)
@@ -1604,16 +1573,14 @@ class WallpaperSettingsPanel(wx.Panel):
                 del busy
                 return None
             self.parent_tray_obj.reload_profiles(event)
-            # The just-saved profile becomes the active one so reopening the
-            # dialog shows the saved state (span mode, etc.) instead of a stale
-            # in-memory profile from before the edit.
-            self.parent_tray_obj.active_profile = self.parent_tray_obj.get_profile_by_name(tmp_profile.name)
+            if saving_active_profile:
+                # The running profile keeps running under its (possibly new) name, and
+                # edits such as the slideshow delay take effect without a restart.
+                # Saving any other profile leaves the running slideshow alone.
+                self.parent_tray_obj.active_profile = self.parent_tray_obj.get_profile_by_name(tmp_profile.name)
+                self.parent_tray_obj.rearm_active_timer()
             self.update_choiceprofile()
             self.parent_tray_obj.update_hotkey(tmp_profile.name, old_profile_binding, tmp_profile.hk_binding)
-            # Re-arm the active profile's slideshow timer so toggling slideshow
-            # (or editing the delay) takes effect immediately instead of only
-            # after an app restart.
-            self.parent_tray_obj.rearm_active_timer()
             self.choice_profiles.SetSelection(self.choice_profiles.FindString(tmp_profile.name))
             # Update wallpaper preview from selected profile. The profile's
             # persistent selection (if any) is what next_wallpaper_files returns.
@@ -1623,7 +1590,7 @@ class WallpaperSettingsPanel(wx.Panel):
                 del busy
                 return None
             self.current_profile_id = saved_profile.profile_id
-            self.expected_source_identity = saved_profile.source_identity
+            self.expected_source_digest = saved_profile.source_digest
             self.loaded_profile = saved_profile
             if self.show_advanced_settings:
                 display_data = self.display_sys.get_disp_list(True)
@@ -1651,7 +1618,7 @@ class WallpaperSettingsPanel(wx.Panel):
         """Empties the wallpaper profile config fields."""
         self._loading = True
         self.current_profile_id = None
-        self.expected_source_identity = None
+        self.expected_source_digest = None
         self.loaded_profile = None
         self.choice_profiles.SetSelection(self.choice_profiles.FindString("Create a new profile"))
 
@@ -2065,6 +2032,10 @@ class WallpaperPreviewPanel(wx.Panel):
         self._last_spangroups = spangroups
         self.refresh_preview(use_ppi_px)
         self.current_preview_images = image_list
+        if not image_list:
+            # Nothing to show, e.g. the profile's images are on an unmounted drive.
+            self.draw_displays(use_ppi_px)
+            return
 
         def safe_sub_bitmap(bm, rect):
             if rect.GetBottom() >= bm.GetHeight():
@@ -2160,14 +2131,12 @@ class WallpaperPreviewPanel(wx.Panel):
     def resize_and_bitmap(self, fname, size, enhance_color=False):
         """Take filename of an image and resize and crop it to size."""
         try:
-            pil = resize_to_fill(Image.open(fname), size, quality="fast", zoom=self.zoom, offset=self.offset)
-        except UnidentifiedImageError:
-            msg = (
-                f"Opening image '{fname}' failed with PIL.UnidentifiedImageError."
-                "It could be corrupted or is of foreign type."
-            )
-            sp_logging.G_LOGGER.info(msg)
-            # show_message_dialog(msg)
+            with Image.open(fname) as source:
+                # Orient the image as the renderer does, so the preview matches the result.
+                upright = ImageOps.exif_transpose(source)
+                pil = resize_to_fill(upright, size, quality="fast", zoom=self.zoom, offset=self.offset)
+        except OSError as error:  # unreadable, truncated, or no longer there
+            sp_logging.G_LOGGER.info("Cannot preview image '%s': %s", fname, error)
             black_bmp = wx.Bitmap.FromRGBA(size[0], size[1], red=0, green=0, blue=0, alpha=255)
             if enhance_color:
                 return (black_bmp, black_bmp)

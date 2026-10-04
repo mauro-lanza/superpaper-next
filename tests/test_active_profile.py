@@ -63,12 +63,12 @@ def test_empty_active_profile_returns_none(profile_modules, monkeypatch, tmp_pat
     assert data.read_active_profile() is None
 
 
-def test_missing_active_profile_file_is_created(profile_modules, monkeypatch, tmp_path):
+def test_missing_pointer_reads_as_none_without_creating_it(profile_modules, monkeypatch, tmp_path):
     data, wpproc = profile_modules
     cache = prepare_profile(data, wpproc, monkeypatch, tmp_path)
 
     assert data.read_active_profile() is None
-    assert (cache / "running_profile").is_file()
+    assert not (cache / "running_profile").exists()
 
 
 def test_invalid_active_profile_pointer_is_rejected_without_rewrite(profile_modules, monkeypatch, tmp_path):
@@ -82,7 +82,7 @@ def test_invalid_active_profile_pointer_is_rejected_without_rewrite(profile_modu
     assert pointer.read_bytes() == original
 
 
-def test_active_profile_rejects_name_mismatch_without_rewrite(profile_modules, monkeypatch, tmp_path):
+def test_pointer_resolves_a_profile_whose_name_line_differs(profile_modules, monkeypatch, tmp_path):
     data, wpproc = profile_modules
     cache = prepare_profile(data, wpproc, monkeypatch, tmp_path)
     pointer = cache / "running_profile"
@@ -90,28 +90,21 @@ def test_active_profile_rejects_name_mismatch_without_rewrite(profile_modules, m
     profiles = tmp_path / "profiles"
     (profiles / "test.profile").write_text("name=other\n", encoding="utf-8")
 
-    assert data.read_active_profile() is None
+    assert data.read_active_profile().name == "test"
     assert pointer.read_text(encoding="utf-8") == "test"
 
 
-def test_active_profile_rejects_symlink_and_collision(profile_modules, monkeypatch, tmp_path):
+def test_pointer_resolves_a_symlinked_profile(profile_modules, monkeypatch, tmp_path):
     data, wpproc = profile_modules
     cache = prepare_profile(data, wpproc, monkeypatch, tmp_path)
     profiles = tmp_path / "profiles"
-    pointer = cache / "running_profile"
-    original = (profiles / "test.profile").read_bytes()
-    (profiles / "Test.profile").write_bytes(original.replace(b"name=test", b"name=Test"))
-    pointer.write_text("test", encoding="utf-8")
-
-    assert data.read_active_profile() is None
-    (profiles / "Test.profile").unlink()
-    (profiles / "test.profile").unlink()
     target = tmp_path / "target.profile"
-    target.write_bytes(original)
+    target.write_bytes((profiles / "test.profile").read_bytes())
+    (profiles / "test.profile").unlink()
     (profiles / "test.profile").symlink_to(target)
-    assert data.read_active_profile() is None
-    assert pointer.read_text(encoding="utf-8") == "test"
-    assert target.read_bytes() == original
+    (cache / "running_profile").write_text("test", encoding="utf-8")
+
+    assert data.read_active_profile().name == "test"
 
 
 def test_invalid_active_profile_write_does_not_touch_pointer(profile_modules, monkeypatch, tmp_path):
@@ -135,26 +128,15 @@ def test_active_profile_write_accepts_profile_id(profile_modules, monkeypatch, t
     assert (cache / "running_profile").read_text(encoding="utf-8") == "test"
 
 
-def test_active_profile_write_rejects_symlink_without_touching_target(profile_modules, monkeypatch, tmp_path):
-    data, wpproc = profile_modules
-    cache = prepare_profile(data, wpproc, monkeypatch, tmp_path)
-    sentinel = tmp_path / "sentinel"
-    sentinel.write_text("outside", encoding="utf-8")
-    (cache / "running_profile").symlink_to(sentinel)
-
-    with pytest.raises(data.ManagedPathError):
-        data.write_active_profile("test")
-
-    assert sentinel.read_text(encoding="utf-8") == "outside"
-
-
-def test_active_profile_write_rejects_nonregular_leaf(profile_modules, monkeypatch, tmp_path):
+def test_active_profile_write_never_replaces_a_directory(profile_modules, monkeypatch, tmp_path):
     data, wpproc = profile_modules
     cache = prepare_profile(data, wpproc, monkeypatch, tmp_path)
     (cache / "running_profile").mkdir()
 
-    with pytest.raises(data.ManagedPathError):
+    with pytest.raises(OSError):
         data.write_active_profile("test")
+
+    assert (cache / "running_profile").is_dir()
 
 
 @pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="FIFOs are unavailable")

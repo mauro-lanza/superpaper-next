@@ -221,12 +221,6 @@ class XYPlaneRectangle:
         )
         return corners
 
-    def corners_2d(self):
-        """Return plane corners in its own coordinates."""
-        width, height = self.size
-        corners = ((0, 0), (width, 0), (0, height), (width, height))
-        return corners
-
     def side_middle_pt(self, side):
         """Return the midpoint of side (left/right)."""
         if side == "left":

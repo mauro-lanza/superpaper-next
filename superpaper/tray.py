@@ -6,6 +6,9 @@ import subprocess
 import sys
 from threading import Lock
 
+import wx  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-import]
+import wx.adv  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-import]
+
 import superpaper.sp_logging as sp_logging
 import superpaper.sp_paths as sp_paths
 import superpaper.wallpaper_processing as wpproc
@@ -29,15 +32,6 @@ from superpaper.wallpaper_processing import (
     run_profile_job,
 )
 
-try:
-    import wx  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-import]
-    import wx.adv  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-import]
-except ImportError as import_e:
-    sp_logging.G_LOGGER.info("Failed to define tray applet classes. Is wxPython installed?")
-    sp_logging.G_LOGGER.info(import_e)
-    sys.exit()
-
-
 # Constants
 TRAY_TOOLTIP = "Superpaper"
 STARTUP_PROFILE: ProfileId | None = None
@@ -59,40 +53,29 @@ def tray_loop(profile: ProfileId | str | os.PathLike[str] | None = None):
     global STARTUP_PROFILE
     if not os.path.isdir(sp_paths.PROFILES_PATH):
         os.mkdir(sp_paths.PROFILES_PATH)
-    if "wx" in sys.modules:
-        # On Linux (wxGTK) the tray icon (StatusNotifierItem) title is derived
-        # from the program name, i.e. the basename of sys.argv[0]. When launched
-        # via "python -m superpaper" this becomes "__main__.py", so normalize it
-        # to a clean application name before the wx.App is created.
-        sys.argv[0] = "Superpaper"
-        if profile:
-            try:
-                STARTUP_PROFILE = _startup_profile_id(profile)
-            except ProfileIdError:
-                STARTUP_PROFILE = None
-            sp_logging.G_LOGGER.info(f"Startup profile: {profile}")
-        if sys.platform == "linux":
-            # Route incoming D-Bus calls (native SNI tray) through wxGTK's own
-            # GLib main loop. Must be set as the default main loop before the
-            # first bus connection is created (i.e. before the wx.App).
-            try:
-                from dbus.mainloop.glib import DBusGMainLoop  # ty:ignore[unresolved-import]
+    # On Linux (wxGTK) the tray icon (StatusNotifierItem) title is derived
+    # from the program name, i.e. the basename of sys.argv[0]. When launched
+    # via "python -m superpaper" this becomes "__main__.py", so normalize it
+    # to a clean application name before the wx.App is created.
+    sys.argv[0] = "Superpaper"
+    if profile:
+        try:
+            STARTUP_PROFILE = _startup_profile_id(profile)
+        except ProfileIdError:
+            STARTUP_PROFILE = None
+        sp_logging.G_LOGGER.info(f"Startup profile: {profile}")
+    if sys.platform == "linux":
+        # Route incoming D-Bus calls (native SNI tray) through wxGTK's own
+        # GLib main loop. Must be set as the default main loop before the
+        # first bus connection is created (i.e. before the wx.App).
+        try:
+            from dbus.mainloop.glib import DBusGMainLoop  # ty:ignore[unresolved-import]
 
-                DBusGMainLoop(set_as_default=True)
-            except ImportError:
-                pass
-        app = App(False)
-        app.MainLoop()
-    else:
-        print(
-            "ERROR: Module 'wx' import has failed. Is it installed? \
-GUI unavailable, exiting."
-        )
-        sp_logging.G_LOGGER.error(
-            "ERROR: Module 'wx' import has failed. Is it installed? \
-GUI unavailable, exiting."
-        )
-        sys.exit()
+            DBusGMainLoop(set_as_default=True)
+        except ImportError:
+            pass
+    app = App(False)
+    app.MainLoop()
 
 
 # Tray applet definitions
@@ -163,8 +146,11 @@ class TaskBarIcon(wx.adv.TaskBarIcon):
         #     sp_logging.G_LOGGER.info("Starting up the first profile found.")
         #     self.start_profile(wx.EVT_MENU, self.list_of_profiles[0])
 
-        # self.hk = None
-        # self.hk2 = None
+        # Hotkey callbacks arrive on system_hotkey's listener thread; every one of
+        # them is handed to the wx main loop (wx.CallAfter) before touching state.
+        self.hk = None
+        self.hk2 = None
+        self.seen_binding = set()
         if self.g_settings.use_hotkeys is True:
             try:
                 # import keyboard # https://github.com/boppreh/keyboard
@@ -176,7 +162,6 @@ class TaskBarIcon(wx.adv.TaskBarIcon):
                     consumer=self.profile_consumer,  # pyright: ignore[reportArgumentType]
                     check_queue_interval=0.05,
                 )
-                self.seen_binding = set()
                 self.register_hotkeys()
             except ImportError as excep:
                 sp_logging.G_LOGGER.info(
@@ -213,6 +198,10 @@ hotkeys will not work. Exception: %s",
 
     def register_hotkeys(self):
         """Registers system-wide hotkeys for profiles and application interaction."""
+        hk, hk2 = self.hk, self.hk2
+        if hk is None or hk2 is None:
+            # Hotkeys were off or unavailable at startup; turning them on applies after a restart.
+            return
         if self.g_settings.use_hotkeys is True:
             if "system_hotkey" not in sys.modules:
                 try:
@@ -267,9 +256,9 @@ hotkeys will not work. Exception: %s",
                     # register general bindings
                     if self.g_settings.hk_binding_next not in self.seen_binding:
                         try:
-                            self.hk.register(
+                            hk.register(
                                 self.g_settings.hk_binding_next,
-                                callback=lambda x: self.next_wallpaper(wx.EVT_MENU),
+                                callback=lambda _event: wx.CallAfter(self.next_wallpaper, None),
                                 overwrite=False,
                             )
                             self.seen_binding.add(self.g_settings.hk_binding_next)
@@ -283,9 +272,9 @@ Check that it is formatted properly and valid keys."
                                 show_message_dialog(msg, "Error")
                     if self.g_settings.hk_binding_pause not in self.seen_binding:
                         try:
-                            self.hk.register(
+                            hk.register(
                                 self.g_settings.hk_binding_pause,
-                                callback=lambda x: self.pause_timer(wx.EVT_MENU),
+                                callback=lambda _event: wx.CallAfter(self.pause_timer, None),
                                 overwrite=False,
                             )
                             self.seen_binding.add(self.g_settings.hk_binding_pause)
@@ -315,7 +304,9 @@ Check that it is formatted properly and valid keys."
                             )
                         if profile.hk_binding is not None and profile.hk_binding not in self.seen_binding:
                             try:
-                                self.hk2.register(profile.hk_binding, profile, overwrite=False)
+                                # Bind the identity, not the object: a profile edited later
+                                # must start with its current settings.
+                                hk2.register(profile.hk_binding, profile.profile_id, overwrite=False)
                                 self.seen_binding.add(profile.hk_binding)
                             # except (SystemHotkeyError, SystemRegisterError, InvalidKeyError):
                             except Exception:
@@ -338,27 +329,31 @@ It is already registered for another action."
                         sp_logging.G_LOGGER.info(sys.exc_info()[0])
 
     def update_hotkey(self, profile_name, old_hotkey, new_hotkey):
-        if new_hotkey:
-            new_hotkey = tuple(new_hotkey.split("+"))
-        else:
-            return
+        """Rebind a profile's hotkey after the profile was saved with a different one."""
+        if self.hk2 is None:
+            return  # hotkeys are disabled or unavailable
+        new_hotkey = tuple(new_hotkey.split("+")) if new_hotkey else None
         if old_hotkey == new_hotkey:
             return
-        profile = self.get_profile_by_name(profile_name)
-        if old_hotkey is not None:
-            self.hk2.unregister(old_hotkey)
-            self.seen_binding.remove(old_hotkey)
-        if new_hotkey is not None and profile is not None:
+        if old_hotkey in self.seen_binding:
             try:
-                self.hk2.register(new_hotkey, profile, overwrite=False)
-                self.seen_binding.add(new_hotkey)
+                self.hk2.unregister(old_hotkey)
+                self.seen_binding.remove(old_hotkey)
             except Exception:
-                msg = f"Error: could not register hotkey {profile.hk_binding}. \
+                # The binding belongs to another action, or the library refused it.
+                sp_logging.G_LOGGER.warning("Could not unregister hotkey %s: %s", old_hotkey, sys.exc_info()[1])
+        if new_hotkey is None:
+            return
+        try:
+            self.hk2.register(new_hotkey, ProfileId.parse(profile_name), overwrite=False)
+            self.seen_binding.add(new_hotkey)
+        except Exception:
+            msg = f"Error: could not register hotkey {'+'.join(new_hotkey)}. \
 Check that it is formatted properly and valid keys."
-                sp_logging.G_LOGGER.warning(msg)
-                sp_logging.G_LOGGER.warning(sys.exc_info()[0])
-                if not wpproc.running_kde():
-                    show_message_dialog(msg, "Error")
+            sp_logging.G_LOGGER.warning(msg)
+            sp_logging.G_LOGGER.warning(sys.exc_info()[0])
+            if not wpproc.running_kde():
+                show_message_dialog(msg, "Error")
 
     def get_profile_by_name(self, name):
         try:
@@ -372,17 +367,22 @@ Check that it is formatted properly and valid keys."
                 return prof
         return None
 
-    def profile_consumer(self, event, hotkey, profile):
-        """Hotkey bindable method that starts up a profile."""
-        if sp_logging.DEBUG:
-            sp_logging.G_LOGGER.info("Profile object is: %s", profile)
-        self.start_profile(wx.EVT_MENU, profile[0][0])
+    def profile_consumer(self, event, hotkey, bound_args):
+        """Start the profile bound to a hotkey; called on the hotkey listener thread."""
+        profile_id = bound_args[0][0]
+        wx.CallAfter(self.start_profile_by_id, profile_id)
+
+    def start_profile_by_id(self, profile_id):
+        """Start the profile currently loaded under ``profile_id``, if it still exists."""
+        profile = self.get_profile_by_id(profile_id)
+        if profile is None:
+            sp_logging.G_LOGGER.info("The profile bound to this hotkey, '%s', no longer exists.", profile_id.value)
+            return
+        self.start_profile(None, profile)
 
     def read_general_settings(self):
         """Refreshes general settings from file and applies hotkey bindings."""
         self.g_settings = GeneralSettingsData()
-        if not hasattr(self, "seen_binding"):
-            self.seen_binding = set()
         self.register_hotkeys()
         if self.g_settings.logging:
             msg = "Logging is enabled after an application restart."
@@ -493,6 +493,9 @@ Check that it is formatted properly and valid keys."
                 # slideshow tick and manual change after a rename/save.
                 wpproc.G_ACTIVE_PROFILE = self.active_profile.name
                 self.repeating_timer, _thrd = run_profile_job(self.active_profile, startup=True)
+                if self.is_paused and self.repeating_timer is not None:
+                    # Editing a paused slideshow must not resume it.
+                    self.repeating_timer.stop()
 
     def start_prev_profile(self, profile, apply_now=False):
         """Checks if a previously running profile has been recorded and starts it.

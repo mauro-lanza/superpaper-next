@@ -28,6 +28,8 @@ def controller(tray, active_profile=None, timer=None):
     icon.repeating_timer = timer
     icon.list_of_profiles = []
     icon.is_paused = False
+    icon.hk2 = None
+    icon.seen_binding = set()
     return icon
 
 
@@ -190,7 +192,6 @@ def test_reload_clears_active_profile_missing_from_inventory(headless_tray_modul
     assert events == (["stop"] if timer_running else [])
 
 
-@pytest.mark.xfail(strict=True, reason="Known timer bug: rearming an active profile does not preserve pause state")
 def test_rearm_preserves_paused_state(headless_tray_module, monkeypatch):
     tray = headless_tray_module
     active = profile("active")
@@ -203,3 +204,61 @@ def test_rearm_preserves_paused_state(headless_tray_module, monkeypatch):
 
     assert icon.is_paused is True
     assert replacement.is_running is False
+
+
+def test_profile_hotkey_starts_the_currently_loaded_profile(headless_tray_module, monkeypatch):
+    tray = headless_tray_module
+    stale = profile("Work")
+    current = profile("Work")
+    started = []
+    icon = controller(tray)
+    icon.list_of_profiles = [current]
+    monkeypatch.setattr(icon, "start_profile", lambda event, selected: started.append(selected))
+
+    # system_hotkey hands the consumer the arguments the binding was registered with.
+    icon.profile_consumer(None, ("control", "w"), [(stale.profile_id,)])
+
+    assert started == [current]
+
+
+def test_hotkey_for_a_deleted_profile_does_nothing(headless_tray_module, monkeypatch):
+    tray = headless_tray_module
+    started = []
+    icon = controller(tray)
+    monkeypatch.setattr(icon, "start_profile", lambda event, selected: started.append(selected))
+
+    icon.profile_consumer(None, ("control", "w"), [(ProfileId("Deleted"),)])
+
+    assert started == []
+
+
+def test_profile_hotkey_changes_are_ignored_while_hotkeys_are_disabled(headless_tray_module):
+    icon = controller(headless_tray_module)
+
+    icon.update_hotkey("Work", ("control", "x"), "control+y")
+
+    assert icon.seen_binding == set()
+
+
+def test_profile_hotkey_change_rebinds_by_identity(headless_tray_module):
+    icon = controller(headless_tray_module)
+    icon.hk2 = Mock()
+    icon.seen_binding = {("control", "x")}
+
+    icon.update_hotkey("Work", ("control", "x"), "control+y")
+
+    icon.hk2.unregister.assert_called_once_with(("control", "x"))
+    icon.hk2.register.assert_called_once_with(("control", "y"), ProfileId("Work"), overwrite=False)
+    assert icon.seen_binding == {("control", "y")}
+
+
+def test_removing_a_profile_hotkey_unbinds_it(headless_tray_module):
+    icon = controller(headless_tray_module)
+    icon.hk2 = Mock()
+    icon.seen_binding = {("control", "x")}
+
+    icon.update_hotkey("Work", ("control", "x"), "")
+
+    icon.hk2.unregister.assert_called_once_with(("control", "x"))
+    icon.hk2.register.assert_not_called()
+    assert icon.seen_binding == set()
