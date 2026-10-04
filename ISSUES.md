@@ -32,7 +32,7 @@ Display detection is now bounded and transactional: transient enumeration failur
 |-------|----------------|
 | [#25](https://github.com/hhannine/superpaper/issues/25) | Detect display hotplug, adapt/reload the profile, and re-render without advancing the slideshow. |
 | [#105](https://github.com/hhannine/superpaper/issues/105) | Identify and implement a current, tested Deepin/DDE wallpaper API. |
-| [#113](https://github.com/hhannine/superpaper/issues/113) | Add macOS dependencies, user-writable paths, packaging, and current multi-display validation. |
+| [#113](https://github.com/hhannine/superpaper/issues/113) | Add macOS dependencies, user-writable paths, packaging, and current multi-display validation. Specifically: PyObjC is imported unconditionally on darwin but is not declared in `pyproject.toml`, and `sp_paths.py` writes config into the installed package directory instead of `~/Library/Application Support`. |
 | [#153](https://github.com/hhannine/superpaper/issues/153) | Use unique macOS crop generations and delayed cleanup to avoid cached/deleted `-b` image URLs. |
 
 ## Open Features And Documentation

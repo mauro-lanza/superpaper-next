@@ -5,6 +5,11 @@
 
 AppImage packages for this fork are available on the [releases page](https://github.com/mauro-lanza/superpaper-next/releases). The AppImage will run once you make it executable.
 
+The AppImage intentionally isolates GIO modules, GSettings schemas, and font
+configuration from the host. Do not apply older `GIO_EXTRA_MODULES` or
+`XDG_DATA_DIRS` workarounds to it; those reintroduce the library mismatches that
+the isolation prevents.
+
 
 ## The recommended way
 
