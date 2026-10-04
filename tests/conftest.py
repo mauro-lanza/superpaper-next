@@ -18,7 +18,7 @@ def isolated_paths(monkeypatch, tmp_path):
 
 
 @pytest.fixture
-def profile_modules(monkeypatch):
+def profile_modules(monkeypatch, tmp_path):
     from superpaper import data
     from superpaper import wallpaper_processing as wpproc
 
@@ -26,6 +26,10 @@ def profile_modules(monkeypatch):
     monkeypatch.setattr(wpproc, "RESOLUTION_ARRAY", [(1920, 1080), (1280, 1024)])
     monkeypatch.setattr(wpproc, "DISPLAY_OFFSET_ARRAY", [(0, 0), (1920, 0)])
     monkeypatch.setattr(data, "show_message_dialog", lambda *args, **kwargs: None)
+    # Remembered selections live in the cache directory; give each test its own.
+    cache = tmp_path / "superpaper-cache"
+    cache.mkdir()
+    monkeypatch.setattr(data.sp_paths, "TEMP_PATH", str(cache))
     return data, wpproc
 
 
@@ -95,6 +99,7 @@ def headless_tray_module(monkeypatch):
     wx = ModuleType("wx")
     wx_adv = ModuleType("wx.adv")
     wx.App = FakeApp
+    wx.CallAfter = lambda function, *args, **kwargs: function(*args, **kwargs)
     wx.adv = wx_adv
     wx_adv.TaskBarIcon = FakeTaskBarIcon
 

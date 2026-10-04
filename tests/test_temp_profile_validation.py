@@ -1,3 +1,6 @@
+import sys
+from pathlib import Path
+
 import pytest
 
 from superpaper.profile_id import ProfileId
@@ -20,18 +23,34 @@ def temp_profile(data, name):
     return profile
 
 
-@pytest.mark.parametrize("name", ["../escape", "cli", "bad=name"])
-def test_managed_validation_rejects_invalid_name_without_write(profile_modules, monkeypatch, tmp_path, name):
+def stored_profile(data, profiles, name, extra=""):
+    (profiles / f"{name}.profile").write_text(f"name={name}\nspanmode=single\nslideshow=false\n{extra}", "utf-8")
+    return data.open_profile(ProfileId(name))
+
+
+def save_over(data, loaded, edited, **kwargs):
+    """Save ``edited`` the way the editor does after opening ``loaded``."""
+    return data.save_managed_profile(
+        edited,
+        current_profile_id=loaded.profile_id,
+        expected_source_digest=loaded.source_digest,
+        **kwargs,
+    )
+
+
+@pytest.mark.parametrize("name", ["../escape", "cli", "bad=name", "trailing.", "Work: dual"])
+def test_new_profile_with_unusable_name_is_rejected_without_write(profile_modules, monkeypatch, tmp_path, name):
     data, _ = profile_modules
     profiles = prepare(data, monkeypatch, tmp_path)
     profile = temp_profile(data, name)
 
     assert profile.test_save() is False
-    assert profile.save() is None
+    with pytest.raises(data.ProfileTransactionError):
+        data.save_managed_profile(profile)
     assert list(profiles.iterdir()) == []
 
 
-def test_managed_save_rejects_portable_collision(profile_modules, monkeypatch, tmp_path):
+def test_new_profile_rejects_portable_collision(profile_modules, monkeypatch, tmp_path):
     data, _ = profile_modules
     profiles = prepare(data, monkeypatch, tmp_path)
     existing = profiles / "Work.profile"
@@ -39,35 +58,64 @@ def test_managed_save_rejects_portable_collision(profile_modules, monkeypatch, t
     profile = temp_profile(data, "work")
 
     assert profile.test_save() is False
-    assert profile.save() is None
+    with pytest.raises(data.ProfileTransactionError):
+        data.save_managed_profile(profile)
     assert existing.read_text(encoding="utf-8") == "name=Work\n"
-    assert not (profiles / "work.profile").exists()
+    assert [path.name for path in profiles.iterdir()] == ["Work.profile"]
 
 
-def test_managed_save_rejects_case_only_rename(profile_modules, monkeypatch, tmp_path):
+def test_new_name_collides_with_a_file_that_does_not_load(profile_modules, monkeypatch, tmp_path):
     data, _ = profile_modules
     profiles = prepare(data, monkeypatch, tmp_path)
-    existing = profiles / "Work.profile"
-    existing.write_text("name=Work\n", encoding="utf-8")
-    profile = temp_profile(data, "work")
+    broken = profiles / "Work.profile"
+    broken.write_text("name=Work\ndelay=not-a-number\n", encoding="utf-8")
 
-    assert profile.test_save(current_profile_id=ProfileId("Work")) is False
-    assert profile.save(current_profile_id=ProfileId("Work")) is None
-    assert existing.read_text(encoding="utf-8") == "name=Work\n"
+    with pytest.raises(data.ProfileTransactionError):
+        data.save_managed_profile(temp_profile(data, "work"))
+
+    assert broken.read_text(encoding="utf-8") == "name=Work\ndelay=not-a-number\n"
 
 
-def test_managed_save_allows_current_profile_and_safe_lookup(profile_modules, monkeypatch, tmp_path):
+def test_case_only_rename_is_rejected(profile_modules, monkeypatch, tmp_path):
+    data, _ = profile_modules
+    profiles = prepare(data, monkeypatch, tmp_path)
+    loaded = stored_profile(data, profiles, "Work")
+    original = (profiles / "Work.profile").read_bytes()
+    renamed = temp_profile(data, "work")
+
+    assert renamed.test_save(current_profile_id=loaded.profile_id) is False
+    with pytest.raises(data.ProfileTransactionError):
+        save_over(data, loaded, renamed)
+    assert (profiles / "Work.profile").read_bytes() == original
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="this filename cannot exist on Windows")
+def test_resave_keeps_a_name_that_new_profiles_may_not_use(profile_modules, monkeypatch, tmp_path):
+    data, _ = profile_modules
+    profiles = prepare(data, monkeypatch, tmp_path)
+    loaded = stored_profile(data, profiles, "Work: dual")
+    edited = temp_profile(data, "Work: dual")
+    edited.hk_binding = "control+x"
+
+    assert edited.test_save(current_profile_id=loaded.profile_id) is True
+    assert save_over(data, loaded, edited) == profiles / "Work: dual.profile"
+    assert data.open_profile("Work: dual").hk_binding == ("control", "x")
+
+
+def test_create_then_resave(profile_modules, monkeypatch, tmp_path):
     data, _ = profile_modules
     profiles = prepare(data, monkeypatch, tmp_path)
     image = tmp_path / "wallpaper.png"
     image.touch()
     profile = temp_profile(data, "Work")
     profile.paths_array = [str(image)]
-    current_id = ProfileId("Work")
 
-    assert profile.test_save(current_profile_id=current_id) is True
-    assert profile.save(current_profile_id=current_id) == profiles / "Work.profile"
-    assert data.open_profile(current_id).profile_id == current_id
+    assert profile.test_save() is True
+    assert data.save_managed_profile(profile) == profiles / "Work.profile"
+    loaded = data.open_profile(ProfileId("Work"))
+    profile.hk_binding = "control+x"
+    assert save_over(data, loaded, profile) == profiles / "Work.profile"
+    assert data.open_profile(ProfileId("Work")).hk_binding == ("control", "x")
 
 
 def test_unmanaged_preview_allows_reserved_cli_name(profile_modules, tmp_path):
@@ -82,223 +130,80 @@ def test_unmanaged_preview_allows_reserved_cli_name(profile_modules, tmp_path):
     assert parsed.profile_id is None
 
 
-def test_managed_save_rejects_symlink_without_touching_target(profile_modules, monkeypatch, tmp_path):
+def test_saving_a_symlinked_profile_writes_through_to_its_target(profile_modules, monkeypatch, tmp_path):
     data, _ = profile_modules
     profiles = prepare(data, monkeypatch, tmp_path)
-    sentinel = tmp_path / "sentinel"
-    sentinel.write_text("outside", encoding="utf-8")
-    (profiles / "Work.profile").symlink_to(sentinel)
-    profile = temp_profile(data, "Work")
+    dotfile = tmp_path / "dotfiles" / "Work.profile"
+    dotfile.parent.mkdir()
+    dotfile.write_text("name=Work\nspanmode=single\nslideshow=false\n", encoding="utf-8")
+    link = profiles / "Work.profile"
+    link.symlink_to(dotfile)
+    loaded = data.open_profile(ProfileId("Work"))
+    edited = temp_profile(data, "Work")
+    edited.hk_binding = "control+x"
 
-    assert profile.save(current_profile_id=ProfileId("Work")) is None
-    assert sentinel.read_text(encoding="utf-8") == "outside"
+    save_over(data, loaded, edited)
+
+    assert link.is_symlink()
+    assert "hotkey=control+x" in dotfile.read_text(encoding="utf-8")
 
 
-def test_managed_save_rejects_nonregular_destination(profile_modules, monkeypatch, tmp_path):
+def test_directory_named_like_a_profile_is_never_replaced(profile_modules, monkeypatch, tmp_path):
     data, _ = profile_modules
     profiles = prepare(data, monkeypatch, tmp_path)
     (profiles / "Work.profile").mkdir()
-    profile = temp_profile(data, "Work")
 
-    assert profile.save(current_profile_id=ProfileId("Work")) is None
+    with pytest.raises(data.ProfileTransactionError):
+        data.save_managed_profile(temp_profile(data, "Work"))
+
     assert (profiles / "Work.profile").is_dir()
-
-
-def test_managed_create_does_not_overwrite_collision(profile_modules, monkeypatch, tmp_path):
-    data, _ = profile_modules
-    profiles = prepare(data, monkeypatch, tmp_path)
-    profile = temp_profile(data, "Work")
-    real_atomic_write = data._atomic_write_regular
-
-    def collide(path, content, *, may_replace):
-        path.write_text("collision", encoding="utf-8")
-        return real_atomic_write(path, content, may_replace=may_replace)
-
-    monkeypatch.setattr(data, "_atomic_write_regular", collide)
-
-    assert profile.save() is None
-    assert (profiles / "Work.profile").read_text(encoding="utf-8") == "collision"
-
-
-def test_managed_create_rejects_symlink_created_immediately_before_publish(profile_modules, monkeypatch, tmp_path):
-    data, _ = profile_modules
-    if not data._HAS_DIR_FD_MUTATIONS:
-        pytest.skip("directory-relative mutations are unavailable")
-    profiles = prepare(data, monkeypatch, tmp_path)
-    path = profiles / "Work.profile"
-    sentinel = tmp_path / "sentinel.profile"
-    sentinel.write_bytes(b"outside")
-    profile = temp_profile(data, "Work")
-    real_identity = data._regular_destination_identity_at
-    checks = 0
-
-    def replace_before_publish(directory_fd, candidate, *, allow_missing):
-        nonlocal checks
-        if candidate == path and allow_missing:
-            checks += 1
-            if checks == 2:
-                path.symlink_to(sentinel)
-        return real_identity(directory_fd, candidate, allow_missing=allow_missing)
-
-    monkeypatch.setattr(data, "_regular_destination_identity_at", replace_before_publish)
-
-    assert profile.save() is None
-    assert path.is_symlink()
-    assert sentinel.read_bytes() == b"outside"
 
 
 def test_rename_rolls_back_destination_when_source_delete_fails(profile_modules, monkeypatch, tmp_path):
     data, _ = profile_modules
     profiles = prepare(data, monkeypatch, tmp_path)
+    loaded = stored_profile(data, profiles, "Work")
     source_path = profiles / "Work.profile"
-    source_path.write_bytes(b"name=Work\nspanmode=single\nslideshow=false\n")
-    source = data.open_profile(ProfileId("Work"))
-    renamed = temp_profile(data, "Renamed")
-    original_remove = data._remove_managed_path
+    real_unlink = Path.unlink
 
-    def fail_source_remove(path, identity):
+    def fail_source_unlink(path, *args, **kwargs):
         if path == source_path:
             message = "injected source deletion failure"
             raise PermissionError(message)
-        return original_remove(path, identity)
+        return real_unlink(path, *args, **kwargs)
 
-    monkeypatch.setattr(data, "_remove_managed_path", fail_source_remove)
+    monkeypatch.setattr(Path, "unlink", fail_source_unlink)
 
     with pytest.raises(data.ProfileTransactionError) as error:
-        data.save_managed_profile(
-            renamed,
-            current_profile_id=source.profile_id,
-            expected_source_identity=source.source_identity,
-        )
+        save_over(data, loaded, temp_profile(data, "Renamed"))
 
     assert error.value.stage == "source removal"
     assert source_path.exists()
     assert not (profiles / "Renamed.profile").exists()
 
 
-def test_save_rejects_source_replaced_after_dialog_load(profile_modules, monkeypatch, tmp_path):
+def test_save_rejects_a_profile_changed_after_the_editor_loaded_it(profile_modules, monkeypatch, tmp_path):
     data, _ = profile_modules
     profiles = prepare(data, monkeypatch, tmp_path)
+    loaded = stored_profile(data, profiles, "Work")
     source_path = profiles / "Work.profile"
-    source_path.write_bytes(b"name=Work\nspanmode=single\nslideshow=false\n")
-    loaded = data.open_profile(ProfileId("Work"))
     replacement = b"name=Work\nspanmode=single\nslideshow=false\nhotkey=control+x\n"
-    source_path.unlink()
     source_path.write_bytes(replacement)
-    edited = temp_profile(data, "Work")
 
     with pytest.raises(data.ProfileTransactionError) as error:
-        data.save_managed_profile(
-            edited,
-            current_profile_id=loaded.profile_id,
-            expected_source_identity=loaded.source_identity,
-        )
+        save_over(data, loaded, temp_profile(data, "Work"))
 
     assert error.value.stage == "source verification"
+    assert "Revert" in str(error.value)
     assert source_path.read_bytes() == replacement
-
-
-def test_rename_rejects_destination_appearing_during_publication(profile_modules, monkeypatch, tmp_path):
-    data, _ = profile_modules
-    if not data._HAS_DIR_FD_MUTATIONS:
-        pytest.skip("directory-relative mutations are unavailable")
-    profiles = prepare(data, monkeypatch, tmp_path)
-    source_path = profiles / "Work.profile"
-    destination = profiles / "Renamed.profile"
-    source_path.write_bytes(b"name=Work\nspanmode=single\nslideshow=false\n")
-    loaded = data.open_profile(ProfileId("Work"))
-    renamed = temp_profile(data, "Renamed")
-    real_link = data.os.link
-
-    def collide_before_link(source, target, **kwargs):
-        destination.write_bytes(b"concurrent")
-        return real_link(source, target, **kwargs)
-
-    monkeypatch.setattr(data.os, "link", collide_before_link)
-
-    with pytest.raises(data.ProfileTransactionError) as error:
-        data.save_managed_profile(
-            renamed,
-            current_profile_id=loaded.profile_id,
-            expected_source_identity=loaded.source_identity,
-        )
-
-    assert error.value.stage == "destination write"
-    assert source_path.exists()
-    assert destination.read_bytes() == b"concurrent"
-
-
-def test_rename_retains_source_replacement_made_immediately_before_unlink(profile_modules, monkeypatch, tmp_path):
-    data, _ = profile_modules
-    if not data._HAS_DIR_FD_MUTATIONS:
-        pytest.skip("directory-relative mutations are unavailable")
-    profiles = prepare(data, monkeypatch, tmp_path)
-    source_path = profiles / "Work.profile"
-    source_path.write_bytes(b"name=Work\nspanmode=single\nslideshow=false\n")
-    source = data.open_profile(ProfileId("Work"))
-    renamed = temp_profile(data, "Renamed")
-    replacement = b"name=Work\nspanmode=single\nslideshow=false\nhotkey=control+x\n"
-    real_identity = data._regular_destination_identity_at
-    injected = False
-
-    def replace_before_check(directory_fd, path, *, allow_missing):
-        nonlocal injected
-        if path == source_path and not allow_missing and not injected:
-            injected = True
-            source_path.unlink()
-            source_path.write_bytes(replacement)
-        return real_identity(directory_fd, path, allow_missing=allow_missing)
-
-    monkeypatch.setattr(data, "_regular_destination_identity_at", replace_before_check)
-
-    with pytest.raises(data.ProfileTransactionError) as error:
-        data.save_managed_profile(
-            renamed,
-            current_profile_id=source.profile_id,
-            expected_source_identity=source.source_identity,
-        )
-
-    assert error.value.stage == "source removal"
-    assert source_path.read_bytes() == replacement
-    assert not (profiles / "Renamed.profile").exists()
-
-
-def test_managed_replace_rejects_replacement_made_immediately_before_publish(profile_modules, monkeypatch, tmp_path):
-    data, _ = profile_modules
-    if not data._HAS_DIR_FD_MUTATIONS:
-        pytest.skip("directory-relative mutations are unavailable")
-    profiles = prepare(data, monkeypatch, tmp_path)
-    path = profiles / "Work.profile"
-    path.write_bytes(b"name=Work\nspanmode=single\nslideshow=false\n")
-    loaded = data.open_profile(ProfileId("Work"))
-    replacement = b"name=Work\nspanmode=single\nslideshow=false\nhotkey=control+x\n"
-    real_identity = data._regular_destination_identity_at
-    checks = 0
-
-    def replace_before_check(directory_fd, candidate, *, allow_missing):
-        nonlocal checks
-        if candidate == path and allow_missing:
-            checks += 1
-            if checks == 2:
-                path.unlink()
-                path.write_bytes(replacement)
-        return real_identity(directory_fd, candidate, allow_missing=allow_missing)
-
-    monkeypatch.setattr(data, "_regular_destination_identity_at", replace_before_check)
-
-    loaded.set_selected_wallpaper(["wallpaper.png"], persist=True)
-
-    assert path.read_bytes() == replacement
 
 
 def test_rename_restores_source_and_destination_on_pointer_failure(profile_modules, monkeypatch, tmp_path):
     data, _ = profile_modules
     profiles = prepare(data, monkeypatch, tmp_path)
+    loaded = stored_profile(data, profiles, "Work")
     source_path = profiles / "Work.profile"
-    original = b"name=Work\nspanmode=single\nslideshow=false\n"
-    source_path.write_bytes(original)
-    source = data.open_profile(ProfileId("Work"))
-    renamed = temp_profile(data, "Renamed")
+    original = source_path.read_bytes()
 
     def fail_pointer(_profile):
         message = "injected pointer failure"
@@ -307,51 +212,90 @@ def test_rename_restores_source_and_destination_on_pointer_failure(profile_modul
     monkeypatch.setattr(data, "write_active_profile", fail_pointer)
 
     with pytest.raises(data.ProfileTransactionError) as error:
-        data.save_managed_profile(
-            renamed,
-            current_profile_id=source.profile_id,
-            expected_source_identity=source.source_identity,
-            update_active=True,
-        )
+        save_over(data, loaded, temp_profile(data, "Renamed"), update_active=True)
 
     assert error.value.stage == "active pointer update"
     assert source_path.read_bytes() == original
     assert not (profiles / "Renamed.profile").exists()
 
 
-def test_managed_selection_write_is_atomic_and_rejects_symlink_replacement(profile_modules, monkeypatch, tmp_path):
+def test_save_after_apply_succeeds(profile_modules, monkeypatch, tmp_path):
+    data, _ = profile_modules
+    profiles = prepare(data, monkeypatch, tmp_path)
+    first = tmp_path / "a.png"
+    second = tmp_path / "b.png"
+    first.touch()
+    second.touch()
+    loaded = stored_profile(data, profiles, "Work", f"display0paths={tmp_path}\nselected={first}\n")
+    loaded.set_selected_wallpaper([str(second)], persist=True)  # what Apply does
+    edited = temp_profile(data, "Work")
+    edited.hk_binding = "control+x"
+    edited.selected = [str(second)]
+
+    save_over(data, loaded, edited)
+
+    reloaded = data.open_profile(ProfileId("Work"))
+    assert reloaded.hk_binding == ("control", "x")
+    assert reloaded.selected == [str(second)]
+
+
+def test_save_after_a_slideshow_tick_succeeds(profile_modules, monkeypatch, tmp_path):
+    data, _ = profile_modules
+    profiles = prepare(data, monkeypatch, tmp_path)
+    images = tmp_path / "images"
+    images.mkdir()
+    (images / "a.png").touch()
+    (images / "b.png").touch()
+    loaded = stored_profile(data, profiles, "Work", f"sortmode=alphabetical\ndisplay0paths={images}\n")
+    loaded.advance_wallpaper()  # what a slideshow tick does while the editor is open
+
+    save_over(data, loaded, temp_profile(data, "Work"))
+
+    assert data.open_profile(ProfileId("Work")).selected == [str(images / "a.png")]
+
+
+def test_save_carries_over_a_selection_from_an_older_version(profile_modules, monkeypatch, tmp_path):
+    data, _ = profile_modules
+    profiles = prepare(data, monkeypatch, tmp_path)
+    image = tmp_path / "chosen.png"
+    image.touch()
+    loaded = stored_profile(data, profiles, "Work", f"selected={image}\n")
+
+    save_over(data, loaded, temp_profile(data, "Work"))
+
+    assert "selected=" not in (profiles / "Work.profile").read_text(encoding="utf-8")
+    assert data.open_profile(ProfileId("Work")).selected == [str(image)]
+
+
+def test_remembering_a_selection_leaves_the_profile_file_alone(profile_modules, monkeypatch, tmp_path):
     data, _ = profile_modules
     profiles = prepare(data, monkeypatch, tmp_path)
     image = tmp_path / "wallpaper.png"
     image.touch()
-    path = profiles / "Work.profile"
-    original = b"name=Work\nspanmode=single\nslideshow=false\ndisplay0paths=source\n"
-    path.write_bytes(original)
-    loaded = data.open_profile(ProfileId("Work"))
-    path.unlink()
-    sentinel = tmp_path / "sentinel.profile"
-    sentinel.write_bytes(b"outside")
-    path.symlink_to(sentinel)
+    loaded = stored_profile(data, profiles, "Work", "display0paths=source\ncustom=value\n")
+    original = (profiles / "Work.profile").read_bytes()
 
     loaded.set_selected_wallpaper([str(image)], persist=True)
 
-    assert path.is_symlink()
-    assert sentinel.read_bytes() == b"outside"
+    assert (profiles / "Work.profile").read_bytes() == original
+    assert data.open_profile(ProfileId("Work")).selected == [str(image)]
 
 
-def test_managed_selection_write_atomically_preserves_profile_bytes(profile_modules, monkeypatch, tmp_path):
+def test_rename_moves_the_selection_and_delete_forgets_it(profile_modules, monkeypatch, tmp_path):
     data, _ = profile_modules
     profiles = prepare(data, monkeypatch, tmp_path)
     image = tmp_path / "wallpaper.png"
     image.touch()
-    path = profiles / "Work.profile"
-    original = b"name=Work\nspanmode=single\nslideshow=false\ndisplay0paths=source\ncustom=value\n"
-    path.write_bytes(original)
-    loaded = data.open_profile(ProfileId("Work"))
-
+    loaded = stored_profile(data, profiles, "Work")
     loaded.set_selected_wallpaper([str(image)], persist=True)
 
-    assert path.read_bytes() == original + f"selected={image}\n".encode()
+    save_over(data, loaded, temp_profile(data, "Renamed"))
+    renamed = data.open_profile(ProfileId("Renamed"))
+    data.delete_managed_profile(renamed)
+    recreated = stored_profile(data, profiles, "Renamed")
+
+    assert renamed.selected == [str(image)]
+    assert recreated.selected is None
 
 
 def test_unmanaged_preview_selection_is_never_persisted(profile_modules, tmp_path):
@@ -364,3 +308,17 @@ def test_unmanaged_preview_selection_is_never_persisted(profile_modules, tmp_pat
     preview.set_selected_wallpaper(["wallpaper.png"], persist=True)
 
     assert path.read_bytes() == original
+
+
+def test_validation_accepts_upper_case_image_extensions(profile_modules, tmp_path):
+    data, _ = profile_modules
+    camera = tmp_path / "camera"
+    camera.mkdir()
+    (camera / "IMG_0001.JPG").touch()
+    profile = data.TempProfileData()
+    profile.name = "camera"
+    profile.spanmode = "single"
+    profile.slideshow = False
+    profile.paths_array = [str(camera)]
+
+    assert profile.test_save(managed=False) is True

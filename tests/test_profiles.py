@@ -1,7 +1,21 @@
 from tests.conftest import write_profile
 
 
-def test_missing_persisted_selection_falls_back_to_source(profile_modules, tmp_path):
+def test_peek_falls_back_to_source_without_forgetting_the_selection(profile_modules, tmp_path):
+    data, _ = profile_modules
+    image = tmp_path / "available.png"
+    image.touch()
+    unmounted = tmp_path / "unmounted.png"
+    profile_path = write_profile(tmp_path / "test.profile", sources=[image], selected=[unmounted])
+
+    profile = data.ProfileData(profile_path)
+
+    assert profile.next_wallpaper_files(peek=True) == [str(image)]
+    assert profile.selected == [str(unmounted)]
+    assert f"selected={unmounted}" in profile_path.read_text(encoding="utf-8")
+
+
+def test_missing_selection_is_cleared_when_files_are_taken(profile_modules, tmp_path):
     data, _ = profile_modules
     image = tmp_path / "available.png"
     image.touch()
@@ -13,7 +27,7 @@ def test_missing_persisted_selection_falls_back_to_source(profile_modules, tmp_p
 
     profile = data.ProfileData(profile_path)
 
-    assert profile.next_wallpaper_files(peek=True) == [str(image)]
+    assert profile.next_wallpaper_files() == [str(image)]
     assert profile.selected is None
     assert "selected=" not in profile_path.read_text(encoding="utf-8")
 

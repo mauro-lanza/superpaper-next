@@ -103,6 +103,14 @@ build = [
 ]
 
 # ---------------------------------------------------------------------------
+# pytest
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+xfail_strict = true
+addopts = ["--strict-markers", "--strict-config"]
+
+# ---------------------------------------------------------------------------
 # Ruff: linter + formatter
 # ---------------------------------------------------------------------------
 [tool.ruff]
@@ -176,3 +184,9 @@ exclude = [
 
 [tool.ty.environment]
 python-version = "3.14"
+
+[tool.ty.rules]
+# The `ty: ignore[unresolved-import]` comments on wx/dbus/win32/AppKit imports are needed
+# where those optional packages are absent (CI) and unused where they are installed (a GUI
+# development venv). Both environments must pass, so flagging unused ignores can't work here.
+unused-ignore-comment = "ignore"

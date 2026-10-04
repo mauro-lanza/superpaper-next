@@ -167,7 +167,7 @@ Check the logs and come create an issue!
 
 ## Known issues
 
-For some common problems and solutions, check [Known issues](./docs/known-issues.md).
+For some common problems and solutions, check the [issue tracker](./ISSUES.md).
 
 
 ## License

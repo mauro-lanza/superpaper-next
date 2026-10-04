@@ -137,3 +137,25 @@ def test_profile_read_does_not_modify_bytes(profile_modules, tmp_path):
     data.ProfileData(profile_path)
 
     assert profile_path.read_bytes() == raw.encode()
+
+
+def test_source_paths_may_contain_equals_signs(profile_modules, tmp_path):
+    data, _ = profile_modules
+    folder = tmp_path / "a=b"
+    folder.mkdir()
+    image = folder / "wallpaper.png"
+    image.touch()
+
+    profile = data.ProfileData(write_profile(tmp_path / "test.profile", sources=[folder]))
+
+    assert profile.paths_array == [[str(folder)]]
+    assert profile.next_wallpaper_files(peek=True) == [str(image)]
+
+
+def test_identical_sources_are_written_with_their_own_display_numbers(profile_modules):
+    data, _ = profile_modules
+    profile = data.TempProfileData()
+    profile.name = "twins"
+    profile.paths_array = ["/images", "/images"]
+
+    assert profile.serialize().splitlines()[-2:] == ["display0paths=/images", "display1paths=/images"]

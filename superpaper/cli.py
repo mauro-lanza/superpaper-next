@@ -4,12 +4,40 @@ import argparse
 import logging
 import os
 import sys
+from typing import NoReturn
 
 import superpaper.sp_logging as sp_logging
 import superpaper.wallpaper_processing as wpproc
 from superpaper.data import CLIProfileData, discover_profile_inventory
 from superpaper.profile_id import ProfileId, ProfileIdError
+from superpaper.spanmode import set_spanmode
 from superpaper.wallpaper_processing import change_wallpaper_job, refresh_display_data
+
+
+def start_tray(profile: ProfileId | None = None) -> None:
+    """Run the tray applet, or explain what is missing if wxPython is not installed."""
+    try:
+        from superpaper.tray import tray_loop
+    except ModuleNotFoundError as error:
+        if error.name != "wx":
+            raise
+        sys.exit(
+            "Superpaper's tray icon and settings window need wxPython. Install it from your "
+            "distribution's packages, or install Superpaper with the [gui] extra."
+        )
+    tray_loop(profile=profile)
+
+
+def _exit_with_error(message: str) -> NoReturn:
+    sp_logging.G_LOGGER.error(message)
+    sys.exit(1)
+
+
+def _refresh_displays() -> None:
+    try:
+        refresh_display_data()
+    except wpproc.DisplayDetectionError as error:
+        _exit_with_error(f"No displays could be detected: {error}")
 
 
 def cli_logic():
@@ -88,94 +116,63 @@ def cli_logic():
         sp_logging.G_LOGGER.info(f"User defined command: {args.command}")
         sp_logging.G_LOGGER.info(f"Debugging: {args.debug}")
     if args.debug and len(sys.argv) == 2:
-        from superpaper.tray import tray_loop
-
-        tray_loop()
-    else:
-        if args.setimages and not args.profile:
-            for filename in args.setimages:
-                if filename and not os.path.isfile(filename):
-                    sp_logging.G_LOGGER.error(
-                        "Exception: One of the passed image names was not \
-a file: (%s). Exiting.",
-                        filename,
-                    )
-                    sys.exit()
-        elif args.profile and not args.setimages:
-            try:
-                profile_id = ProfileId.parse(args.profile)
-            except ProfileIdError as error:
-                sp_logging.G_LOGGER.error("Invalid profile name: %s", error)
-                sys.exit()
-            refresh_display_data()
-            inventory = discover_profile_inventory()
-            entry = inventory.find(profile_id)
-            if entry is not None:
-                from superpaper.tray import tray_loop
-
-                tray_loop(profile=profile_id)
-                return 0
-            else:
-                sp_logging.G_LOGGER.error(
-                    "Exception: No profile was found by the given name: \
-(%s). Exiting.",
-                    args.profile,
-                )
-                sp_logging.G_LOGGER.error(
-                    "Valid profile names are: \
-(%s)",
-                    [entry.profile_id.value for entry in inventory.entries],
-                )
-                sys.exit(1)
-        else:
-            sp_logging.G_LOGGER.info("""Exception: You must pass either image(s) to set as \
-wallpaper with '-s' or '--setimages', or a profile \
-to start Superpaper with using '-p' or '--profile'. \
-Exiting.""")
-            sys.exit()
-        display_data_loaded = False
-        if args.perspective:
-            refresh_display_data()
-            display_data_loaded = True
-            if args.perspective not in wpproc.G_ACTIVE_DISPLAYSYSTEM.perspective_dict:
-                sp_logging.G_LOGGER.error(
-                    f"Exception: Valid perspective profile names are: {list(wpproc.G_ACTIVE_DISPLAYSYSTEM.perspective_dict.keys())}."
-                )
-                sys.exit()
-        spangrp = None
-        if args.spangroups:
-            # Parse spangroups
-            spangrp = []
-            for grp in args.spangroups:
-                try:
-                    ids = [int(idx) for idx in grp]
-                    spangrp.append(sorted(set(ids)))  # drop duplicates
-                except ValueError:
-                    sp_logging.G_LOGGER.error(
-                        f"Exception: One of the display ids \
-was not an integer: {grp}. Exiting."
-                    )
-                    sys.exit()
-        if args.offsets and len(args.offsets) % 2 != 0:
-            sp_logging.G_LOGGER.error(
-                "Exception: Number of offset pixels not even. \
-If passing manual offsets, give width and height offset for each display, even if \
-not actually offsetting every display. Exiting."
-            )
-            sys.exit()
-        if args.command:
-            if len(args.command) > 1:
-                sp_logging.G_LOGGER.error(
-                    "Exception: Remember to put the \
-custom command in quotes. Exiting."
-                )
-                sys.exit()
-            wpproc.G_SET_COMMAND_STRING = args.command[0]
-
-        if not display_data_loaded:
-            refresh_display_data()
-        profile = CLIProfileData(args.setimages, args.advanced, args.perspective, spangrp, args.offsets)
-        job_thread = change_wallpaper_job(profile, force=True)
-        if job_thread is not None:
-            job_thread.join()
+        set_spanmode()
+        start_tray()
         return 0
+    if args.setimages and not args.profile:
+        for filename in args.setimages:
+            if filename and not os.path.isfile(filename):
+                _exit_with_error(f"One of the passed image names was not a file: {filename}")
+    elif args.profile and not args.setimages:
+        try:
+            profile_id = ProfileId.parse(args.profile)
+        except ProfileIdError as error:
+            _exit_with_error(f"Invalid profile name: {error}")
+        _refresh_displays()
+        inventory = discover_profile_inventory()
+        if inventory.find(profile_id) is None:
+            names = [entry.profile_id.value for entry in inventory.entries]
+            _exit_with_error(
+                f"No profile was found by the given name: {args.profile}. Valid profile names are: {names}"
+            )
+        set_spanmode()
+        start_tray(profile=profile_id)
+        return 0
+    else:
+        _exit_with_error(
+            "Pass either image(s) to set as the wallpaper with '-s' or '--setimages', "
+            "or a profile to start Superpaper with using '-p' or '--profile'."
+        )
+    if args.perspective:
+        _refresh_displays()
+        perspectives = wpproc.G_ACTIVE_DISPLAYSYSTEM.perspective_dict
+        if args.perspective not in perspectives:
+            _exit_with_error(f"Valid perspective profile names are: {list(perspectives)}")
+    spangrp = None
+    if args.spangroups:
+        # Parse spangroups
+        spangrp = []
+        for grp in args.spangroups:
+            try:
+                ids = [int(idx) for idx in grp]
+            except ValueError:
+                _exit_with_error(f"One of the display ids was not an integer: {grp}")
+            spangrp.append(sorted(set(ids)))  # drop duplicates
+    if args.offsets and len(args.offsets) % 2 != 0:
+        _exit_with_error(
+            "Number of offset pixels not even. If passing manual offsets, give width and height offset "
+            "for each display, even if not actually offsetting every display."
+        )
+    if args.command:
+        if len(args.command) > 1:
+            _exit_with_error("Remember to put the custom command in quotes.")
+        wpproc.G_SET_COMMAND_STRING = args.command[0]
+
+    if not args.perspective:  # the perspective check above already refreshed them
+        _refresh_displays()
+    set_spanmode()
+    profile = CLIProfileData(args.setimages, args.advanced, args.perspective, spangrp, args.offsets)
+    job_thread = change_wallpaper_job(profile, force=True)
+    if job_thread is not None:
+        job_thread.join()
+    return 0

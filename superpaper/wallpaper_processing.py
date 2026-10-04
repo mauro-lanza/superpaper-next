@@ -45,20 +45,15 @@ def running_kde():
 
 # Platform-native helpers are imported conditionally below. Declare them up front
 # with safe fallbacks so the names are always bound regardless of platform; the
-# real implementations replace these on the matching OS.
+# real implementations replace these on the matching OS. dbus is not among them:
+# it is optional on Linux and imported only where KDE needs it (_plasma_shell).
 set_wallpaper_win: Any = None
-dbus: Any = None
 NSScreen: Any = None
 NSWorkspace: Any = None
 NSURL: Any = None
 
 if sys.platform == "win32":
     from superpaper.wallpaper_windows import set_wallpaper_win
-elif sys.platform == "linux":
-    # KDE has special needs
-    # if os.environ.get("DESKTOP_SESSION") in ["/usr/share/xsessions/plasma", "plasma"]:
-    if running_kde():
-        import dbus  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-import]
 elif sys.platform == "darwin":
     from AppKit import NSScreen, NSWorkspace
     from Foundation import NSURL
@@ -79,6 +74,12 @@ G_WALLPAPER_CHANGE_LOCK = Lock()
 G_WALLPAPER_CHANGE_PENDING = Lock()
 G_SUPPORTED_IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".bmp", ".gif", ".tiff", ".webp")
 G_SET_COMMAND_STRING: str = ""
+
+
+def is_supported_image(filename: str) -> bool:
+    """Whether a file name has an extension Superpaper renders, in any letter case."""
+    return filename.lower().endswith(G_SUPPORTED_IMAGE_EXTENSIONS)
+
 
 # global to take care that failure message is not shown more than once at launch
 USER_TOLD_OF_PHYS_FAIL = False
@@ -929,16 +930,6 @@ def compute_canvas(res_array, offset_array):
     return canvas_size
 
 
-def compute_ppi_corrected_res_array(res_array, ppi_list_rel_density):
-    """Return ppi density normalized sizes of the real resolutions."""
-    eff_res_array = []
-    for i in range(len(res_array)):
-        effw = round(res_array[i][0] / ppi_list_rel_density[i])
-        effh = round(res_array[i][1] / ppi_list_rel_density[i])
-        eff_res_array.append((effw, effh))
-    return eff_res_array
-
-
 # resize image to fill given rectangle and do a positioned crop to size.
 # Return output image.
 def resize_to_fill(
@@ -1013,104 +1004,6 @@ def resize_to_fill(
     else:
         sp_logging.G_LOGGER.info("Error: result image not of correct size. crp:%s, res:%s", cropped_res.size, res)
         return cropped_res
-
-
-def get_center(res):
-    """Computes center point of a resolution rectangle."""
-    return (round(res[0] / 2), round(res[1] / 2))
-
-
-def get_all_centers(resarr_eff, manual_offsets):
-    """Computes center points of given resolution list taking into account their offsets."""
-    centers = []
-    sum_widths = 0
-    # get the vertical pixel distance of the center of the left most display
-    # from the top.
-    center_standard_height = get_center(resarr_eff[0])[1]
-    if len(manual_offsets) < len(resarr_eff):
-        sp_logging.G_LOGGER.info(
-            "get_all_centers: Not enough manual offsets: \
-                                 %s for displays: %s",
-            len(manual_offsets),
-            len(resarr_eff),
-        )
-    else:
-        for i in range(len(resarr_eff)):
-            horiz_radius = get_horizontal_radius(resarr_eff[i])
-            # here take the center height to be the same for all the displays
-            # unless modified with the manual offset
-            center_pos_from_anchor_left_top = (
-                sum_widths + manual_offsets[i][0] + horiz_radius,
-                center_standard_height + manual_offsets[i][1],
-            )
-            centers.append(center_pos_from_anchor_left_top)
-            sum_widths += resarr_eff[i][0]
-    if sp_logging.DEBUG:
-        sp_logging.G_LOGGER.info("centers: %s", centers)
-    return centers
-
-
-def get_lefttop_from_center(center, res):
-    """Compute top left coordinate of a rectangle from its center."""
-    return (center[0] - round(res[0] / 2), center[1] - round(res[1] / 2))
-
-
-def get_rightbottom_from_lefttop(lefttop, res):
-    """Compute right bottom corner of a rectangle from its left top."""
-    return (lefttop[0] + res[0], lefttop[1] + res[1])
-
-
-def get_horizontal_radius(res):
-    """Returns half the width of the input rectangle."""
-    return round(res[0] / 2)
-
-
-def compute_crop_tuples(resolution_array_ppinormalized, manual_offsets):
-    # Assume the centers of the physical displays are aligned on common
-    # horizontal line. If this is not the case one must use the manual
-    # offsets defined in the profile for adjustment (and bezel corrections).
-    # Anchor positions to the top left corner of the left most display. If
-    # its size is scaled up, one will need to adjust the horizontal positions
-    # of all the displays. (This is automatically handled by using the
-    # effective resolution array).
-    # Additionally one must make sure that the highest point of the display
-    # arrangement is at y=0.
-    crop_tuples = []
-    centers = get_all_centers(resolution_array_ppinormalized, manual_offsets)
-    for center, res in zip(centers, resolution_array_ppinormalized):
-        lefttop = get_lefttop_from_center(center, res)
-        rightbottom = get_rightbottom_from_lefttop(lefttop, res)
-        crop_tuples.append(lefttop + rightbottom)
-    # Translate crops so that the highest point is at y=0 -- remember to add
-    # translation to both top and bottom coordinates! Same horizontally.
-    # Left-most edge of the crop tuples.
-    leftmost = min(crop_tuples, key=itemgetter(0))[0]
-    # Top-most edge of the crop tuples.
-    topmost = min(crop_tuples, key=itemgetter(1))[1]
-    if leftmost == 0 and topmost == 0:
-        if sp_logging.DEBUG:
-            sp_logging.G_LOGGER.info("crop_tuples: %s", crop_tuples)
-        return crop_tuples  # [(left, up, right, bottom),...]
-    else:
-        crop_tuples_translated = translate_crops(crop_tuples, (leftmost, topmost))
-        if sp_logging.DEBUG:
-            sp_logging.G_LOGGER.info("crop_tuples_translated: %s", crop_tuples_translated)
-        return crop_tuples_translated  # [(left, up, right, bottom),...]
-
-
-def translate_crops(crop_tuples, translate_tuple):
-    """Translate crop tuples to be over the image are, i.e. left top at (0,0)."""
-    crop_tuples_translated = []
-    for crop_tuple in crop_tuples:
-        crop_tuples_translated.append(
-            (
-                crop_tuple[0] - translate_tuple[0],
-                crop_tuple[1] - translate_tuple[1],
-                crop_tuple[2] - translate_tuple[0],
-                crop_tuple[3] - translate_tuple[1],
-            )
-        )
-    return crop_tuples_translated
 
 
 def compute_working_canvas(crop_tuples, bezels=None):
@@ -1445,7 +1338,12 @@ def set_wallpaper(outputfile, force=False, source_files=None):
         sp_logging.G_LOGGER.info("Unknown platform: %s", sys.platform)
     script_file = os.path.join(CONFIG_PATH, "run-after-wp-change.py")
     if os.path.isfile(script_file):
-        subprocess.run(["python3", script_file, str(outputfile), str(source_files)], env=host_spawn_env())
+        # The script gets the wallpaper image, then each source image as its own argument.
+        hook = ["python3", script_file, str(outputfile), *map(str, source_files or [])]
+        try:
+            subprocess.run(hook, env=host_spawn_env())
+        except OSError as error:
+            sp_logging.G_LOGGER.error("Could not run %s: %s", script_file, error)
     return 0
 
 
@@ -1714,6 +1612,32 @@ def _get_qdbus_cmd():
     return None
 
 
+class PlasmaScriptingUnavailable(RuntimeError):
+    """dbus-python, which KDE wallpaper scripting needs, is not installed."""
+
+
+def _plasma_shell():
+    """Return the PlasmaShell D-Bus interface that evaluates wallpaper scripts.
+
+    dbus-python is optional and builds from source, so it is imported here, at the
+    point of use: without it Superpaper still starts and only KDE wallpaper setting
+    fails, with an explanation.
+    """
+    try:
+        import dbus  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-import]
+    except ImportError as error:
+        message = (
+            "Setting the wallpaper on KDE Plasma needs dbus-python. Install your distribution's "
+            "python-dbus package, or install Superpaper with the [linux] extra."
+        )
+        raise PlasmaScriptingUnavailable(message) from error
+    session_bus = dbus.SessionBus()
+    return dbus.Interface(
+        session_bus.get_object("org.kde.plasmashell", "/PlasmaShell"),
+        dbus_interface="org.kde.PlasmaShell",
+    )
+
+
 def get_kde_activity_mapping():
     """Get mapping of activity IDs to activity names."""
     try:
@@ -1847,11 +1771,7 @@ for(var i = 0; i < allDesktops.length; i++) {
 print(result.join(';'));
 """
 
-        sessionb = dbus.SessionBus()
-        plasma_interface = dbus.Interface(
-            sessionb.get_object("org.kde.plasmashell", "/PlasmaShell"),
-            dbus_interface="org.kde.PlasmaShell",
-        )
+        plasma_interface = _plasma_shell()
 
         desktop_info = plasma_interface.evaluateScript(script)
         sp_logging.G_LOGGER.info("Desktop info from plasma: %s", desktop_info)
@@ -2026,11 +1946,7 @@ for(var idx = 0; idx < allDesktops.length; idx++) {
 
     try:
         sp_logging.G_LOGGER.info("kde_set_activity_wallpapers: Creating dbus connection")
-        sessionb = dbus.SessionBus()
-        plasma_interface = dbus.Interface(
-            sessionb.get_object("org.kde.plasmashell", "/PlasmaShell"),
-            dbus_interface="org.kde.PlasmaShell",
-        )
+        plasma_interface = _plasma_shell()
 
         sp_logging.G_LOGGER.info("kde_set_activity_wallpapers: Evaluating KDE script")
         plasma_interface.evaluateScript(script)
@@ -2209,11 +2125,11 @@ for(var idx = 0; idx < allDesktops.length; idx++) {{
     filess_img_names_str = ", ".join('"' + _escape_js_string(item) + '"' for item in filess_img_names)
 
     sp_logging.G_LOGGER.info("kdeplasma_actions: Creating dbus connection")
-    sessionb = dbus.SessionBus()
-    plasma_interface = dbus.Interface(
-        sessionb.get_object("org.kde.plasmashell", "/PlasmaShell"),
-        dbus_interface="org.kde.PlasmaShell",
-    )
+    try:
+        plasma_interface = _plasma_shell()
+    except PlasmaScriptingUnavailable as error:
+        sp_logging.G_LOGGER.error("%s", error)
+        return
     if profname == G_ACTIVE_PROFILE or image_piece_list or force:
         sp_logging.G_LOGGER.info("kdeplasma_actions: Evaluating KDE script")
         plasma_interface.evaluateScript(script.format(imagelist=filess_img_names_str))

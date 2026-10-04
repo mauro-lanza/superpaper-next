@@ -1,3 +1,4 @@
+import sys
 import unicodedata
 from pathlib import Path
 
@@ -28,7 +29,7 @@ from superpaper.profile_id import (
     ],
 )
 def test_profile_id_accepts_portable_names(name):
-    profile_id = ProfileId.parse(name)
+    profile_id = ProfileId.parse_new(name)
 
     assert profile_id.value == name
     assert profile_id.profile_filename == f"{name}.profile"
@@ -38,9 +39,6 @@ def test_profile_id_accepts_portable_names(name):
     ("name", "code"),
     [
         ("", ProfileIdErrorCode.EMPTY),
-        (" ", ProfileIdErrorCode.SURROUNDING_WHITESPACE),
-        (" Work", ProfileIdErrorCode.SURROUNDING_WHITESPACE),
-        ("Work ", ProfileIdErrorCode.SURROUNDING_WHITESPACE),
         (".", ProfileIdErrorCode.DOT_COMPONENT),
         ("..", ProfileIdErrorCode.DOT_COMPONENT),
         ("../outside", ProfileIdErrorCode.SEPARATOR),
@@ -53,17 +51,6 @@ def test_profile_id_accepts_portable_names(name):
         ("name\0 ", ProfileIdErrorCode.NUL),
         ("name\tvalue", ProfileIdErrorCode.CONTROL),
         ("name\ud800value", ProfileIdErrorCode.CONTROL),
-        ("bad=name", ProfileIdErrorCode.INVALID_CHARACTER),
-        ("bad:name", ProfileIdErrorCode.INVALID_CHARACTER),
-        ("trailing.", ProfileIdErrorCode.TRAILING_DOT),
-        ("CON", ProfileIdErrorCode.RESERVED_NAME),
-        ("con.notes", ProfileIdErrorCode.RESERVED_NAME),
-        ("CON .txt", ProfileIdErrorCode.RESERVED_NAME),
-        ("CoNin$", ProfileIdErrorCode.RESERVED_NAME),
-        ("CONOUT$.txt", ProfileIdErrorCode.RESERVED_NAME),
-        ("LPT9", ProfileIdErrorCode.RESERVED_NAME),
-        ("LPT1 .foo", ProfileIdErrorCode.RESERVED_NAME),
-        ("COM¹.log", ProfileIdErrorCode.RESERVED_NAME),
         ("cli", ProfileIdErrorCode.RESERVED_APPLICATION_NAME),
         ("Create a new profile", ProfileIdErrorCode.RESERVED_APPLICATION_NAME),
     ],
@@ -76,6 +63,41 @@ def test_profile_id_rejects_unsafe_names(name, code):
     assert error.value.raw == name
 
 
+NON_PORTABLE_NAMES = [
+    (" ", ProfileIdErrorCode.SURROUNDING_WHITESPACE),
+    (" Work", ProfileIdErrorCode.SURROUNDING_WHITESPACE),
+    ("Work ", ProfileIdErrorCode.SURROUNDING_WHITESPACE),
+    ("bad=name", ProfileIdErrorCode.INVALID_CHARACTER),
+    ("bad:name", ProfileIdErrorCode.INVALID_CHARACTER),
+    ("trailing.", ProfileIdErrorCode.TRAILING_DOT),
+    ("CON", ProfileIdErrorCode.RESERVED_NAME),
+    ("con.notes", ProfileIdErrorCode.RESERVED_NAME),
+    ("CON .txt", ProfileIdErrorCode.RESERVED_NAME),
+    ("CoNin$", ProfileIdErrorCode.RESERVED_NAME),
+    ("CONOUT$.txt", ProfileIdErrorCode.RESERVED_NAME),
+    ("LPT9", ProfileIdErrorCode.RESERVED_NAME),
+    ("LPT1 .foo", ProfileIdErrorCode.RESERVED_NAME),
+    ("COM¹.log", ProfileIdErrorCode.RESERVED_NAME),
+    ("a" * 201, ProfileIdErrorCode.TOO_LONG),
+    ("é" * 101, ProfileIdErrorCode.TOO_LONG),
+    ("😀" * 51, ProfileIdErrorCode.TOO_LONG),
+]
+
+
+@pytest.mark.parametrize(("name", "code"), NON_PORTABLE_NAMES)
+def test_new_profile_names_must_be_portable(name, code):
+    with pytest.raises(ProfileIdError) as error:
+        ProfileId.parse_new(name)
+
+    assert error.value.code is code
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows enforces its filename rules for every name")
+@pytest.mark.parametrize(("name", "_code"), NON_PORTABLE_NAMES)
+def test_existing_non_portable_names_still_identify_profiles(name, _code):
+    assert ProfileId.parse(name).value == name
+
+
 @pytest.mark.parametrize(
     "name",
     [
@@ -85,32 +107,19 @@ def test_profile_id_rejects_unsafe_names(name, code):
     ],
 )
 def test_profile_id_accepts_exact_length_boundaries(name):
-    assert ProfileId.parse(name).value == name
+    assert ProfileId.parse_new(name).value == name
 
 
-@pytest.mark.parametrize(
-    "name",
-    [
-        "a" * 201,
-        "é" * 101,
-        "😀" * 51,
-    ],
-)
-def test_profile_id_rejects_names_over_length_boundaries(name):
-    with pytest.raises(ProfileIdError) as error:
-        ProfileId.parse(name)
-
-    assert error.value.code is ProfileIdErrorCode.TOO_LONG
-
-
-def test_profile_id_reports_normalized_suggestion():
+def test_new_profile_name_reports_normalized_suggestion():
     decomposed = unicodedata.normalize("NFD", "Café")
 
     with pytest.raises(ProfileIdError) as error:
-        ProfileId.parse(decomposed)
+        ProfileId.parse_new(decomposed)
 
     assert error.value.code is ProfileIdErrorCode.NOT_NFC
     assert error.value.suggested == "Café"
+    # macOS HFS+ hands out decomposed filenames, so an existing file must still load.
+    assert ProfileId.parse(decomposed).value == decomposed
 
 
 @pytest.mark.parametrize("factory", [ProfileId, ProfileId.parse])
@@ -136,6 +145,12 @@ def test_collision_key_is_case_insensitive():
 
 def test_collision_key_uses_unicode_casefold():
     assert ProfileId.parse("Straße").collision_key == ProfileId.parse("STRASSE").collision_key
+
+
+def test_collision_key_ignores_unicode_normalization():
+    decomposed = unicodedata.normalize("NFD", "Café")
+
+    assert ProfileId.parse(decomposed).collision_key == ProfileId.parse("café").collision_key
 
 
 def test_profile_path_is_directly_contained(tmp_path):
@@ -170,18 +185,16 @@ def test_managed_leaf_rejects_non_direct_or_dot_paths(tmp_path, relative):
         assert_managed_leaf(root, root / relative, allow_missing=True)
 
 
-def test_managed_leaf_rejects_symlink(tmp_path):
+def test_managed_leaf_accepts_symlinked_profile(tmp_path):
     root = tmp_path / "profiles"
     root.mkdir()
-    outside = tmp_path / "outside.profile"
-    outside.write_text("sentinel", encoding="utf-8")
+    dotfile = tmp_path / "dotfiles" / "linked.profile"
+    dotfile.parent.mkdir()
+    dotfile.write_text("name=linked\n", encoding="utf-8")
     link = root / "linked.profile"
-    link.symlink_to(outside)
+    link.symlink_to(dotfile)
 
-    with pytest.raises(ManagedPathError, match="symbolic links"):
-        assert_managed_leaf(root, link, allow_missing=False)
-
-    assert outside.read_text(encoding="utf-8") == "sentinel"
+    assert assert_managed_leaf(root, link, allow_missing=False) == link
 
 
 def test_managed_leaf_allow_missing_accepts_missing_or_regular_file(tmp_path):

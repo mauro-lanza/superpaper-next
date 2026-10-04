@@ -28,6 +28,10 @@ def run_module_cli(tmp_path, *args):
         "spanmode = types.ModuleType('superpaper.spanmode'); "
         "spanmode.set_spanmode = lambda: None; "
         "sys.modules['superpaper.spanmode'] = spanmode; "
+        # One fake monitor, so that runs on headless machines reach the code under test.
+        "import screeninfo; "
+        "screeninfo.get_monitors = lambda: [types.SimpleNamespace("
+        "x=0, y=0, width=1920, height=1080, width_mm=527, height_mm=296, name='fake')]; "
         f"sys.argv = {['superpaper', *args]!r}; "
         "runpy.run_module('superpaper', run_name='__main__')"
     )
@@ -79,10 +83,29 @@ def test_module_unknown_argument_is_argparse_error(tmp_path):
 def test_module_missing_profile_exits_nonzero(tmp_path):
     result = run_module_cli(tmp_path, "--profile", "missing")
 
-    assert result.returncode != 0
+    assert result.returncode == 1
+    assert "No profile was found by the given name: missing" in result.stderr
 
 
-def test_main_dispatches_cli_after_spanmode(monkeypatch):
+def test_missing_wxpython_is_explained(tmp_path):
+    script = (
+        "import runpy, sys, types; "
+        "spanmode = types.ModuleType('superpaper.spanmode'); "
+        "spanmode.set_spanmode = lambda: None; "
+        "sys.modules['superpaper.spanmode'] = spanmode; "
+        "sys.modules['wx'] = None; "
+        "sys.argv = ['superpaper']; "
+        "runpy.run_module('superpaper', run_name='__main__')"
+    )
+    env = cli_subprocess_env(tmp_path)
+
+    result = subprocess.run([sys.executable, "-c", script], check=False, capture_output=True, text=True, env=env)
+
+    assert result.returncode == 1
+    assert "need wxPython" in result.stderr
+
+
+def test_main_leaves_span_mode_to_the_cli(monkeypatch):
     from superpaper import __main__ as entrypoint
 
     calls = []
@@ -94,7 +117,7 @@ def test_main_dispatches_cli_after_spanmode(monkeypatch):
 
     entrypoint.main()
 
-    assert calls == ["spanmode", "cli"]
+    assert calls == ["cli"]
 
 
 def test_main_dispatches_tray_after_spanmode(monkeypatch):
@@ -102,7 +125,7 @@ def test_main_dispatches_tray_after_spanmode(monkeypatch):
 
     calls = []
     tray = ModuleType("superpaper.tray")
-    tray.tray_loop = lambda: calls.append("tray")
+    tray.tray_loop = lambda profile=None: calls.append("tray")
     monkeypatch.setitem(sys.modules, "superpaper.tray", tray)
     monkeypatch.setattr(entrypoint, "set_spanmode", lambda: calls.append("spanmode"))
     monkeypatch.setattr(sys, "argv", ["superpaper"])
@@ -240,7 +263,7 @@ def test_profile_lookup_rejects_path_input(monkeypatch, tmp_path, profile_name):
     with pytest.raises(SystemExit) as error:
         cli.cli_logic()
 
-    assert error.value.code is None
+    assert error.value.code == 1
 
 
 def test_invalid_profile_id_fails_before_inventory_or_display_data(monkeypatch, tmp_path):
@@ -287,16 +310,16 @@ def test_profile_lookup_accepts_valid_unicode(monkeypatch, tmp_path):
     assert [profile_id.value for profile_id in calls] == ["Työ"]
 
 
-@pytest.mark.parametrize("failure", ["mismatch", "symlink", "collision"])
-def test_profile_lookup_rejects_undiscoverable_target(monkeypatch, tmp_path, failure):
+@pytest.mark.parametrize("variant", ["name line differs", "symlink", "case variant"])
+def test_profile_launch_accepts_profiles_saved_by_older_versions(monkeypatch, tmp_path, variant):
     from superpaper import cli
 
     profiles = tmp_path / "profiles"
     profiles.mkdir()
     saved = profiles / "saved.profile"
-    if failure == "mismatch":
+    if variant == "name line differs":
         saved.write_text("name=other\n", encoding="utf-8")
-    elif failure == "symlink":
+    elif variant == "symlink":
         target = tmp_path / "target.profile"
         target.write_text("name=saved\n", encoding="utf-8")
         saved.symlink_to(target)
@@ -313,15 +336,13 @@ def test_profile_lookup_rejects_undiscoverable_target(monkeypatch, tmp_path, fai
     monkeypatch.setattr(cli, "refresh_display_data", lambda: None)
     monkeypatch.setattr(sys, "argv", ["superpaper", "--profile", "saved"])
 
-    with pytest.raises(SystemExit):
-        cli.cli_logic()
-
-    assert calls == []
+    assert cli.cli_logic() == 0
+    assert [profile_id.value for profile_id in calls] == ["saved"]
 
 
 @pytest.mark.parametrize(
     "setting",
-    ["delay=not-a-number", "ppi=0;0", "diagonal_inches=0;24", "zoom=", "align="],
+    ["delay=not-a-number", "diagonal_inches=0;24", "zoom=", "align="],
 )
 def test_profile_lookup_rejects_malformed_content_before_tray(monkeypatch, tmp_path, setting):
     from superpaper import cli
@@ -345,7 +366,6 @@ def test_profile_lookup_rejects_malformed_content_before_tray(monkeypatch, tmp_p
     assert calls == []
 
 
-@pytest.mark.xfail(strict=True, reason="Known CLI bug: validation failures currently exit with status 0")
 def test_missing_image_exits_nonzero(monkeypatch, tmp_path):
     from superpaper import cli
 

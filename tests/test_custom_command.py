@@ -106,3 +106,41 @@ def test_custom_command_receives_host_environment(profile_modules, monkeypatch):
     assert received_env is not None
     assert received_env["XDG_DATA_DIRS"] == "/host/data"
     assert not any(key.startswith("SUPERPAPER_HOSTENV_") for key in received_env)
+
+
+def test_post_change_script_receives_each_source_as_an_argument(profile_modules, monkeypatch, tmp_path):
+    _, wpproc = profile_modules
+    calls = []
+    (tmp_path / "run-after-wp-change.py").touch()
+    monkeypatch.setattr(wpproc, "CONFIG_PATH", str(tmp_path))
+    monkeypatch.setattr(wpproc, "IS_WINDOWS", False)
+    monkeypatch.setattr(wpproc, "IS_LINUX", True)
+    monkeypatch.setattr(wpproc, "G_SET_COMMAND_STRING", "setter {image}")
+    monkeypatch.setattr(wpproc.subprocess, "run", lambda command, **kwargs: calls.append(command))
+
+    wpproc.set_wallpaper("/tmp/wallpaper.png", source_files=["/a.png", "/b c.png"])
+
+    assert calls[-1] == [
+        "python3",
+        str(tmp_path / "run-after-wp-change.py"),
+        "/tmp/wallpaper.png",
+        "/a.png",
+        "/b c.png",
+    ]
+
+
+def test_missing_python_for_the_post_change_script_is_logged_not_raised(profile_modules, monkeypatch, tmp_path):
+    _, wpproc = profile_modules
+    (tmp_path / "run-after-wp-change.py").touch()
+    monkeypatch.setattr(wpproc, "CONFIG_PATH", str(tmp_path))
+    monkeypatch.setattr(wpproc, "IS_WINDOWS", False)
+    monkeypatch.setattr(wpproc, "IS_LINUX", True)
+    monkeypatch.setattr(wpproc, "G_SET_COMMAND_STRING", "setter {image}")
+
+    def run(command, **_kwargs):
+        if command[0] == "python3":
+            raise FileNotFoundError(command[0])
+
+    monkeypatch.setattr(wpproc.subprocess, "run", run)
+
+    assert wpproc.set_wallpaper("/tmp/wallpaper.png", source_files=["/a.png"]) == 0
