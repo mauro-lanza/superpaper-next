@@ -20,5 +20,6 @@ releases/
 # Test artifacts
 .pytest_cache/
 
-# Local working artifacts (agent prompts, scratch notes)
+# Local working artifacts (agent prompts, plans, scratch notes)
 docs/next-session-prompt.md
+docs/restructuring-plan*.md

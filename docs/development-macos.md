@@ -35,8 +35,7 @@ in wxPython, which installs from PyPI on macOS.
   falls through to the portable (executable-relative) branch on macOS rather
   than using `~/Library/Application Support`.
 
-Both are tracked under #113 and are scheduled in
-[`restructuring-plan.md`](./restructuring-plan.md).
+Both are tracked under #113.
 
 ## Running
 
