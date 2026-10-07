@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from superpaper.profile_id import ProfileId
 from tests.conftest import monitor
 
 
@@ -68,11 +69,18 @@ def test_a_layout_lists_displays_in_desktop_order(profile_modules, display_layou
 
 class SingleImageProfile:
     name = "test"
+    profile_id = ProfileId("test")
     spanmode = "single"
+    zoom = 1.0
+    offsets = (0.0, 0.0)
 
     @staticmethod
     def has_valid_selection():
         return True
+
+    @staticmethod
+    def next_wallpaper_files():
+        return ["image.png"]
 
     @staticmethod
     def display_corrections(_resolutions):
@@ -80,15 +88,16 @@ class SingleImageProfile:
 
 
 def blocking_render(monkeypatch, wpproc):
-    """Make the simple renderer wait until released; return (started, release)."""
+    """Make the running profile's render wait until released; return (started, release)."""
     started = Event()
     release = Event()
 
-    def render(_profile, _force, **_kwargs):
+    def render(_source, _layout, **_options):
         started.set()
         release.wait(timeout=1)
 
-    monkeypatch.setattr(wpproc, "span_single_image_simple", render)
+    monkeypatch.setattr(wpproc, "G_ACTIVE_PROFILE", SingleImageProfile.name)
+    monkeypatch.setattr(wpproc.render, "simple", render)
     return started, release
 
 

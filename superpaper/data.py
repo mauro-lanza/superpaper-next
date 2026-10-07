@@ -239,6 +239,23 @@ def open_profile(paths: AppPaths, profile: ProfileId | str) -> ProfileData | Non
     return loaded.profile if isinstance(loaded, ProfileDiscoveryEntry) else None
 
 
+def stored_profile_ids(paths: AppPaths) -> list[ProfileId] | None:
+    """The ids of the profile files in the profiles directory, whether or not they load;
+    None if the directory can't be read."""
+    try:
+        stems = [path.stem for path in paths.profiles.iterdir() if path.suffix == ".profile"]
+    except OSError as error:
+        sp_logging.G_LOGGER.warning("Could not list the profiles in %s: %s", paths.profiles, error)
+        return None
+    profile_ids = []
+    for stem in stems:
+        try:
+            profile_ids.append(ProfileId.parse(stem))
+        except ProfileIdError:
+            continue
+    return profile_ids
+
+
 def parse_profile_file(path: str | os.PathLike[str]):
     """Explicitly parse an arbitrary profile file, such as a GUI preview."""
     return ProfileData(path, persist_selection=False)
@@ -989,6 +1006,8 @@ class CLIProfileData(ProfileData):
 
     def __init__(self, files, advanced=False, perspective=None, spangroups=None, offsets=None):
         self.name = "cli"
+        # Not a saved profile, so its renders are drafts.
+        self.profile_id = None
         self.files = []
         self.spanmode = ""  # single / multi
         self.spangroups = spangroups

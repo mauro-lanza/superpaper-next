@@ -161,7 +161,8 @@ You can either:
 
 To use other directories, for example to try something without touching your own
 setup, set `SUPERPAPER_CONFIG_HOME` and `SUPERPAPER_CACHE_HOME` to the directories
-to use.
+to use. The cache directory should hold nothing but Superpaper's files: when it starts,
+Superpaper deletes the rendered wallpapers of profiles that no longer exist.
 
 
 ## Troubleshooting

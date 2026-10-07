@@ -78,8 +78,9 @@ def set_wallpaper(image: str, pieces: Sequence[str] | None, *, set_command: str,
             return run(["feh", "--bg-scale", "--no-xinerama", image], timeout=QUICK)
         case "gnome":
             dark = gsettings("org.gnome.desktop.background", "picture-uri-dark", "file://" + image)
-            light = gsettings("org.gnome.desktop.background", "picture-uri", "file://" + image)
-            return light if dark.ok else dark
+            if not dark.ok:  # GNOME before 42 has no wallpaper for the dark style
+                logger.info("No dark-style wallpaper set: %s", dark.problem)
+            return gsettings("org.gnome.desktop.background", "picture-uri", "file://" + image)
         case "cinnamon":
             return gsettings("org.cinnamon.desktop.background", "picture-uri", "file://" + image)
         case "mate":

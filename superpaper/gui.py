@@ -12,7 +12,7 @@ from typing import Literal, overload
 
 import wx  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-import]
 import wx.adv  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-import]
-from PIL import Image, ImageEnhance, ImageOps
+from PIL import ImageEnhance
 
 import superpaper.sp_logging as sp_logging
 import superpaper.wallpaper_processing as wpproc
@@ -36,8 +36,8 @@ from superpaper.data import (
 from superpaper.message_dialog import show_message_dialog
 from superpaper.paths import resource
 from superpaper.profile_id import ProfileId, ProfileIdError
+from superpaper.render import SourceImageError, open_source_image, resize_to_fill
 from superpaper.settings import read_settings
-from superpaper.wallpaper_processing import resize_to_fill
 
 
 class ConfigFrame(wx.Frame):
@@ -2138,11 +2138,9 @@ class WallpaperPreviewPanel(wx.Panel):
     def resize_and_bitmap(self, fname, size, enhance_color=False):
         """Take filename of an image and resize and crop it to size."""
         try:
-            with Image.open(fname) as source:
-                # Orient the image as the renderer does, so the preview matches the result.
-                upright = ImageOps.exif_transpose(source)
-                pil = resize_to_fill(upright, size, quality="fast", zoom=self.zoom, offset=self.offset)
-        except OSError as error:  # unreadable, truncated, or no longer there
+            # Opened as the renderer opens it, so the preview matches the result.
+            pil = resize_to_fill(open_source_image(fname), size, quality="fast", zoom=self.zoom, offset=self.offset)
+        except SourceImageError as error:  # unreadable, truncated, too large, or no longer there
             sp_logging.G_LOGGER.info("Cannot preview image '%s': %s", fname, error)
             black_bmp = wx.Bitmap.FromRGBA(size[0], size[1], red=0, green=0, blue=0, alpha=255)
             if enhance_color:
