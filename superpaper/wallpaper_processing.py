@@ -659,11 +659,14 @@ class DisplaySystem:
                 use_perspective,
                 def_perspective,
             )
-            self.update_bezels(bezel_mms)
-            self.update_ppinorm_offsets(ppi_norm_offsets)  # Bezels & user diagonals always included.
+            # Diagonal overrides first: the bezels were saved in millimetres using the
+            # pixel densities they imply, so converting with the detected densities would
+            # make every save drift the bezels a little further.
             if diagonal_inches:
                 sp_logging.G_LOGGER.info("Updating diagonal_inches")
                 self.update_display_diags(diagonal_inches, reset_offsets=False)
+            self.update_bezels(bezel_mms)
+            self.update_ppinorm_offsets(ppi_norm_offsets)  # Bezels & user diagonals always included.
             self.use_perspective = use_perspective
             if def_perspective == "None":
                 self.default_perspective = None
