@@ -24,7 +24,7 @@ from superpaper.files import write_atomically
 from superpaper.profile_id import ProfileId
 
 if TYPE_CHECKING:
-    from superpaper.wallpaper_processing import DisplaySystem
+    from superpaper.displays import DisplaySystem
 
 logger = logging.getLogger(__name__)
 

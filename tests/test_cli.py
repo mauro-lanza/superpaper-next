@@ -226,7 +226,7 @@ def test_advanced_cli_arguments_are_preserved(monkeypatch, tmp_path, app_paths):
     image.touch()
     captured = {}
     profile = object()
-    display_system = SimpleNamespace(perspective_dict={"desk": object()})
+    display_system = SimpleNamespace(perspective_dict={"desk": object()}, size_hint=lambda: None)
     monkeypatch.setattr(
         sys,
         "argv",
@@ -266,6 +266,23 @@ def test_advanced_cli_arguments_are_preserved(monkeypatch, tmp_path, app_paths):
     assert captured["profile_args"] == ([str(image)], True, "desk", [[0], [1, 2]], ["1", "2"])
     # The layout that knows the perspective is the one the wallpaper is rendered for.
     assert captured["render"] == (profile, app_paths, display_system, "setter {image}", True)
+
+
+@pytest.mark.parametrize(("advanced", "hinted"), [(True, True), (False, False)])
+def test_an_undetected_display_size_is_mentioned_when_spanning_by_size(
+    monkeypatch, tmp_path, app_paths, caplog, advanced, hinted
+):
+    from superpaper import cli
+
+    image = tmp_path / "wallpaper.png"
+    image.touch()
+    arguments = ["superpaper", "--setimages", str(image), "--command", "setter {image}"]
+    monkeypatch.setattr(sys, "argv", [*arguments, "--advanced"] if advanced else arguments)
+    monkeypatch.setattr(cli, "DisplaySystem", lambda config_dir: SimpleNamespace(size_hint=lambda: "Enter its size."))
+    monkeypatch.setattr(cli, "change_wallpaper_job", lambda *args, **kwargs: None)
+
+    assert cli.cli_logic(app_paths) == 0
+    assert ("Enter its size." in caplog.text) is hinted
 
 
 def test_cli_help_exits_successfully(monkeypatch, tmp_path):
