@@ -17,6 +17,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from superpaper import displays
+
 
 def monitor(x, y, width, height, width_mm, height_mm, name):
     return SimpleNamespace(x=x, y=y, width=width, height=height, width_mm=width_mm, height_mm=height_mm, name=name)
@@ -70,29 +72,27 @@ def saved_layouts(tmp_path):
     return tmp_path
 
 
-def display_system(wpproc, monkeypatch, config_dir, monitors):
-    monkeypatch.setattr(wpproc, "get_monitors", lambda: monitors)
-    return wpproc.DisplaySystem(config_dir)
+def display_system(monkeypatch, config_dir, monitors):
+    monkeypatch.setattr(displays, "get_monitors", lambda: monitors)
+    return displays.DisplaySystem(config_dir)
 
 
 @pytest.mark.parametrize(("monitors", "key"), [(DUAL_MONITORS, DUAL_KEY), (LAPTOP_MONITORS, LAPTOP_KEY)])
-def test_the_key_of_a_monitor_set_never_changes(profile_modules, monkeypatch, tmp_path, monitors, key):
-    _, wpproc = profile_modules
+def test_the_key_of_a_monitor_set_never_changes(monkeypatch, tmp_path, monitors, key):
+    system = display_system(monkeypatch, tmp_path, monitors)
 
-    assert str(hash(display_system(wpproc, monkeypatch, tmp_path, monitors))) == key
+    assert str(hash(system)) == key
+    assert system.key == key
 
 
-def test_the_key_ignores_monitor_names_and_order(profile_modules, monkeypatch, tmp_path):
-    _, wpproc = profile_modules
+def test_the_key_ignores_monitor_names_and_order(monkeypatch, tmp_path):
     renamed = [monitor(m.x, m.y, m.width, m.height, m.width_mm, m.height_mm, "renamed") for m in DUAL_MONITORS]
 
-    assert str(hash(display_system(wpproc, monkeypatch, tmp_path, renamed[::-1]))) == DUAL_KEY
+    assert str(hash(display_system(monkeypatch, tmp_path, renamed[::-1]))) == DUAL_KEY
 
 
-def test_a_saved_layout_loads(profile_modules, monkeypatch, saved_layouts):
-    _, wpproc = profile_modules
-
-    system = display_system(wpproc, monkeypatch, saved_layouts, DUAL_MONITORS)
+def test_a_saved_layout_loads(monkeypatch, saved_layouts):
+    system = display_system(monkeypatch, saved_layouts, DUAL_MONITORS)
 
     assert system.get_ppinorm_offsets() == [(0, 0), (2605.7204000891693, 98.49418762870297)]
     assert system.bezels_in_mm() == [(10.5, 0.0), (0.0, 0.0)]
@@ -120,9 +120,8 @@ def test_a_saved_layout_loads(profile_modules, monkeypatch, saved_layouts):
     assert system.get_persp_data("default") is system.perspective_dict["desk"]
 
 
-def test_saving_an_unchanged_layout_rewrites_the_same_bytes(profile_modules, monkeypatch, saved_layouts):
-    _, wpproc = profile_modules
-    system = display_system(wpproc, monkeypatch, saved_layouts, DUAL_MONITORS)
+def test_saving_an_unchanged_layout_rewrites_the_same_bytes(monkeypatch, saved_layouts):
+    system = display_system(monkeypatch, saved_layouts, DUAL_MONITORS)
     dat = (saved_layouts / "display_systems.dat").read_bytes()
     persp = (saved_layouts / f"{DUAL_KEY}.persp").read_bytes()
 
@@ -134,19 +133,15 @@ def test_saving_an_unchanged_layout_rewrites_the_same_bytes(profile_modules, mon
     assert (saved_layouts / f"{DUAL_KEY}.persp").read_bytes() == persp
 
 
-def test_repeated_saves_do_not_drift(profile_modules, monkeypatch, saved_layouts):
-    _, wpproc = profile_modules
-
+def test_repeated_saves_do_not_drift(monkeypatch, saved_layouts):
     for _ in range(3):
-        display_system(wpproc, monkeypatch, saved_layouts, DUAL_MONITORS).save_system()
+        display_system(monkeypatch, saved_layouts, DUAL_MONITORS).save_system()
 
     assert (saved_layouts / "display_systems.dat").read_text(encoding="utf-8") == DISPLAY_SYSTEMS_DAT
 
 
-def test_the_laptop_layout_loads_with_its_diagonal_override(profile_modules, monkeypatch, saved_layouts):
-    _, wpproc = profile_modules
-
-    system = display_system(wpproc, monkeypatch, saved_layouts, LAPTOP_MONITORS)
+def test_the_laptop_layout_loads_with_its_diagonal_override(monkeypatch, saved_layouts):
+    system = display_system(monkeypatch, saved_layouts, LAPTOP_MONITORS)
 
     (laptop,) = system.disp_list
     assert laptop.phys_size_failed is True
@@ -156,11 +151,10 @@ def test_the_laptop_layout_loads_with_its_diagonal_override(profile_modules, mon
     assert system.perspective_dict == {}
 
 
-def test_monitors_without_a_saved_layout_get_a_guessed_one(profile_modules, monkeypatch, saved_layouts):
-    _, wpproc = profile_modules
+def test_monitors_without_a_saved_layout_get_a_guessed_one(monkeypatch, saved_layouts):
     moved = [DUAL_MONITORS[0], monitor(0, 1440, 1920, 1080, 527, 296, "HDMI-A-1")]
 
-    system = display_system(wpproc, monkeypatch, saved_layouts, moved)
+    system = display_system(monkeypatch, saved_layouts, moved)
 
     assert str(hash(system)) not in {DUAL_KEY, LAPTOP_KEY}
     assert system.use_user_diags is False

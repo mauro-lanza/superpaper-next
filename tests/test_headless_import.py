@@ -19,6 +19,8 @@ HEADLESS_MODULES = (
     "superpaper.desktop.linux",
     "superpaper.desktop.process",
     "superpaper.desktop.spanmode",
+    "superpaper.display_store",
+    "superpaper.displays",
     "superpaper.files",
     "superpaper.message_dialog",
     "superpaper.paths",

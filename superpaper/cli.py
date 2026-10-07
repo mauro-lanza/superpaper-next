@@ -7,13 +7,13 @@ from typing import NoReturn
 
 import superpaper.desktop as desktop
 import superpaper.sp_logging as sp_logging
-import superpaper.wallpaper_processing as wpproc
 from superpaper.data import CLIProfileData, discover_profile_inventory
 from superpaper.desktop.spanmode import set_spanmode
+from superpaper.displays import DisplayDetectionError, DisplaySystem
 from superpaper.paths import AppPaths, ensure_dirs
 from superpaper.profile_id import ProfileId, ProfileIdError
 from superpaper.settings import SETTINGS_FILE, read_settings, write_settings
-from superpaper.wallpaper_processing import DisplaySystem, change_wallpaper_job
+from superpaper.wallpaper_processing import change_wallpaper_job
 
 
 def start_tray(paths: AppPaths, profile: ProfileId | None = None, *, debug: bool = False) -> None:
@@ -48,7 +48,7 @@ def _exit_with_error(message: str) -> NoReturn:
 def _detect_displays(paths: AppPaths) -> DisplaySystem:
     try:
         return DisplaySystem(paths.config)
-    except wpproc.DisplayDetectionError as error:
+    except DisplayDetectionError as error:
         _exit_with_error(f"No displays could be detected: {error}")
 
 
@@ -183,6 +183,8 @@ def cli_logic(paths: AppPaths):
 
     if display_system is None:  # the perspective check above already detected them
         display_system = _detect_displays(paths)
+    if args.advanced and (hint := display_system.size_hint()):
+        sp_logging.G_LOGGER.warning("%s", hint)
     set_spanmode()
     profile = CLIProfileData(args.setimages, args.advanced, args.perspective, spangrp, args.offsets)
     job_thread = change_wallpaper_job(

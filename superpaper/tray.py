@@ -9,6 +9,7 @@ import wx  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-impor
 import wx.adv  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-import]
 
 import superpaper.desktop as desktop
+import superpaper.displays as displays
 import superpaper.render_cache as render_cache
 import superpaper.sp_logging as sp_logging
 import superpaper.wallpaper_processing as wpproc
@@ -195,6 +196,10 @@ hotkeys will not work. Exception: %s",
         if problem:
             sp_logging.G_LOGGER.error("%s", problem)
             wx.CallAfter(show_message_dialog, problem, "Error")
+        size_hint = self.display_system.size_hint()
+        if size_hint:
+            sp_logging.G_LOGGER.warning("%s", size_hint)
+            wx.CallAfter(show_message_dialog, size_hint)
 
     def register_hotkeys(self):
         """Registers system-wide hotkeys for profiles and application interaction."""
@@ -465,7 +470,7 @@ Check that it is formatted properly and valid keys."
         A change already under way keeps the layout it started with, so this never
         waits for one. If detection fails, the previous layout stays in use.
         """
-        self.display_system = wpproc.DisplaySystem(self.paths.config)
+        self.display_system = displays.DisplaySystem(self.paths.config)
 
     def change_wallpaper(self, profile, *, force=False, advance=False, skip_if_busy=False, display_system=None):
         """Start one wallpaper change for ``profile``, with the settings and displays as they are now.

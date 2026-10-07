@@ -340,12 +340,12 @@ def test_wallpaper_changes_use_the_displays_current_at_the_time(headless_tray_mo
 
 def test_a_failed_display_refresh_keeps_the_previous_layout(headless_tray_module, monkeypatch, tmp_path):
     tray = headless_tray_module
-    monkeypatch.setattr(tray.wpproc, "get_monitors", list)
-    monkeypatch.setattr(tray.wpproc.time, "sleep", lambda _delay: None)
+    monkeypatch.setattr(tray.displays, "get_monitors", list)
+    monkeypatch.setattr(tray.displays.time, "sleep", lambda _delay: None)
     icon = controller(tray)
     icon.paths = AppPaths(config=tmp_path, profiles=tmp_path / "profiles", cache=tmp_path)
 
-    with pytest.raises(tray.wpproc.DisplayDetectionError):
+    with pytest.raises(tray.displays.DisplayDetectionError):
         tray.TaskBarIcon.refresh_displays(icon)
 
     assert icon.display_system is LAYOUT

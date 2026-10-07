@@ -14,6 +14,7 @@ import wx  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-impor
 import wx.adv  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-import]
 from PIL import ImageEnhance
 
+import superpaper.displays as displays
 import superpaper.sp_logging as sp_logging
 import superpaper.wallpaper_processing as wpproc
 from superpaper.configuration_dialogs import (
@@ -106,7 +107,7 @@ class WallpaperSettingsPanel(wx.Panel):
         self._system_clean = None
         # This is staged dialog state. Do not publish it until Apply/Save; live
         # field edits must not alter the display system used by background jobs.
-        self.display_sys = wpproc.DisplaySystem(self.paths.config)
+        self.display_sys = displays.DisplaySystem(self.paths.config)
         # self.wpprev_pnl = WallpaperPreviewPanel(self.frame, self.display_sys)
         self.wpprev_pnl = WallpaperPreviewPanel(self, self.display_sys)
         self.sizer_top_half.Add(self.wpprev_pnl, 1, wx.CENTER | wx.EXPAND, 5)

@@ -14,7 +14,7 @@ from PIL import Image, ImageOps, UnidentifiedImageError
 import superpaper.perspective as persp
 
 if TYPE_CHECKING:
-    from superpaper.wallpaper_processing import DisplaySystem
+    from superpaper.displays import DisplaySystem
 
 logger = logging.getLogger(__name__)
 

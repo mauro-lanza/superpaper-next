@@ -59,11 +59,11 @@ def display_layout(monkeypatch, tmp_path):
 
     The layouts are loaded from ``config_dir``, by default a directory with none saved.
     """
-    from superpaper import wallpaper_processing as wpproc
+    from superpaper import displays
 
     def build(monitors=TWO_DISPLAYS, config_dir=None):
-        monkeypatch.setattr(wpproc, "get_monitors", lambda: monitors)
-        return wpproc.DisplaySystem(config_dir or tmp_path / "no-saved-layouts")
+        monkeypatch.setattr(displays, "get_monitors", lambda: monitors)
+        return displays.DisplaySystem(config_dir or tmp_path / "no-saved-layouts")
 
     return build
 

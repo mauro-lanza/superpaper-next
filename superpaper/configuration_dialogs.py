@@ -875,9 +875,9 @@ class PerspectiveConfig(wx.Dialog):
         self.profnames.append("Create a new profile")
         self.choice_profiles.SetItems(self.profnames)
 
-    def check_for_large_image_size(self, persp_name):
-        """Compute how large an image the current perspective
-        settings would produce as an intermediate step."""
+    def check_for_large_image_size(self, persp_data):
+        """How large an image the perspective ``persp_data`` would produce as an
+        intermediate step: (whether that is too large, its size)."""
         if self.frame.cb_offsets.GetValue():
             offsets = []
             for tc in self.frame.tc_list_offsets:
@@ -889,14 +889,9 @@ class PerspectiveConfig(wx.Dialog):
         else:
             offsets = len(self.display_sys.disp_list) * [(0, 0)]
         crops = self.display_sys.get_ppi_norm_crops(offsets)
-        persp_data = self.display_sys.get_persp_data(persp_name)
-        if persp_data:
-            proj_plane_crops, persp_coeffs = persp.get_backprojected_display_system(crops, persp_data)
-            # Canvas containing back-projected displays
-            canv = render.compute_working_canvas(proj_plane_crops)
-        else:
-            # No perspective data => no back-projection enlargement to check.
-            return (False, (0, 0))
+        proj_plane_crops, persp_coeffs = persp.get_backprojected_display_system(crops, persp_data)
+        # Canvas containing back-projected displays
+        canv = render.compute_working_canvas(proj_plane_crops)
         max_size = 12000
         if canv[0] > max_size or canv[1] > max_size:
             return (True, canv)
@@ -962,14 +957,11 @@ class PerspectiveConfig(wx.Dialog):
         for an, vo, do in zip(ti_angl, ti_vero, ti_depo):
             tilts.append((an, px_per_mm * vo, px_per_mm * do))
 
-        # update and save data
-        # check for large images
+        # Warn before saving settings that would need huge intermediate images. They are
+        # checked as they are, so the layout is only changed once they are accepted.
         if self.warn_large_img:
-            scratch_name = "\0validation"
-            previous_use_perspective = self.display_sys.use_perspective
-            previous_default_perspective = self.display_sys.default_perspective
-            self.display_sys.update_perspectives(scratch_name, toggle, is_ds_def, viewer_data, swivels, tilts)
-            too_large, canvas = self.check_for_large_image_size(scratch_name)
+            candidate = {"central_disp": centr_disp, "viewer_pos": viewer_offset, "swivels": swivels, "tilts": tilts}
+            too_large, canvas = self.check_for_large_image_size(candidate)
             if too_large:
                 msg = (
                     "These perspective settings will produce large intermediate images "
@@ -984,23 +976,9 @@ class PerspectiveConfig(wx.Dialog):
                     "\n"
                     "This warning may be disabled from settings."
                 )
-                res = show_message_dialog(msg, "Info", style="YES_NO")
-                if not res:
-                    # Stop saving, remove temp
-                    self.persp_dict.pop(scratch_name, None)
-                    self.display_sys.use_perspective = previous_use_perspective
-                    self.display_sys.default_perspective = previous_default_perspective
+                if not show_message_dialog(msg, "Info", style="YES_NO"):
                     return 0
-                else:
-                    # Continue and write profile
-                    self.persp_dict.pop(scratch_name, None)
-                    self.display_sys.update_perspectives(persp_name, toggle, is_ds_def, viewer_data, swivels, tilts)
-            else:
-                # No large images, temp not needed
-                self.persp_dict.pop(scratch_name, None)
-                self.display_sys.update_perspectives(persp_name, toggle, is_ds_def, viewer_data, swivels, tilts)
-        else:
-            self.display_sys.update_perspectives(persp_name, toggle, is_ds_def, viewer_data, swivels, tilts)
+        self.display_sys.update_perspectives(persp_name, toggle, is_ds_def, viewer_data, swivels, tilts)
         # Persist the perspective file first, then the display system that names the
         # default; the tray then reloads both as one layout.
         self.display_sys.save_perspectives()
