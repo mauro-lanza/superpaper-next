@@ -147,15 +147,20 @@ def test_one_image_per_display_keeps_the_gaps_black(tmp_path, display_layout):
 # Advanced spanning: two screens of different pixel density with a 6 mm bezel between
 # them. The digests pin the output exactly; they were recorded with Pillow 12.2.0 and
 # numpy 2.5.0, so a different version of either can change them, and then they are
-# re-recorded deliberately.
+# re-recorded deliberately. The perspective case solves a linear system with numpy's
+# OpenBLAS, whose AVX-512 kernels round its last bits differently from the other x86-64
+# kernels. That moves 58 of the 4032 pixels by one level, so it has a digest for each.
 SMALL_MONITORS = [
     monitor(0, 0, 64, 36, 120, 68, "A"),
     monitor(64, 6, 48, 27, 105, 59, "B"),
 ]
 ADVANCED_GOLDENS = {
-    "offsets": "d55a711c95670d2e4ad667b5967864f6a4ec9f9d67b2c94d06f43f95075dd618",
-    "span groups": "49a179d205c35521f306a400e09310146b7b87cc69dcba71f61fb6016e549f98",
-    "perspective": "f22045d3fa224a9f60cebf74ea1e1e0e31717313e3f92b785acdd52f288911a2",
+    "offsets": {"d55a711c95670d2e4ad667b5967864f6a4ec9f9d67b2c94d06f43f95075dd618"},
+    "span groups": {"49a179d205c35521f306a400e09310146b7b87cc69dcba71f61fb6016e549f98"},
+    "perspective": {
+        "f22045d3fa224a9f60cebf74ea1e1e0e31717313e3f92b785acdd52f288911a2",  # AVX-512 kernels
+        "5ab69aa9661b802a4e11d15221fdcb440d2709d9fddf6cd8331bf411ad1b9f6a",  # the others
+    },
 }
 
 
@@ -188,4 +193,4 @@ def test_advanced_spanning_golden(tmp_path, display_layout, case, spangroups, pe
 
     assert image.size == (112, 36)
     digest = hashlib.sha256(image.tobytes()).hexdigest()
-    assert digest == ADVANCED_GOLDENS[case], f"pixels changed (Pillow {PIL.__version__}, numpy {numpy.__version__})"
+    assert digest in ADVANCED_GOLDENS[case], f"pixels changed (Pillow {PIL.__version__}, numpy {numpy.__version__})"
