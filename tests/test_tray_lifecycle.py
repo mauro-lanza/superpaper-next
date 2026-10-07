@@ -102,7 +102,10 @@ def test_start_previous_profile_restore_and_explicit_apply(headless_tray_module,
     active = profile("active")
     calls = []
     timer = object()
-    monkeypatch.setattr(tray, "quick_profile_job", lambda selected, **kwargs: calls.append(("quick", selected)))
+    restored = True
+    monkeypatch.setattr(
+        tray, "quick_profile_job", lambda selected, **kwargs: calls.append(("quick", selected)) or restored
+    )
     monkeypatch.setattr(
         tray,
         "run_profile_job",
@@ -113,6 +116,12 @@ def test_start_previous_profile_restore_and_explicit_apply(headless_tray_module,
     icon.start_prev_profile(active, apply_now=False)
     assert calls == [("quick", active), ("run", active, True)]
     assert icon.repeating_timer is timer
+
+    # With no earlier render to show again, the wallpaper is rendered now, without cycling.
+    calls.clear()
+    restored = False
+    icon.start_prev_profile(active, apply_now=False)
+    assert calls == [("quick", active), ("run", active, False)]
 
     calls.clear()
     icon.start_prev_profile(active, apply_now=True)

@@ -9,6 +9,7 @@ import wx  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-impor
 import wx.adv  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-import]
 
 import superpaper.desktop as desktop
+import superpaper.render_cache as render_cache
 import superpaper.sp_logging as sp_logging
 import superpaper.wallpaper_processing as wpproc
 from superpaper.__version__ import __version__
@@ -16,6 +17,7 @@ from superpaper.configuration_dialogs import HelpFrame, SettingsFrame
 from superpaper.data import (
     list_profiles,
     read_active_profile,
+    stored_profile_ids,
     write_active_profile,
 )
 from superpaper.desktop.linux import running_kde
@@ -110,6 +112,10 @@ class TaskBarIcon(wx.adv.TaskBarIcon):
         self.pause_item = None
         self.is_paused = False
         self.list_of_profiles = list_profiles(self.paths)
+        # Renders of profiles deleted or renamed since the last start aren't needed.
+        stored = stored_profile_ids(self.paths)
+        if stored is not None:
+            render_cache.sweep(self.paths.cache, stored)
         # Should now return an object if a previous profile was written or
         # None if no previous data was found
         if startup_profile:
@@ -522,16 +528,16 @@ Check that it is formatted properly and valid keys."
                 # slideshow timer (if the profile is a slideshow).
                 self.repeating_timer, thrd = self._run_profile(profile, startup=False)
             else:
-                # Restore the last rendered wallpaper without cycling, then arm
-                # the slideshow timer (if any). The wallpaper is not changed on
-                # launch; cycling only happens later on the timer's schedule.
-                quick_profile_job(
+                # Show the last wallpaper again without cycling, then arm the slideshow
+                # timer (if any); cycling only happens later on the timer's schedule. With
+                # no earlier render to show, the current wallpaper is rendered now.
+                restored = quick_profile_job(
                     profile,
                     display_system=self.display_system,
                     paths=self.paths,
                     set_command=self.g_settings.set_command,
                 )
-                self.repeating_timer, thrd = self._run_profile(profile, startup=True)
+                self.repeating_timer, thrd = self._run_profile(profile, startup=restored)
 
     def start_profile(self, event, profile, force_reload=False):
         """

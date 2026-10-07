@@ -74,6 +74,19 @@ def test_no_custom_command_preserves_native_dispatch(monkeypatch, ran):
     assert all(options["timeout"] == process.QUICK for _, options in ran)
 
 
+def test_gnome_without_a_dark_style_wallpaper_still_takes_the_wallpaper(monkeypatch):
+    monkeypatch.setenv("DESKTOP_SESSION", "gnome")
+
+    def run(command, **options):
+        if "picture-uri-dark" in command:  # GNOME before 42
+            return subprocess.CompletedProcess(command, 1, stdout="", stderr="No such key “picture-uri-dark”\n")
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(process.subprocess, "run", run)
+
+    assert set_wallpaper().ok
+
+
 def test_an_unknown_desktop_is_reported_not_guessed(monkeypatch, ran):
     monkeypatch.setenv("DESKTOP_SESSION", "unknown")
 

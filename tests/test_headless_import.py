@@ -24,6 +24,8 @@ HEADLESS_MODULES = (
     "superpaper.paths",
     "superpaper.perspective",
     "superpaper.profile_id",
+    "superpaper.render",
+    "superpaper.render_cache",
     "superpaper.settings",
     "superpaper.sni_tray",
     "superpaper.sp_logging",

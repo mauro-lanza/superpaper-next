@@ -11,7 +11,7 @@ import wx  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-impor
 import wx.adv  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-import]
 
 import superpaper.perspective as persp
-import superpaper.wallpaper_processing as wpproc
+import superpaper.render as render
 from superpaper.data import CLIProfileData
 from superpaper.message_dialog import show_message_dialog
 from superpaper.paths import resource
@@ -893,7 +893,7 @@ class PerspectiveConfig(wx.Dialog):
         if persp_data:
             proj_plane_crops, persp_coeffs = persp.get_backprojected_display_system(crops, persp_data)
             # Canvas containing back-projected displays
-            canv = wpproc.compute_working_canvas(proj_plane_crops)
+            canv = render.compute_working_canvas(proj_plane_crops)
         else:
             # No perspective data => no back-projection enlargement to check.
             return (False, (0, 0))
@@ -1534,11 +1534,11 @@ class HelpPopup(wx.PopupTransientWindow):
             if persp_data:
                 proj_plane_crops, persp_coeffs = persp.get_backprojected_display_system(crops, persp_data)
                 # Canvas containing back-projected displays
-                canv = wpproc.compute_working_canvas(proj_plane_crops)
+                canv = render.compute_working_canvas(proj_plane_crops)
             else:
-                canv = wpproc.compute_working_canvas(crops)
+                canv = render.compute_working_canvas(crops)
         else:
-            canv = wpproc.compute_canvas(display_sys.resolutions(), display_sys.digital_offsets())
+            canv = render.compute_canvas(display_sys.resolutions(), display_sys.digital_offsets())
         res_str = f"{canv[0]}x{canv[1]}"
         fin = senten.format(res_str)
         return fin

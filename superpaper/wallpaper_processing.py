@@ -1,8 +1,7 @@
 """
-Wallpaper image processing back-end for Superpaper.
-
-Applies image corrections, crops, merges etc., and hands the result to the desktop
-(superpaper.desktop) to set as the wallpaper.
+Display layouts, and the jobs that change the wallpaper: choose a profile's images,
+render them (superpaper.render), keep the result (superpaper.render_cache) and show it
+(superpaper.desktop).
 
 Written by Henri Hänninen, copyright 2022 under MIT licence.
 """
@@ -11,25 +10,21 @@ import configparser
 import math
 import os
 import time
-from operator import itemgetter
 from pathlib import Path
 from threading import Lock, Thread, Timer
 
-from PIL import Image, ImageOps, UnidentifiedImageError
 from screeninfo import get_monitors
 
 import superpaper.desktop as desktop
-import superpaper.perspective as persp
+import superpaper.render as render
+import superpaper.render_cache as render_cache
 import superpaper.sp_logging as sp_logging
 from superpaper.desktop.kde import Activities
 from superpaper.desktop.process import Result
 from superpaper.message_dialog import show_message_dialog
 from superpaper.paths import AppPaths
+from superpaper.profile_id import ProfileId, ProfileIdError
 from superpaper.sp_platform import IS_WINDOWS
-
-# Disables PIL.Image.DecompressionBombError.
-Image.MAX_IMAGE_PIXELS = None  # 715827880 would be 4x default max.
-
 
 # Global constants
 
@@ -839,399 +834,22 @@ def get_display_data(*, max_attempts=3, retry_delay=0.25):
     return display_list
 
 
-def compute_canvas(res_array, offset_array):
-    """Computes the size of the total desktop area from monitor resolutions and offsets."""
-    # Take the subtractions of right-most right - left-most left
-    # and bottom-most bottom - top-most top (=0).
-    leftmost = 0
-    topmost = 0
-    right_edges = []
-    bottom_edges = []
-    for res, off in zip(res_array, offset_array):
-        right_edges.append(off[0] + res[0])
-        bottom_edges.append(off[1] + res[1])
-    # Right-most edge.
-    rightmost = max(right_edges)
-    # Bottom-most edge.
-    bottommost = max(bottom_edges)
-    canvas_size = [rightmost - leftmost, bottommost - topmost]
-    if sp_logging.DEBUG:
-        sp_logging.G_LOGGER.info("Canvas size: %s", canvas_size)
-    return canvas_size
+def set_wallpaper(image, source_files=None, *, display_system: DisplaySystem, paths: AppPaths, set_command="") -> bool:
+    """Hand the rendered wallpaper ``image`` to the desktop, then run the user's
+    run-after-wp-change.py. Returns whether the desktop took it.
 
-
-# resize image to fill given rectangle and do a positioned crop to size.
-# Return output image.
-def resize_to_fill(
-    img,
-    res,
-    quality: str | Image.Resampling = Image.Resampling.LANCZOS,
-    zoom=1.0,
-    offset=(0.0, 0.0),
-):
-    """Resize image to fill given rectangle and do a positioned crop to size.
-
-    The image is always scaled so that it fully covers the target rectangle
-    ``res`` (no letterboxing). ``zoom`` (>= 1.0) scales the image further in,
-    cropping away more of the source. ``offset`` is an (x, y) pair in the range
-    [-1.0, 1.0] that slides the crop window within the available overflow:
-    0.0 keeps the default centered crop, -1.0 aligns to the left/top edge and
-    +1.0 aligns to the right/bottom edge. The result always fills ``res``.
-    """
-    if quality == "fast":
-        quality = Image.Resampling.HAMMING
-        reducing_gap = 1.5
-    else:
-        quality = Image.Resampling.LANCZOS
-        reducing_gap = None
-
-    if img.mode != "RGB":
-        img = img.convert("RGB")
-
-    # Sanitize positioning parameters.
-    try:
-        zoom = float(zoom)
-    except TypeError, ValueError:
-        zoom = 1.0
-    if zoom < 1.0:
-        zoom = 1.0
-    try:
-        offset_x = min(1.0, max(-1.0, float(offset[0])))
-        offset_y = min(1.0, max(-1.0, float(offset[1])))
-    except TypeError, ValueError, IndexError:
-        offset_x, offset_y = 0.0, 0.0
-
-    image_size = img.size  # returns image (width,height)
-    if image_size == res and zoom == 1.0 and offset_x == 0.0 and offset_y == 0.0:
-        # input image is already of the correct size, no action needed.
-        return img
-
-    # Scale so the image at least covers the target rectangle (cover fit),
-    # then apply the additional user zoom. Using max() of the edge ratios
-    # guarantees coverage regardless of aspect ratios.
-    cover_multiplier = max(res[0] / image_size[0], res[1] / image_size[1])
-    resize_multiplier = cover_multiplier * zoom
-    # Guarantee the scaled image is never smaller than the target on either
-    # edge despite rounding, so the final crop always yields exactly res.
-    new_size = (
-        max(round(resize_multiplier * image_size[0]), res[0]),
-        max(round(resize_multiplier * image_size[1]), res[1]),
-    )
-    img = img.resize(new_size, resample=quality, reducing_gap=reducing_gap)
-
-    extra_width = new_size[0] - res[0]
-    extra_height = new_size[1] - res[1]
-    # offset 0.0 -> centered crop (extra/2); -1.0 -> 0; +1.0 -> extra.
-    left = round(extra_width / 2 * (1 + offset_x))
-    top = round(extra_height / 2 * (1 + offset_y))
-    # Clamp the crop origin so the window stays fully inside the image.
-    left = min(max(left, 0), extra_width)
-    top = min(max(top, 0), extra_height)
-    crop_tuple = (left, top, left + res[0], top + res[1])
-    cropped_res = img.crop(crop_tuple)
-    if cropped_res.size == res:
-        return cropped_res
-    else:
-        sp_logging.G_LOGGER.info("Error: result image not of correct size. crp:%s, res:%s", cropped_res.size, res)
-        return cropped_res
-
-
-def compute_working_canvas(crop_tuples, bezels=None):
-    """Computes effective size of the desktop are taking into account PPI/offsets/bezels.
-
-    When ``bezels`` is provided (a list of ``(right, bottom)`` ppi-normalized
-    bezel sizes parallel to ``crop_tuples``), the outer bezels extend the
-    canvas so that the rendered image matches what the GUI preview shows. The
-    preview sizes its canvas with these bezels included, so omitting them here
-    made the applied wallpaper ignore outer bezels.
-    """
-    # Take the subtractions of right-most right - left-most left
-    # and bottom-most bottom - top-most top (=0).
-    leftmost = 0
-    topmost = 0
-    if bezels:
-        # Right-/bottom-most edge including each display's outer bezel.
-        rightmost = max(round(crp[2] + bez[0]) for crp, bez in zip(crop_tuples, bezels))
-        bottommost = max(round(crp[3] + bez[1]) for crp, bez in zip(crop_tuples, bezels))
-    else:
-        # Right-most edge of the crop tuples.
-        rightmost = max(crop_tuples, key=itemgetter(2))[2]
-        # Bottom-most edge of the crop tuples.
-        bottommost = max(crop_tuples, key=itemgetter(3))[3]
-    canvas_size = [rightmost - leftmost, bottommost - topmost]
-    return canvas_size
-
-
-def alternating_outputfile(cache_dir: Path, prof_name):
-    """Return alternating output filename and old filename.
-
-    This is done so that the cache doesn't become a huge dump of unused files,
-    and it is alternating since some OSs don't update their wallpapers if the
-    current image file is overwritten.
-    """
-    if IS_WINDOWS:
-        ftype = "jpg"
-    else:
-        ftype = "png"
-    outputfile = os.path.join(cache_dir, prof_name + "-a." + ftype)
-    if os.path.isfile(outputfile):
-        outputfile_old = outputfile
-        outputfile = os.path.join(cache_dir, prof_name + "-b." + ftype)
-    else:
-        outputfile_old = os.path.join(cache_dir, prof_name + "-b." + ftype)
-    return (outputfile, outputfile_old)
-
-
-def span_single_image_simple(profile, force, *, display_system: DisplaySystem, paths: AppPaths, set_command=""):
-    """
-    Spans a single image across all monitors. No corrections.
-
-    This simple method resizes the source image so it fills the whole
-    desktop canvas. Since no corrections are applied, no offset dependent
-    cuts are needed and so this should work on any monitor arrangement.
-    """
-    files = profile.next_wallpaper_files()
-    if len(files) != 1:
-        sp_logging.G_LOGGER.error("No complete wallpaper selection is available for profile '%s'.", profile.name)
-        return
-    file = files[0]
-    if sp_logging.DEBUG:
-        sp_logging.G_LOGGER.info(file)
-    try:
-        img = Image.open(file)
-        img = ImageOps.exif_transpose(img)
-    except OSError, UnidentifiedImageError:
-        sp_logging.G_LOGGER.info(
-            ("Opening image '%s' failed with PIL.UnidentifiedImageError.It could be corrupted or is of foreign type."),
-            file,
-        )
-        return
-    canvas_tuple = tuple(compute_canvas(display_system.resolutions(), display_system.digital_offsets()))
-    img_resize = resize_to_fill(img, canvas_tuple, zoom=profile.zoom, offset=profile.offsets)
-
-    outputfile, outputfile_old = alternating_outputfile(paths.cache, profile.name)
-    img_resize.save(outputfile, quality=95)  # set quality if jpg is used, png unaffected
-    if profile.name == G_ACTIVE_PROFILE or force:
-        set_wallpaper(outputfile, [file], display_system=display_system, paths=paths, set_command=set_command)
-    if os.path.exists(outputfile_old):
-        os.remove(outputfile_old)
-    return 0
-
-
-def group_persp_data(persp_dat, groups):
-    """Rerturn list of grouped perspective data objects."""
-    if not persp_dat:
-        return [None] * len(groups)
-    group_persp_data_list = []
-    for grp in groups:
-        group_data = {
-            "central_disp": persp_dat["central_disp"],
-            "viewer_pos": persp_dat["viewer_pos"],
-            "swivels": [persp_dat["swivels"][index] for index in grp],
-            "tilts": [persp_dat["tilts"][index] for index in grp],
-        }
-        group_persp_data_list.append(group_data)
-    return group_persp_data_list
-
-
-def translate_to_group_coordinates(group_crop_list):
-    """Translates lists of group crops into groups internal coordinates."""
-    if len(group_crop_list) == 1:
-        return group_crop_list
-    else:
-        group_crop_list_transl = []
-        for grp_crops in group_crop_list:
-            left_anch = min([crp[0] for crp in grp_crops])
-            top_anch = min([crp[1] for crp in grp_crops])
-            transl_crops = []
-            for crp in grp_crops:
-                transl_crops.append((crp[0] - left_anch, crp[1] - top_anch, crp[2] - left_anch, crp[3] - top_anch))
-            group_crop_list_transl.append(transl_crops)
-        return group_crop_list_transl
-
-
-# Take pixel densities of displays into account to have the image match
-# physically between displays.
-def span_single_image_advanced(profile, force, *, display_system: DisplaySystem, paths: AppPaths, set_command=""):
-    """
-    Applies wallpaper using PPI, bezel, offset corrections.
-
-    Further description todo.
-    """
-    files = profile.next_wallpaper_files()
-    expected_files = len(profile.spangroups) if profile.spangroups else 1
-    if len(files) != expected_files:
-        sp_logging.G_LOGGER.error("No complete wallpaper selection is available for profile '%s'.", profile.name)
-        return
-    if sp_logging.DEBUG:
-        sp_logging.G_LOGGER.info(files)
-    try:
-        img_list = [Image.open(fil) for fil in files]
-        img_list = [ImageOps.exif_transpose(img) for img in img_list]
-    except OSError, UnidentifiedImageError:
-        sp_logging.G_LOGGER.info(
-            ("Opening image '%s' failed with PIL.UnidentifiedImageError.It could be corrupted or is of foreign type."),
-            files,
-        )
-        return
-
-    # Cropping now sections of the image to be shown, USE EFFECTIVE WORKING
-    # SIZES. Also EFFECTIVE SIZE Offsets are now required.
-    resolutions = display_system.resolutions()
-    manual_offsets = profile.display_corrections(resolutions).manual_offsets
-    cropped_images = {}
-    crop_tuples = display_system.get_ppi_norm_crops(manual_offsets)
-    sp_logging.G_LOGGER.info(
-        "use_perspective: %s, prof.perspective: %s",
-        display_system.use_perspective,
-        profile.perspective,
-    )
-    persp_dat = None
-    if display_system.use_perspective:
-        persp_dat = display_system.get_persp_data(profile.perspective)
-
-    if profile.spangroups:
-        spangroups = profile.spangroups
-    else:
-        spangroups = [list(range(len(resolutions)))]
-
-    grp_crop_tuples = translate_to_group_coordinates([[crop_tuples[index] for index in grp] for grp in spangroups])
-    grp_res_array = [[resolutions[index] for index in grp] for grp in spangroups]
-    # Per-display outer bezel sizes (ppi-normalized), grouped to match the
-    # crops, so the working canvas can include outer bezels like the preview.
-    bezels_px = display_system.bezels_in_px()
-    grp_bezels = [[bezels_px[index] for index in grp] for grp in spangroups]
-    grp_persp_dat = group_persp_data(persp_dat, spangroups)
-
-    for img, grp, grp_p_dat, grp_crops, grp_res_arr, grp_bez in zip(
-        img_list, spangroups, grp_persp_dat, grp_crop_tuples, grp_res_array, grp_bezels
-    ):
-        if persp_dat:
-            proj_plane_crops, persp_coeffs = persp.get_backprojected_display_system(grp_crops, grp_p_dat)
-            # Canvas containing back-projected displays
-            canvas_tuple_proj = tuple(compute_working_canvas(proj_plane_crops))
-            # Canvas containing ppi normalized displays
-            canvas_tuple_trgt = tuple(compute_working_canvas(grp_crops))
-            sp_logging.G_LOGGER.info("Back-projected canvas size: %s", canvas_tuple_proj)
-            img_workingsize = resize_to_fill(img, canvas_tuple_proj, zoom=profile.zoom, offset=profile.offsets)
-            for _crop_tup, coeffs, ppin_crop, (i_res, res) in zip(
-                proj_plane_crops, persp_coeffs, grp_crops, enumerate(grp_res_arr)
-            ):
-                # Whole image needs to be transformed for each display separately
-                # since the coeffs live between the full back-projected plane
-                # containing all displays and the full 'target' working canvas
-                # size canvas_tuple_trgt containing ppi normalized displays.
-                persp_crop = img_workingsize.transform(
-                    canvas_tuple_trgt, Image.Transform.PERSPECTIVE, coeffs, Image.Resampling.BICUBIC
-                )
-                ## persp_crop.save(str(canvas_tuple_trgt)+str(crop_tup), "PNG")
-                # Crop desired region from transformed image which is now in
-                # ppi normalized resolution
-                crop_img = persp_crop.crop(ppin_crop)
-                # Resize correct crop to actual display resolution
-                crop_img = crop_img.resize(res, resample=Image.Resampling.LANCZOS)
-                # cropped_images.append(crop_img) #old
-                cropped_images[grp[i_res]] = crop_img
-        else:
-            # larger working size needed to fill all the normalized lower density
-            # displays. Takes account manual offsets that might require extra space.
-            # Outer bezels extend the canvas so the result matches the preview
-            # (issue #156); the per-display crops below stay resolution-sized.
-            canvas_tuple_eff = tuple(compute_working_canvas(grp_crops, grp_bez))
-            # Image is now the height of the eff tallest display + possible manual
-            # offsets and the width of the combined eff widths + possible manual
-            # offsets.
-            img_workingsize = resize_to_fill(img, canvas_tuple_eff, zoom=profile.zoom, offset=profile.offsets)
-            # Simultaneously make crops at working size and then resize down to actual
-            # display resolution as needed.
-            for crop_tup, (i_res, res) in zip(grp_crops, enumerate(grp_res_arr)):
-                crop_img = img_workingsize.crop(crop_tup)
-                if crop_img.size == res:
-                    # cropped_images.append(crop_img)
-                    cropped_images[grp[i_res]] = crop_img
-                else:
-                    crop_img = crop_img.resize(res, resample=Image.Resampling.LANCZOS)
-                    # cropped_images.append(crop_img)
-                    cropped_images[grp[i_res]] = crop_img
-    # Combine crops to a single canvas of the size of the actual desktop
-    # actual combined size of the display resolutions
-    offsets = display_system.digital_offsets()
-    canvas_tuple_fin = tuple(compute_canvas(resolutions, offsets))
-    combined_image = Image.new("RGB", canvas_tuple_fin, color=0)
-    combined_image.load()
-    for crp_id in cropped_images:
-        combined_image.paste(cropped_images[crp_id], offsets[crp_id])
-
-    # Saving combined image
-    outputfile, outputfile_old = alternating_outputfile(paths.cache, profile.name)
-    combined_image.save(outputfile, quality=95)  # set quality if jpg is used, png unaffected
-    if profile.name == G_ACTIVE_PROFILE or force:
-        set_wallpaper(outputfile, files, display_system=display_system, paths=paths, set_command=set_command)
-    if os.path.exists(outputfile_old):
-        os.remove(outputfile_old)
-    return 0
-
-
-def set_multi_image_wallpaper(profile, force, *, display_system: DisplaySystem, paths: AppPaths, set_command=""):
-    """Sets a distinct image on each monitor.
-
-    Since most platforms only support setting a single image
-    as the wallpaper this has to be accomplished by creating a
-    composite image based on the monitor offsets and then setting
-    the resulting image as the wallpaper. A profile set up for a different
-    number of displays than ``display_system`` has is not rendered.
-    """
-    resolutions = display_system.resolutions()
-    offsets = display_system.digital_offsets()
-    files = profile.next_wallpaper_files()
-    if len(files) != len(resolutions):
-        sp_logging.G_LOGGER.error("No complete wallpaper selection is available for profile '%s'.", profile.name)
-        return
-    if sp_logging.DEBUG:
-        sp_logging.G_LOGGER.info(str(files))
-    img_resized = []
-    for file, res in zip(files, resolutions):
-        # image = Image.open(file)
-        try:
-            image = Image.open(file)
-            image = ImageOps.exif_transpose(image)
-        except OSError, UnidentifiedImageError:
-            sp_logging.G_LOGGER.info(
-                (
-                    "Opening image '%s' failed with PIL.UnidentifiedImageError."
-                    "It could be corrupted or is of foreign type."
-                ),
-                file,
-            )
-            return
-        img_resized.append(resize_to_fill(image, res, zoom=profile.zoom, offset=profile.offsets))
-    canvas_tuple = tuple(compute_canvas(resolutions, offsets))
-    combined_image = Image.new("RGB", canvas_tuple, color=0)
-    combined_image.load()
-    for i in range(len(files)):
-        combined_image.paste(img_resized[i], offsets[i])
-
-    outputfile, outputfile_old = alternating_outputfile(paths.cache, profile.name)
-    combined_image.save(outputfile, quality=95)  # set quality if jpg is used, png unaffected
-    if profile.name == G_ACTIVE_PROFILE or force:
-        set_wallpaper(outputfile, files, display_system=display_system, paths=paths, set_command=set_command)
-    if os.path.exists(outputfile_old):
-        os.remove(outputfile_old)
-    return 0
-
-
-def set_wallpaper(outputfile, source_files=None, *, display_system: DisplaySystem, paths: AppPaths, set_command=""):
-    """Hand a rendered wallpaper to the desktop, then run the user's run-after-wp-change.py.
-
-    Desktops that take one image per display get ``outputfile`` cut for ``display_system``.
+    Desktops that take one image per display get ``image`` cut for ``display_system``.
     ``set_command`` is the user's own setter command, if any (Linux only).
     """
-    pieces = special_image_cropper(outputfile, display_system) if desktop.takes_pieces(set_command) else None
-    _log_problem(desktop.set_wallpaper(outputfile, pieces, set_command=set_command, activities=_activities(paths)))
-    remove_old_temp_files(outputfile)
+    pieces = None
+    if desktop.takes_pieces(set_command):
+        pieces = [str(piece) for piece in render_cache.cut_pieces(Path(image), display_system)]
+    result = desktop.set_wallpaper(str(image), pieces, set_command=set_command, activities=_activities(paths))
+    _log_problem(result)
     script = paths.config / "run-after-wp-change.py"
     if script.is_file():
-        _log_problem(desktop.run_hook(script, outputfile, source_files or []))
+        _log_problem(desktop.run_hook(script, str(image), source_files or []))
+    return result.ok
 
 
 def _activities(paths: AppPaths) -> Activities:
@@ -1245,12 +863,12 @@ def _activities(paths: AppPaths) -> Activities:
 
 def _cached_pieces(cache_dir: Path, profile_name: str) -> list[str]:
     """The per-display images last rendered for the profile named ``profile_name``."""
-    names = sorted(
-        name
-        for name in os.listdir(cache_dir)
-        if os.path.isfile(os.path.join(cache_dir, name)) and name.startswith(profile_name + "-") and "-crop-" in name
-    )
-    return [os.path.join(cache_dir, name) for name in names]
+    try:
+        profile_id = ProfileId.parse(profile_name)
+    except ProfileIdError:  # an activity name no profile can have
+        return []
+    rendered = render_cache.latest(render_cache.slot(cache_dir, profile_id))
+    return [str(piece) for piece in rendered.pieces] if rendered else []
 
 
 def _log_problem(result: Result) -> None:
@@ -1258,81 +876,70 @@ def _log_problem(result: Result) -> None:
         sp_logging.G_LOGGER.error("%s", result.problem)
 
 
-def special_image_cropper(outputfile, display_system: DisplaySystem):
-    """
-    Crops input image into monitor specific pieces based on display offsets.
-
-    This is needed on systems where the wallpapers are set on a per display basis.
-    This means that the composed image needs to be re-cut into pieces which
-    are saved separately.
-    """
-    # file needs to be split into monitor pieces since KDE/XFCE are special
-    img = Image.open(outputfile)
-    outputname = os.path.splitext(outputfile)[0]
-    img_names = []
-    for crop_id, (res, offset) in enumerate(zip(display_system.resolutions(), display_system.digital_offsets())):
-        left = offset[0]
-        top = offset[1]
-        right = left + res[0]
-        bottom = top + res[1]
-        crop_tuple = (left, top, right, bottom)
-        cropped_img = img.crop(crop_tuple)
-        fname = outputname + "-crop-" + str(crop_id) + ".png"
-        img_names.append(fname)
-        cropped_img.save(fname, "PNG")
-    return img_names
-
-
-def remove_old_temp_files(outputfile):
-    """
-    This method looks for previous temp images and deletes them.
-
-    Currently only used to delete the monitor specific crops that are
-    needed for KDE and XFCE. They are kept beside ``outputfile``.
-    """
-    opbase = os.path.basename(outputfile)
-    opname = os.path.splitext(opbase)[0]
-    oldfileid = ""
-    if opname.endswith("-a"):
-        oldfileid = "-b"
-    elif opname.endswith("-b"):
-        oldfileid = "-a"
-    else:
-        pass
-    if oldfileid:
-        # Must take care than only temps of current profile are deleted.
-        profilename = opname.strip()[:-2]
-        match_string = profilename + oldfileid + "-crop"
-        match_string = match_string.strip()
-        if sp_logging.DEBUG:
-            sp_logging.G_LOGGER.info("Removing images matching with: '%s'", match_string)
-        cache_dir = os.path.dirname(outputfile)
-        for temp_file in os.listdir(cache_dir):
-            if match_string in temp_file:
-                os.remove(os.path.join(cache_dir, temp_file))
-
-
 def _change_wallpaper(profile, force, advance, display_system: DisplaySystem, paths: AppPaths, set_command):
-    """Resolve a selection and render it for ``display_system``."""
+    """Choose ``profile``'s images, render them for ``display_system``, keep the render in
+    the cache and show it.
+
+    Unless ``force``, a profile that is no longer running is left alone: its slideshow can
+    tick once more after another profile has started.
+    """
+    if not force and profile.name != G_ACTIVE_PROFILE:
+        sp_logging.G_LOGGER.info("Wallpaper change skipped: profile '%s' is no longer running.", profile.name)
+        return
     if (advance or not profile.has_valid_selection()) and not profile.advance_wallpaper():
         sp_logging.G_LOGGER.error("Wallpaper change skipped: profile '%s' has no complete selection.", profile.name)
         return
-    if profile.spanmode.startswith("single"):
-        # A single image with legacy corrections (offsets=, ppi=, ...) needs the advanced renderer.
-        if profile.display_corrections(display_system.resolutions()).ppimode:
-            span_single_image_advanced(
-                profile, force, display_system=display_system, paths=paths, set_command=set_command
-            )
-        else:
-            span_single_image_simple(
-                profile, force, display_system=display_system, paths=paths, set_command=set_command
-            )
-    elif profile.spanmode.startswith("advanced"):
-        span_single_image_advanced(profile, force, display_system=display_system, paths=paths, set_command=set_command)
-    elif profile.spanmode.startswith("multi"):
-        set_multi_image_wallpaper(profile, force, display_system=display_system, paths=paths, set_command=set_command)
-    else:
-        sp_logging.G_LOGGER.info("Unkown profile spanmode: %s", profile.spanmode)
+    files = profile.next_wallpaper_files()
+    try:
+        image = _render(profile, files, display_system)
+    except render.SourceImageError as error:
+        sp_logging.G_LOGGER.error("Wallpaper change skipped: %s", error)
+        return
+    if image is None:
+        return
+    try:
+        output = render_cache.save(render_cache.slot(paths.cache, profile.profile_id), image)
+    except OSError as error:
+        sp_logging.G_LOGGER.error("Wallpaper change skipped: the wallpaper could not be saved: %s", error)
+        return
+    if set_wallpaper(output, files, display_system=display_system, paths=paths, set_command=set_command):
+        # Until the desktop takes the new render, the previous one may still be on screen.
+        render_cache.forget_previous(output)
+
+
+def _render(profile, files, display_system: DisplaySystem):
+    """Compose ``profile``'s desktop image from ``files``; None, with the reason logged, if
+    they don't fit its span mode."""
+    resolutions = display_system.resolutions()
+    if profile.spanmode.startswith("multi"):
+        if len(files) != len(resolutions):
+            _log_incomplete(profile)
+            return None
+        return render.multi(files, display_system, zoom=profile.zoom, pan=profile.offsets)
+    corrections = profile.display_corrections(resolutions)
+    if profile.spanmode.startswith("single") and not corrections.ppimode:
+        if len(files) != 1:
+            _log_incomplete(profile)
+            return None
+        return render.simple(files[0], display_system, zoom=profile.zoom, pan=profile.offsets)
+    # Advanced spanning, or a single image with legacy corrections (offsets=, ppi=, ...).
+    if len(files) != (len(profile.spangroups) if profile.spangroups else 1):
+        _log_incomplete(profile)
+        return None
+    perspective = display_system.get_persp_data(profile.perspective) if display_system.use_perspective else None
+    return render.advanced(
+        files,
+        display_system,
+        manual_offsets=corrections.manual_offsets,
+        spangroups=profile.spangroups,
+        perspective=perspective,
+        zoom=profile.zoom,
+        pan=profile.offsets,
+    )
+
+
+def _log_incomplete(profile) -> None:
+    sp_logging.G_LOGGER.error("No complete wallpaper selection is available for profile '%s'.", profile.name)
 
 
 def change_wallpaper_job(
@@ -1408,68 +1015,50 @@ def run_profile_job(profile, change, startup=False):
     return (repeating_timer, thrd)
 
 
-def quick_profile_job(profile, *, display_system: DisplaySystem, paths: AppPaths, set_command=""):
-    """
-    At startup and profile change, switch to old temp wallpaper.
+def quick_profile_job(profile, *, display_system: DisplaySystem, paths: AppPaths, set_command="") -> bool:
+    """Show the last wallpaper again at startup, without rendering anything.
 
-    Since the image processing takes some time, in order to carry
-    out actions quickly at startup or at user request, set the old
-    temp image of the requested profile as the wallpaper.
+    That is the last render of ``profile``, or a draft shown after it: the editor's Apply,
+    the align test or the command line. Returns False if ``profile`` has no render to
+    show, so that the caller can render it.
     """
+    if profile.profile_id is None:
+        return False
+    rendered = render_cache.latest(render_cache.slot(paths.cache, profile.profile_id))
+    if rendered is None:
+        sp_logging.G_LOGGER.info("Profile '%s' has no earlier render to show.", profile.name)
+        return False
+    draft = render_cache.latest(render_cache.slot(paths.cache, None))
+    if draft is not None and draft.modified > rendered.modified:
+        rendered = draft
 
     def locked_setter(setter, *args, **kwargs):
         with G_WALLPAPER_CHANGE_PENDING, G_WALLPAPER_CHANGE_LOCK:
             setter(*args, **kwargs)
 
-    # Look for old temp image. The setter worker takes the render lock, so the
-    # UI thread never blocks behind an in-progress render.
-    cache_dir = paths.cache
-    files = [
-        i
-        for i in os.listdir(cache_dir)
-        if os.path.isfile(os.path.join(cache_dir, i)) and (i.startswith((profile.name + "-a", profile.name + "-b")))
-    ]
-    if sp_logging.DEBUG:
-        sp_logging.G_LOGGER.info("quickswitch file lookup: %s", files)
-    if files:
-        image = os.path.join(cache_dir, files[0])
-        image_pieces = sorted(os.path.join(cache_dir, i) for i in files if "-crop-" in i)
-        if desktop.takes_pieces(set_command) and image_pieces:
-            if sp_logging.DEBUG:
-                sp_logging.G_LOGGER.info("Use wallpaper crop pieces: %s", image_pieces)
-            thrd = Thread(
-                target=locked_setter,
-                args=(_restore_pieces, image, image_pieces),
-                kwargs={"paths": paths, "set_command": set_command},
-                daemon=True,
-            )
-            thrd.start()
-        elif IS_WINDOWS:
-            # Skip quick switch on Windows if not using perspective corrections.
-            if profile.spanmode == "advanced" and display_system.use_perspective:
-                if (
-                    profile.perspective == "default" and display_system.default_perspective is not None
-                ) or profile.perspective not in ["default", "disabled"]:
-                    thrd = Thread(
-                        target=locked_setter,
-                        args=(set_wallpaper, image),
-                        kwargs={"display_system": display_system, "paths": paths, "set_command": set_command},
-                        daemon=True,
-                    )
-                    thrd.start()
-            else:
-                pass
-        else:
-            thrd = Thread(
-                target=locked_setter,
-                args=(set_wallpaper, image),
-                kwargs={"display_system": display_system, "paths": paths, "set_command": set_command},
-                daemon=True,
-            )
-            thrd.start()
+    # The setter worker takes the render lock, so the UI thread never blocks behind an
+    # in-progress render.
+    image = str(rendered.image)
+    pieces = [str(piece) for piece in rendered.pieces]
+    if desktop.takes_pieces(set_command) and pieces:
+        sp_logging.G_LOGGER.info("Use wallpaper crop pieces: %s", pieces)
+        setter, args, kwargs = _restore_pieces, (image, pieces), {"paths": paths, "set_command": set_command}
+    elif IS_WINDOWS and not _windows_restores(profile, display_system):
+        return True  # Windows keeps the wallpaper itself
     else:
-        if sp_logging.DEBUG:
-            sp_logging.G_LOGGER.info("Old file for quickswitch was not found. %s", files)
+        setter, args = set_wallpaper, (image,)
+        kwargs = {"display_system": display_system, "paths": paths, "set_command": set_command}
+    Thread(target=locked_setter, args=(setter, *args), kwargs=kwargs, daemon=True).start()
+    return True
+
+
+def _windows_restores(profile, display_system: DisplaySystem) -> bool:
+    """Whether Windows gets the wallpaper again at startup: only a perspective render does."""
+    if profile.spanmode != "advanced" or not display_system.use_perspective:
+        return False
+    if profile.perspective == "default":
+        return display_system.default_perspective is not None
+    return profile.perspective != "disabled"
 
 
 def _restore_pieces(image, pieces, *, paths: AppPaths, set_command):
