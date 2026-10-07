@@ -1,63 +1,34 @@
 """
 Wallpaper image processing back-end for Superpaper.
 
-Applies image corrections, crops, merges etc. and sets the wallpaper
-with native platform methods whenever possible.
+Applies image corrections, crops, merges etc., and hands the result to the desktop
+(superpaper.desktop) to set as the wallpaper.
 
 Written by Henri Hänninen, copyright 2022 under MIT licence.
 """
 
 import configparser
-import json
 import math
 import os
-import shutil
-import subprocess
-import sys
 import time
-import traceback
 from operator import itemgetter
 from pathlib import Path
 from threading import Lock, Thread, Timer
-from typing import Any
 
 from PIL import Image, ImageOps, UnidentifiedImageError
 from screeninfo import get_monitors
 
+import superpaper.desktop as desktop
 import superpaper.perspective as persp
 import superpaper.sp_logging as sp_logging
+from superpaper.desktop.kde import Activities
+from superpaper.desktop.process import Result
 from superpaper.message_dialog import show_message_dialog
 from superpaper.paths import AppPaths
-from superpaper.sp_platform import IS_LINUX, IS_MACOS, IS_WINDOWS, host_spawn_env
+from superpaper.sp_platform import IS_WINDOWS
 
 # Disables PIL.Image.DecompressionBombError.
 Image.MAX_IMAGE_PIXELS = None  # 715827880 would be 4x default max.
-
-
-def running_kde():
-    """Detect if running in a KDE session."""
-    d_ses = os.environ.get("DESKTOP_SESSION")
-    if d_ses and ("plasma" in d_ses or "kde" in d_ses):
-        return True
-    kde_f_ses = os.environ.get("KDE_FULL_SESSION")
-    xdg_ses_dtop = os.environ.get("XDG_SESSION_DESKTOP")
-    return bool(kde_f_ses == "true" or xdg_ses_dtop == "KDE")
-
-
-# Platform-native helpers are imported conditionally below. Declare them up front
-# with safe fallbacks so the names are always bound regardless of platform; the
-# real implementations replace these on the matching OS. dbus is not among them:
-# it is optional on Linux and imported only where KDE needs it (_plasma_shell).
-set_wallpaper_win: Any = None
-NSScreen: Any = None
-NSWorkspace: Any = None
-NSURL: Any = None
-
-if sys.platform == "win32":
-    from superpaper.wallpaper_windows import set_wallpaper_win
-elif sys.platform == "darwin":
-    from AppKit import NSScreen, NSWorkspace
-    from Foundation import NSURL
 
 
 # Global constants
@@ -1041,7 +1012,7 @@ def span_single_image_simple(profile, force, *, display_system: DisplaySystem, p
     outputfile, outputfile_old = alternating_outputfile(paths.cache, profile.name)
     img_resize.save(outputfile, quality=95)  # set quality if jpg is used, png unaffected
     if profile.name == G_ACTIVE_PROFILE or force:
-        set_wallpaper(outputfile, force, [file], display_system=display_system, paths=paths, set_command=set_command)
+        set_wallpaper(outputfile, [file], display_system=display_system, paths=paths, set_command=set_command)
     if os.path.exists(outputfile_old):
         os.remove(outputfile_old)
     return 0
@@ -1195,7 +1166,7 @@ def span_single_image_advanced(profile, force, *, display_system: DisplaySystem,
     outputfile, outputfile_old = alternating_outputfile(paths.cache, profile.name)
     combined_image.save(outputfile, quality=95)  # set quality if jpg is used, png unaffected
     if profile.name == G_ACTIVE_PROFILE or force:
-        set_wallpaper(outputfile, force, files, display_system=display_system, paths=paths, set_command=set_command)
+        set_wallpaper(outputfile, files, display_system=display_system, paths=paths, set_command=set_command)
     if os.path.exists(outputfile_old):
         os.remove(outputfile_old)
     return 0
@@ -1243,284 +1214,51 @@ def set_multi_image_wallpaper(profile, force, *, display_system: DisplaySystem, 
     outputfile, outputfile_old = alternating_outputfile(paths.cache, profile.name)
     combined_image.save(outputfile, quality=95)  # set quality if jpg is used, png unaffected
     if profile.name == G_ACTIVE_PROFILE or force:
-        set_wallpaper(outputfile, force, files, display_system=display_system, paths=paths, set_command=set_command)
+        set_wallpaper(outputfile, files, display_system=display_system, paths=paths, set_command=set_command)
     if os.path.exists(outputfile_old):
         os.remove(outputfile_old)
     return 0
 
 
-# def errcheck(result, func, args):
-#     """Error getter for Windows."""
-#     if not result:
-#         raise ctypes.WinError(ctypes.get_last_error())
+def set_wallpaper(outputfile, source_files=None, *, display_system: DisplaySystem, paths: AppPaths, set_command=""):
+    """Hand a rendered wallpaper to the desktop, then run the user's run-after-wp-change.py.
 
-
-def set_wallpaper(
-    outputfile,
-    force=False,
-    source_files=None,
-    *,
-    display_system: DisplaySystem | None,
-    paths: AppPaths,
-    set_command="",
-):
+    Desktops that take one image per display get ``outputfile`` cut for ``display_system``.
+    ``set_command`` is the user's own setter command, if any (Linux only).
     """
-    Master method to set the composed image as wallpaper.
-
-    After the final background image is created, this method
-    is called to communicate with the host system to set the
-    desktop background. For Linux hosts there is a separate method.
-    Desktops that take one image per display (KDE, macOS) get ``outputfile`` cut
-    for ``display_system``. ``set_command`` is the user's own setter command, if any
-    (Linux only).
-    """
-    if IS_WINDOWS:
-        set_wallpaper_win(outputfile)
-    # Old wallpaper setting code with no transition
-    #         spi_setdeskwallpaper = 20
-    #         spif_update_ini_file = 1
-    #         spif_send_change = 2
-    #         user32 = ctypes.WinDLL('user32', use_last_error=True)
-    #         spiw = user32.SystemParametersInfoW
-    #         spiw.argtypes = [
-    #             ctypes.c_uint,
-    #             ctypes.c_uint,
-    #             ctypes.c_void_p,
-    #             ctypes.c_uint]
-    #         spiw.restype = ctypes.c_int
-    #         spiw.errcheck = errcheck
-    #         spi_success = spiw(
-    #             spi_setdeskwallpaper,
-    #             0,
-    #             outputfile,
-    #             spif_update_ini_file | spif_send_change)
-    #         if spi_success == 0:
-    #             sp_logging.G_LOGGER.info("SystemParametersInfo wallpaper set failed with \
-    # spi_success: '%s'", spi_success)
-    elif IS_LINUX:
-        set_wallpaper_linux(outputfile, force, display_system=display_system, paths=paths, set_command=set_command)
-    elif IS_MACOS:
-        # script = """/usr/bin/osascript<<END
-        #             tell application "Finder"
-        #             set desktop picture to POSIX file "%s"
-        #             end tell
-        #             END"""
-        # subprocess.Popen(script % outputfile, shell=True)
-        set_wallpaper_macos(outputfile, image_piece_list=None, force=force, display_system=display_system)
-    else:
-        sp_logging.G_LOGGER.info("Unknown platform: %s", sys.platform)
-    script_file = os.path.join(paths.config, "run-after-wp-change.py")
-    if os.path.isfile(script_file):
-        # The script gets the wallpaper image, then each source image as its own argument.
-        hook = ["python3", script_file, str(outputfile), *map(str, source_files or [])]
-        try:
-            subprocess.run(hook, env=host_spawn_env())
-        except OSError as error:
-            sp_logging.G_LOGGER.error("Could not run %s: %s", script_file, error)
-    return 0
+    pieces = special_image_cropper(outputfile, display_system) if desktop.takes_pieces(set_command) else None
+    _log_problem(desktop.set_wallpaper(outputfile, pieces, set_command=set_command, activities=_activities(paths)))
+    remove_old_temp_files(outputfile)
+    script = paths.config / "run-after-wp-change.py"
+    if script.is_file():
+        _log_problem(desktop.run_hook(script, outputfile, source_files or []))
 
 
-def set_wallpaper_macos(outputfile, image_piece_list=None, force=False, *, display_system: DisplaySystem | None):
-    """
-    MacOS has a separate desktop for each screen, each of which has their own
-    background image property. This means that the wallpaper has to be set
-    piece-by-piece.
-
-    The list of screens given by NSScreen is not sorted by coordinates so
-    that must be done first.
-
-    https://developer.apple.com/documentation/appkit/nsscreen/1388393-screens
-    https://developer.apple.com/documentation/appkit/nsworkspace/1527228-setdesktopimageurl
-    https://developer.apple.com/documentation/foundation/url
-    """
-    screens = NSScreen.screens()
-
-    # get screen positions on desktop
-    screen_coords = []
-    for scrn in screens:
-        frm: Any = scrn.frame
-        if callable(frm):
-            frm = frm()
-        screen_coords.append((int(frm.origin.x), int(frm.origin.y)))
-
-    # sort screens by their desktop coords
-    screens_and_coords = list(zip(screens, screen_coords))
-    screens_and_coords.sort(key=lambda x: x[1])
-    sorted_screens = [sac[0] for sac in screens_and_coords]
-
-    # image cropper to get image list
-    profname = None
-    if outputfile:
-        profname = os.path.splitext(os.path.basename(outputfile))[0][:-2]
-        img_names = special_image_cropper(outputfile, display_system)
-    elif not outputfile and image_piece_list:
-        if sp_logging.DEBUG:
-            sp_logging.G_LOGGER.info("KDE: Using image piece list!")
-        img_names = image_piece_list
-    else:
-        sp_logging.G_LOGGER.info("Error! macOS wallpaper setter called without arguments!")
-        return
-    img_piece_urls = [NSURL.fileURLWithPath_(imagepath) for imagepath in img_names]
-
-    # zip screens and image list and loop over setting the images using the shared workspace
-    sharedSpace = NSWorkspace.sharedWorkspace()
-    options = {}
-    if profname == G_ACTIVE_PROFILE or image_piece_list or force:
-        for screen, imgurl in zip(sorted_screens, img_piece_urls):
-            (result, error) = sharedSpace.setDesktopImageURL_forScreen_options_error_(imgurl, screen, options, None)
-            if error:
-                sp_logging.G_LOGGER.info("setDesktopImageURL failed with error: %s", error)
-
-    # Delete old images after new ones are set
-    if outputfile:
-        remove_old_temp_files(outputfile)
+def _activities(paths: AppPaths) -> Activities:
+    """How KDE finds the wallpapers of the profiles its activities are named after."""
+    return Activities(
+        current_profile=G_ACTIVE_PROFILE,
+        cached_pieces=lambda name: _cached_pieces(paths.cache, name),
+        state_dir=paths.config,
+    )
 
 
-def set_wallpaper_linux(
-    outputfile, force=False, *, display_system: DisplaySystem | None, paths: AppPaths, set_command=""
-):
-    """
-    Wallpaper setter for Linux hosts.
-
-    Functionality is based on the DESKTOP_SESSION environment variable,
-    if it is not set, like often on window managers such as i3, the default
-    behavior is to attempt to use feh as the communication layer with the
-    desktop.
-
-    On systems where the variable is set, a native way of setting the
-    wallpaper can be used. These are DE specific. A ``set_command`` replaces
-    all of that.
-    """
-    sp_logging.G_LOGGER.info("set_wallpaper_linux: Starting for file: %s", outputfile)
-    file = "file://" + outputfile
-    if sp_logging.DEBUG:
-        sp_logging.G_LOGGER.info(file)
-
-    desk_env = os.environ.get("DESKTOP_SESSION")
-    if sp_logging.DEBUG:
-        sp_logging.G_LOGGER.info("DESKTOP_SESSION is: '%s'", desk_env)
-
-    if set_command != "":
-        if set_command == "feh":
-            sp_logging.G_LOGGER.info("Using 'feh' command mode!")
-            subprocess.run(["feh", "--bg-scale", "--no-xinerama", outputfile], env=host_spawn_env())
-        else:
-            command_string_list = set_command.split()
-            formatted_command = []
-            for term in command_string_list:
-                formatted_command.append(term.format(image=outputfile))
-            sp_logging.G_LOGGER.info("Formatted custom command is: '%s'", formatted_command)
-            subprocess.run(formatted_command, env=host_spawn_env())
-        return
-    if desk_env:
-        if desk_env in [
-            "gnome",
-            "gnome-wayland",
-            "gnome-xorg",
-            "unity",
-            "ubuntu",
-            "pantheon",
-            "budgie-desktop",
-            "pop",
-            "zorin",
-        ]:
-            subprocess.run(
-                [
-                    "/usr/bin/gsettings",
-                    "set",
-                    "org.gnome.desktop.background",
-                    "picture-uri-dark",
-                    file,
-                ],
-                env=host_spawn_env(),
-            )
-            subprocess.run(
-                ["/usr/bin/gsettings", "set", "org.gnome.desktop.background", "picture-uri", file],
-                env=host_spawn_env(),
-            )
-        elif desk_env == "cinnamon" or "cinnamon" in desk_env.lower():
-            subprocess.run(
-                [
-                    "/usr/bin/gsettings",
-                    "set",
-                    "org.cinnamon.desktop.background",
-                    "picture-uri",
-                    file,
-                ],
-                env=host_spawn_env(),
-            )
-        elif desk_env == "mate":
-            subprocess.run(
-                ["/usr/bin/gsettings", "set", "org.mate.background", "picture-filename", outputfile],
-                env=host_spawn_env(),
-            )
-        elif desk_env in ["xfce", "xubuntu", "ubuntustudio"]:
-            xfce_actions(outputfile)
-        elif desk_env.lower() == "lubuntu" or "lxqt" in desk_env.lower():
-            try:
-                subprocess.run(["pcmanfm", "-w", outputfile], env=host_spawn_env())
-            except OSError:
-                try:
-                    subprocess.run(["pcmanfm-qt", "-w", outputfile], env=host_spawn_env())
-                except OSError:
-                    sp_logging.G_LOGGER.info(
-                        "Exception: failure to find either command \
-'pcmanfm' or 'pcmanfm-qt'. Exiting."
-                    )
-                    sys.exit(1)
-        # elif desk_env in ["/usr/share/xsessions/plasma", "plasma"]:
-        elif running_kde():
-            kdeplasma_actions(
-                outputfile, force=force, profile_name=G_ACTIVE_PROFILE, display_system=display_system, paths=paths
-            )
-        elif "i3" in desk_env or desk_env == "/usr/share/xsessions/bspwm":
-            subprocess.run(["feh", "--bg-scale", "--no-xinerama", outputfile], env=host_spawn_env())
-        else:
-            message = "Your DE could not be detected to set the wallpaper. \
-You need to set the 'set_command' option in your \
-settings file superpaper/general_settings. Exiting."
-            sp_logging.G_LOGGER.info(message)
-            show_message_dialog(message, "Error")
-            sys.exit(1)
-    else:
-        if running_kde():
-            kdeplasma_actions(
-                outputfile, force=force, profile_name=G_ACTIVE_PROFILE, display_system=display_system, paths=paths
-            )
-        else:
-            sp_logging.G_LOGGER.info(
-                "DESKTOP_SESSION variable is empty, \
-attempting to use feh to set the wallpaper."
-            )
-            subprocess.run(["feh", "--bg-scale", "--no-xinerama", outputfile], env=host_spawn_env())
+def _cached_pieces(cache_dir: Path, profile_name: str) -> list[str]:
+    """The per-display images last rendered for the profile named ``profile_name``."""
+    names = sorted(
+        name
+        for name in os.listdir(cache_dir)
+        if os.path.isfile(os.path.join(cache_dir, name)) and name.startswith(profile_name + "-") and "-crop-" in name
+    )
+    return [os.path.join(cache_dir, name) for name in names]
 
 
-def set_wallpaper_piecewise(image_piece_list, *, paths: AppPaths):
-    """
-    Wallpaper setter that takes already cropped images and sets them
-    directly to corresponding monitors on systems where wallpapers
-    are set on a monitor by monitor basis.
-
-    This is used when the quick wallpaper change conditions are met,
-    see quick_profile_job method, to improve performance on these
-    systems.
-
-    Currently supported such systems are KDE Plasma and XFCE.
-    """
-    if IS_LINUX:
-        if running_kde():
-            kdeplasma_actions(None, image_piece_list, profile_name=G_ACTIVE_PROFILE, display_system=None, paths=paths)
-        # desk_env = os.environ.get("DESKTOP_SESSION")
-        # elif desk_env in ["xfce", "xubuntu", "ubuntustudio"]:
-        # xfce_actions(None, image_piece_list)
-    elif IS_MACOS:
-        set_wallpaper_macos(None, image_piece_list=image_piece_list, display_system=None)
-    else:
-        pass
-    return 0
+def _log_problem(result: Result) -> None:
+    if not result.ok:
+        sp_logging.G_LOGGER.error("%s", result.problem)
 
 
-def special_image_cropper(outputfile, display_system: DisplaySystem | None):
+def special_image_cropper(outputfile, display_system: DisplaySystem):
     """
     Crops input image into monitor specific pieces based on display offsets.
 
@@ -1528,9 +1266,6 @@ def special_image_cropper(outputfile, display_system: DisplaySystem | None):
     This means that the composed image needs to be re-cut into pieces which
     are saved separately.
     """
-    if display_system is None:
-        message = "Cutting a wallpaper into one image per display needs the display layout."
-        raise ValueError(message)
     # file needs to be split into monitor pieces since KDE/XFCE are special
     img = Image.open(outputfile)
     outputname = os.path.splitext(outputfile)[0]
@@ -1575,597 +1310,6 @@ def remove_old_temp_files(outputfile):
         for temp_file in os.listdir(cache_dir):
             if match_string in temp_file:
                 os.remove(os.path.join(cache_dir, temp_file))
-
-
-def _escape_js_string(s):
-    """Escape a string for safe embedding in a JavaScript string literal."""
-    s = s.replace("\\", "\\\\")
-    s = s.replace('"', '\\"')
-    s = s.replace("'", "\\'")
-    s = s.replace("\n", "\\n")
-    s = s.replace("\r", "\\r")
-    return s
-
-
-def _get_qdbus_cmd():
-    """Return the available qdbus command name (qdbus6 for Plasma 6, qdbus otherwise)."""
-    for cmd in ("qdbus6", "qdbus"):
-        if shutil.which(cmd):
-            return cmd
-    return None
-
-
-class PlasmaScriptingUnavailable(RuntimeError):
-    """dbus-python, which KDE wallpaper scripting needs, is not installed."""
-
-
-def _plasma_shell():
-    """Return the PlasmaShell D-Bus interface that evaluates wallpaper scripts.
-
-    dbus-python is optional and builds from source, so it is imported here, at the
-    point of use: without it Superpaper still starts and only KDE wallpaper setting
-    fails, with an explanation.
-    """
-    try:
-        import dbus  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-import]
-    except ImportError as error:
-        message = (
-            "Setting the wallpaper on KDE Plasma needs dbus-python. Install your distribution's "
-            "python-dbus package, or install Superpaper with the [linux] extra."
-        )
-        raise PlasmaScriptingUnavailable(message) from error
-    session_bus = dbus.SessionBus()
-    return dbus.Interface(
-        session_bus.get_object("org.kde.plasmashell", "/PlasmaShell"),
-        dbus_interface="org.kde.PlasmaShell",
-    )
-
-
-def get_kde_activity_mapping():
-    """Get mapping of activity IDs to activity names."""
-    try:
-        qdbus = _get_qdbus_cmd()
-        if not qdbus:
-            sp_logging.G_LOGGER.error("Neither qdbus6 nor qdbus found")
-            return {}
-        # Get list of activity IDs
-        result = subprocess.run(
-            [qdbus, "org.kde.ActivityManager", "/ActivityManager/Activities", "ListActivities"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-            env=host_spawn_env(),
-        )
-        if result.returncode != 0:
-            return {}
-
-        activity_ids = result.stdout.strip().split("\n")
-        activity_map = {}
-
-        # Get name for each activity
-        for activity_id in activity_ids:
-            if activity_id:
-                result = subprocess.run(
-                    [
-                        qdbus,
-                        "org.kde.ActivityManager",
-                        "/ActivityManager/Activities",
-                        "ActivityName",
-                        activity_id,
-                    ],
-                    capture_output=True,
-                    text=True,
-                    timeout=5,
-                    env=host_spawn_env(),
-                )
-                if result.returncode == 0:
-                    activity_name = result.stdout.strip()
-                    activity_map[activity_id] = activity_name
-
-        sp_logging.G_LOGGER.info("KDE Activities found: %s", activity_map)
-    except Exception as e:
-        sp_logging.G_LOGGER.error("Failed to get KDE activities: %s", e)
-        return {}
-    else:
-        return activity_map
-
-
-def kde_load_desktop_mapping_cache(config_dir: Path):
-    """Load cached desktop-to-activity mapping from file."""
-    cache_file = os.path.join(config_dir, "kde_desktop_mapping.json")
-    try:
-        if os.path.isfile(cache_file):
-            with open(cache_file) as f:
-                data = json.load(f)
-                if not isinstance(data, dict):
-                    sp_logging.G_LOGGER.warning("Invalid cache format, expected dict, got %s", type(data).__name__)
-                    return {}
-                result = {}
-                for k, v in data.items():
-                    try:
-                        result[int(k)] = str(v)
-                    except ValueError, TypeError:
-                        sp_logging.G_LOGGER.warning("Skipping invalid cache entry: %s -> %s", k, v)
-                return result
-    except (json.JSONDecodeError, OSError) as e:
-        sp_logging.G_LOGGER.error("Failed to load desktop mapping cache: %s", e)
-    return {}
-
-
-def kde_save_desktop_mapping_cache(config_dir: Path, mapping):
-    """Save desktop-to-activity mapping to file."""
-    cache_file = os.path.join(config_dir, "kde_desktop_mapping.json")
-    try:
-        with open(cache_file, "w") as f:
-            json.dump(mapping, f, indent=2)
-        sp_logging.G_LOGGER.info("Saved desktop mapping cache to %s", cache_file)
-    except Exception as e:
-        sp_logging.G_LOGGER.error("Failed to save desktop mapping cache: %s", e)
-
-
-def kde_get_desktop_to_activity_mapping(config_dir: Path):
-    """
-    Query KDE to get which desktop containment belongs to which activity.
-    Returns dict mapping desktop_id -> activity_id
-
-    This function builds up knowledge progressively. Each time it's called,
-    it knows for certain which desktops belong to the CURRENT activity,
-    and uses cached information (kept in ``config_dir``) for other activities.
-    """
-    try:
-        # Load cached mapping
-        desktop_to_activity = kde_load_desktop_mapping_cache(config_dir)
-
-        qdbus = _get_qdbus_cmd()
-        if not qdbus:
-            sp_logging.G_LOGGER.error("Neither qdbus6 nor qdbus found")
-            return desktop_to_activity
-
-        # Get list of all activities
-        result = subprocess.run(
-            [qdbus, "org.kde.ActivityManager", "/ActivityManager/Activities", "ListActivities"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-            env=host_spawn_env(),
-        )
-        if result.returncode != 0:
-            return desktop_to_activity
-
-        activity_ids = [a.strip() for a in result.stdout.strip().split("\n") if a.strip()]
-
-        # Get current activity
-        result = subprocess.run(
-            [qdbus, "org.kde.ActivityManager", "/ActivityManager/Activities", "CurrentActivity"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-            env=host_spawn_env(),
-        )
-        current_activity_id = result.stdout.strip() if result.returncode == 0 else None
-
-        # Query plasma shell for desktop containment information
-        script = """
-var allDesktops = desktops();
-var result = [];
-for(var i = 0; i < allDesktops.length; i++) {
-    result.push(allDesktops[i].id + ',' + allDesktops[i].screen);
-}
-print(result.join(';'));
-"""
-
-        plasma_interface = _plasma_shell()
-
-        desktop_info = plasma_interface.evaluateScript(script)
-        sp_logging.G_LOGGER.info("Desktop info from plasma: %s", desktop_info)
-
-        # Parse desktop info: "id,screen;id,screen;..."
-        all_desktop_ids = []
-        active_desktop_ids = []
-        if desktop_info:
-            for item in desktop_info.split(";"):
-                if "," in item:
-                    parts = item.split(",")
-                    desktop_id = int(parts[0])
-                    screen_id = int(parts[1])
-                    all_desktop_ids.append(desktop_id)
-                    if screen_id != -1:
-                        active_desktop_ids.append(desktop_id)
-
-        if not active_desktop_ids or not current_activity_id:
-            sp_logging.G_LOGGER.error("Could not determine active desktops or current activity")
-            return desktop_to_activity
-
-        # Update mapping: the active desktops definitely belong to the current activity
-        mapping_updated = False
-        for desktop_id in active_desktop_ids:
-            if desktop_to_activity.get(desktop_id) != current_activity_id:
-                desktop_to_activity[desktop_id] = current_activity_id
-                mapping_updated = True
-
-        # For any desktops we don't know about yet, make educated guesses
-        # based on the number of screens and activity count
-        unmapped_desktop_ids = [d for d in all_desktop_ids if d not in desktop_to_activity]
-        if unmapped_desktop_ids and len(activity_ids) > 1:
-            other_activities = [a for a in activity_ids if a != current_activity_id]
-            num_screens = len(active_desktop_ids)
-
-            for idx, desktop_id in enumerate(unmapped_desktop_ids):
-                activity_idx = idx // num_screens
-                if activity_idx < len(other_activities):
-                    desktop_to_activity[desktop_id] = other_activities[activity_idx]
-                    mapping_updated = True
-
-        # Save updated mapping
-        if mapping_updated:
-            kde_save_desktop_mapping_cache(config_dir, desktop_to_activity)
-
-        sp_logging.G_LOGGER.info("Current activity: %s", current_activity_id)
-        sp_logging.G_LOGGER.info("Active desktops: %s", active_desktop_ids)
-        sp_logging.G_LOGGER.info("Desktop to activity mapping: %s", desktop_to_activity)
-
-    except Exception as e:
-        sp_logging.G_LOGGER.error("Failed to get desktop-activity mapping: %s", e)
-        sp_logging.G_LOGGER.error(traceback.format_exc())
-        return {}
-    else:
-        return desktop_to_activity
-
-
-def kde_set_activity_wallpapers(activity_wallpapers_map, config_dir: Path):
-    """
-    Set wallpapers for specific activities in KDE Plasma.
-
-    Args:
-        activity_wallpapers_map: dict mapping activity_id -> list of image file paths
-        config_dir: where the desktop-to-activity mapping is remembered
-    """
-    if not activity_wallpapers_map:
-        sp_logging.G_LOGGER.info("No activity wallpapers to set")
-        return
-
-    # Get desktop-to-activity mapping
-    desktop_to_activity = kde_get_desktop_to_activity_mapping(config_dir)
-    if not desktop_to_activity:
-        sp_logging.G_LOGGER.error("Failed to get desktop-activity mapping, cannot set wallpapers")
-        return
-
-    # Build mapping as JavaScript: desktop_id -> [images]
-    desktop_images_js = "{\n"
-    for desktop_id, activity_id in desktop_to_activity.items():
-        if activity_id in activity_wallpapers_map:
-            images = activity_wallpapers_map[activity_id]
-            file_urls = ["file://" + img for img in images]
-            images_str = ", ".join('"' + _escape_js_string(url) + '"' for url in file_urls)
-            desktop_images_js += f"    {desktop_id}: [{images_str}],\n"
-    desktop_images_js += "}"
-
-    script = (
-        """
-var desktopImagesMap = """
-        + desktop_images_js
-        + """;
-
-// Get all desktops
-var allDesktops = desktops();
-
-// Get currently active desktops to determine screen order
-var activeDesktops = [];
-for(var idx = 0; idx < allDesktops.length; idx++) {
-    if(allDesktops[idx].screen != -1) {
-        activeDesktops.push(allDesktops[idx]);
-    }
-}
-
-// Sort active desktops by position (vertical then horizontal)
-var i = 1;
-while(i < activeDesktops.length) {
-    var j = i;
-    while(j > 0 && screenGeometry(activeDesktops[j-1].screen).top > screenGeometry(activeDesktops[j].screen).top) {
-        var temp = activeDesktops[j];
-        activeDesktops[j] = activeDesktops[j-1];
-        activeDesktops[j-1] = temp;
-        j = j-1;
-    }
-    i = i+1;
-}
-
-i = 1;
-while(i < activeDesktops.length) {
-    var j = i;
-    while(j > 0 && screenGeometry(activeDesktops[j-1].screen).left > screenGeometry(activeDesktops[j].screen).left) {
-        var temp = activeDesktops[j];
-        activeDesktops[j] = activeDesktops[j-1];
-        activeDesktops[j-1] = temp;
-        j = j-1;
-    }
-    i = i+1;
-}
-
-// Create screen ID list from sorted active desktops
-var screenOrder = [];
-for(var k = 0; k < activeDesktops.length; k++) {
-    screenOrder.push(activeDesktops[k].screen);
-}
-
-// Apply wallpapers to each desktop based on its ID
-for(var idx = 0; idx < allDesktops.length; idx++) {
-    var desktop = allDesktops[idx];
-    var desktopId = desktop.id;
-
-    // Check if we have wallpapers for this desktop
-    if(desktopImagesMap[desktopId]) {
-        var imageArray = desktopImagesMap[desktopId];
-        var screenId = desktop.screen;
-
-        // For inactive desktops, infer screen from desktop index
-        if(screenId == -1 && screenOrder.length > 0) {
-            screenId = screenOrder[idx % screenOrder.length];
-        }
-
-        // Find which image index to use for this screen
-        var imageIndex = -1;
-        for(var s = 0; s < screenOrder.length; s++) {
-            if(screenOrder[s] == screenId) {
-                imageIndex = s;
-                break;
-            }
-        }
-
-        // Set wallpaper if we found a valid image for this screen
-        if(imageIndex >= 0 && imageIndex < imageArray.length) {
-            desktop.wallpaperPlugin = "org.kde.image";
-            desktop.currentConfigGroup = Array("Wallpaper", "org.kde.image", "General");
-            desktop.writeConfig("Image", imageArray[imageIndex]);
-        }
-    }
-}
-
-// Reload config for all desktops
-for(var idx = 0; idx < allDesktops.length; idx++) {
-    allDesktops[idx].reloadConfig();
-}
-"""
-    )
-
-    try:
-        sp_logging.G_LOGGER.info("kde_set_activity_wallpapers: Creating dbus connection")
-        plasma_interface = _plasma_shell()
-
-        sp_logging.G_LOGGER.info("kde_set_activity_wallpapers: Evaluating KDE script")
-        plasma_interface.evaluateScript(script)
-        sp_logging.G_LOGGER.info("kde_set_activity_wallpapers: Script evaluation complete")
-    except Exception as e:
-        sp_logging.G_LOGGER.error("kde_set_activity_wallpapers failed: %s", e)
-        sp_logging.G_LOGGER.error(traceback.format_exc())
-
-
-def kdeplasma_actions(
-    outputfile,
-    image_piece_list=None,
-    force=False,
-    profile_name=None,
-    *,
-    display_system: DisplaySystem | None,
-    paths: AppPaths,
-):
-    """
-    Sets the multi monitor wallpaper on KDE.
-
-    Arguments are path to an image and an optional image piece
-    list when one can set the wallpaper from existing cropped
-    images. IF image pieces are to be used, call this method
-    with outputfile == None.
-
-    If profile_name is provided and matches an activity name, wallpapers
-    are set for that specific activity. Otherwise, sets for all activities
-    based on profile name matching.
-
-    This is needed since KDE uses its own scripting language to
-    set the desktop background which sets a single image on every
-    monitor. This means that the composed image must be cut into
-    correct pieces that then are set to their respective displays.
-    """
-
-    # Check if we should use activity-aware wallpaper setting
-    activity_map = get_kde_activity_mapping()
-    if activity_map:
-        # Build wallpapers for all activities based on matching profiles
-        activity_wallpapers = {}
-
-        # Get the current profile's images
-        if outputfile and os.path.isfile(outputfile):
-            current_img_names = special_image_cropper(outputfile, display_system)
-        elif image_piece_list:
-            current_img_names = image_piece_list
-        else:
-            current_img_names = None
-
-        # Match each activity to a profile
-        for act_id, act_name in activity_map.items():
-            # Check if this activity matches the current profile
-            if profile_name and act_name == profile_name and current_img_names:
-                activity_wallpapers[act_id] = current_img_names
-                sp_logging.G_LOGGER.info("Activity '%s' matched profile '%s'", act_name, profile_name)
-            else:
-                # Try to find existing temp files for a profile matching this activity name
-                matching_files = [
-                    i
-                    for i in os.listdir(paths.cache)
-                    if os.path.isfile(os.path.join(paths.cache, i)) and i.startswith(act_name + "-") and "-crop-" in i
-                ]
-
-                if matching_files:
-                    matching_files.sort()
-                    full_paths = [os.path.join(paths.cache, f) for f in matching_files]
-                    activity_wallpapers[act_id] = full_paths
-                    sp_logging.G_LOGGER.info(
-                        "Activity '%s' using cached wallpapers from profile '%s'",
-                        act_name,
-                        act_name,
-                    )
-                elif current_img_names:
-                    # No matching profile found, use current profile as fallback
-                    activity_wallpapers[act_id] = current_img_names
-                    sp_logging.G_LOGGER.info(
-                        "Activity '%s' using fallback wallpapers from profile '%s'",
-                        act_name,
-                        profile_name,
-                    )
-
-        # Apply wallpapers to all activities at once
-        if activity_wallpapers:
-            kde_set_activity_wallpapers(activity_wallpapers, paths.config)
-
-            # Clean up old temp files
-            if outputfile:
-                remove_old_temp_files(outputfile)
-            return
-
-    script = """
-var imageFileArray = Array({imagelist});
-
-// Get all desktops across all activities
-var allDesktops = desktops();
-
-// First, identify the screen order from currently active desktops
-var activeDesktops = [];
-for(var idx = 0; idx < allDesktops.length; idx++) {{
-    if(allDesktops[idx].screen != -1) {{
-        activeDesktops.push(allDesktops[idx]);
-    }}
-}}
-
-// Sort active desktops by screen position (vertical then horizontal)
-var i = 1;
-while(i < activeDesktops.length) {{
-    var j = i;
-    while(j > 0 && screenGeometry(activeDesktops[j-1].screen).top > screenGeometry(activeDesktops[j].screen).top) {{
-        var temp = activeDesktops[j];
-        activeDesktops[j] = activeDesktops[j-1];
-        activeDesktops[j-1] = temp;
-        j = j-1;
-    }}
-    i = i+1;
-}}
-
-i = 1;
-while(i < activeDesktops.length) {{
-    var j = i;
-    while(j > 0 && screenGeometry(activeDesktops[j-1].screen).left > screenGeometry(activeDesktops[j].screen).left) {{
-        var temp = activeDesktops[j];
-        activeDesktops[j] = activeDesktops[j-1];
-        activeDesktops[j-1] = temp;
-        j = j-1;
-    }}
-    i = i+1;
-}}
-
-// Create mapping: screen id -> image index
-var screenToImageIndex = {{}};
-for(var k = 0; k < activeDesktops.length && k < imageFileArray.length; k++) {{
-    screenToImageIndex[activeDesktops[k].screen] = k;
-}}
-
-// Now apply wallpapers to ALL desktops (including inactive activities)
-// Each desktop remembers its screen assignment even when inactive
-for(var idx = 0; idx < allDesktops.length; idx++) {{
-    var desktop = allDesktops[idx];
-    var screenId = desktop.screen;
-
-    // For inactive desktops (screen == -1), try to infer screen from desktop index
-    // In KDE, desktops are typically ordered: activity0_screen0, activity0_screen1, etc.
-    if(screenId == -1) {{
-        // Estimate screen based on position in desktop list
-        // This assumes desktops are in order within each activity
-        var numScreens = activeDesktops.length;
-        if(numScreens > 0) {{
-            screenId = idx % numScreens;
-        }}
-    }}
-
-    // Look up which image to use for this screen
-    var imageIndex = screenToImageIndex[screenId];
-    if(imageIndex !== undefined && imageIndex < imageFileArray.length) {{
-        desktop.wallpaperPlugin = "org.kde.image";
-        desktop.currentConfigGroup = Array("Wallpaper", "org.kde.image", "General");
-        desktop.writeConfig("Image", imageFileArray[imageIndex]);
-    }}
-}}
-
-// Reload config for all desktops
-for(var idx = 0; idx < allDesktops.length; idx++) {{
-    allDesktops[idx].reloadConfig();
-}}
-"""
-    profname = None
-    if outputfile:
-        profname = os.path.splitext(os.path.basename(outputfile))[0][:-2]
-        img_names = special_image_cropper(outputfile, display_system)
-    elif not outputfile and image_piece_list:
-        if sp_logging.DEBUG:
-            sp_logging.G_LOGGER.info("KDE: Using image piece list!")
-        img_names = image_piece_list
-    else:
-        if sp_logging.DEBUG:
-            sp_logging.G_LOGGER.info("Error! KDE actions called without arguments!")
-        return
-
-    filess_img_names = []
-    for fname in img_names:
-        filess_img_names.append("file://" + fname)
-    filess_img_names_str = ", ".join('"' + _escape_js_string(item) + '"' for item in filess_img_names)
-
-    sp_logging.G_LOGGER.info("kdeplasma_actions: Creating dbus connection")
-    try:
-        plasma_interface = _plasma_shell()
-    except PlasmaScriptingUnavailable as error:
-        sp_logging.G_LOGGER.error("%s", error)
-        return
-    if profname == G_ACTIVE_PROFILE or image_piece_list or force:
-        sp_logging.G_LOGGER.info("kdeplasma_actions: Evaluating KDE script")
-        plasma_interface.evaluateScript(script.format(imagelist=filess_img_names_str))
-        sp_logging.G_LOGGER.info("kdeplasma_actions: Script evaluation complete")
-
-    # Delete old images after new ones are set
-    if outputfile:
-        remove_old_temp_files(outputfile)
-
-
-# def xfce_actions(outputfile, image_piece_list = None):
-def xfce_actions(outputfile):
-    """
-    Sets the multi monitor wallpaper on XFCE.
-
-    This is needed since XFCE uses its own scripting interface to
-    set the desktop background which sets a single image on every
-    monitor. This means that the composed image must be cut into
-    correct pieces that then are set to their respective displays.
-    """
-
-    read_prop = subprocess.Popen(
-        ["xfconf-query", "-c", "xfce4-desktop", "-p", "/backdrop", "-l"],
-        stdout=subprocess.PIPE,
-        env=host_spawn_env(),
-    )
-    props = []
-    if read_prop.stdout is not None:
-        props = read_prop.stdout.read().decode("utf-8").split("\n")
-    for prop in props:
-        if "workspace0/image-style" in prop:
-            subprocess.run(
-                ["xfconf-query", "-c", "xfce4-desktop", "-p", prop, "-s", "6"],
-                env=host_spawn_env(),
-            )
-        elif "workspace0/last-image" in prop:
-            subprocess.run(
-                ["xfconf-query", "-c", "xfce4-desktop", "-p", prop, "-s", outputfile],
-                env=host_spawn_env(),
-            )
-
-    # Delete old images after new ones are set
-    if outputfile:
-        remove_old_temp_files(outputfile)
 
 
 def _change_wallpaper(profile, force, advance, display_system: DisplaySystem, paths: AppPaths, set_command):
@@ -2288,15 +1432,15 @@ def quick_profile_job(profile, *, display_system: DisplaySystem, paths: AppPaths
     if sp_logging.DEBUG:
         sp_logging.G_LOGGER.info("quickswitch file lookup: %s", files)
     if files:
-        image_pieces = [os.path.join(cache_dir, i) for i in files if "-crop-" in i]
-        if use_image_pieces() and image_pieces:
-            image_pieces.sort()
+        image = os.path.join(cache_dir, files[0])
+        image_pieces = sorted(os.path.join(cache_dir, i) for i in files if "-crop-" in i)
+        if desktop.takes_pieces(set_command) and image_pieces:
             if sp_logging.DEBUG:
                 sp_logging.G_LOGGER.info("Use wallpaper crop pieces: %s", image_pieces)
             thrd = Thread(
                 target=locked_setter,
-                args=(set_wallpaper_piecewise, image_pieces),
-                kwargs={"paths": paths},
+                args=(_restore_pieces, image, image_pieces),
+                kwargs={"paths": paths, "set_command": set_command},
                 daemon=True,
             )
             thrd.start()
@@ -2308,7 +1452,7 @@ def quick_profile_job(profile, *, display_system: DisplaySystem, paths: AppPaths
                 ) or profile.perspective not in ["default", "disabled"]:
                     thrd = Thread(
                         target=locked_setter,
-                        args=(set_wallpaper, os.path.join(cache_dir, files[0])),
+                        args=(set_wallpaper, image),
                         kwargs={"display_system": display_system, "paths": paths, "set_command": set_command},
                         daemon=True,
                     )
@@ -2318,7 +1462,7 @@ def quick_profile_job(profile, *, display_system: DisplaySystem, paths: AppPaths
         else:
             thrd = Thread(
                 target=locked_setter,
-                args=(set_wallpaper, os.path.join(cache_dir, files[0])),
+                args=(set_wallpaper, image),
                 kwargs={"display_system": display_system, "paths": paths, "set_command": set_command},
                 daemon=True,
             )
@@ -2328,14 +1472,6 @@ def quick_profile_job(profile, *, display_system: DisplaySystem, paths: AppPaths
             sp_logging.G_LOGGER.info("Old file for quickswitch was not found. %s", files)
 
 
-def use_image_pieces():
-    """Determine if it improves perfomance to use existing image pieces.
-
-    Systems that use image pieces are: KDE, XFCE.
-    """
-    if IS_LINUX:
-        # desk_env = os.environ.get("DESKTOP_SESSION")
-        # elif desk_env in ["xfce", "xubuntu", "ubuntustudio"]:
-        #     return True
-        return running_kde()
-    return bool(IS_MACOS)
+def _restore_pieces(image, pieces, *, paths: AppPaths, set_command):
+    """Show the per-display images last rendered, on a desktop that takes those."""
+    _log_problem(desktop.set_wallpaper(image, pieces, set_command=set_command, activities=_activities(paths)))

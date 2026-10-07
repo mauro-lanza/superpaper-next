@@ -8,7 +8,9 @@ import logging
 import sys
 from pathlib import Path
 
-G_LOGGER = logging.getLogger("default")
+# Modules that log through logging.getLogger(__name__) sit beneath G_LOGGER, so the
+# handlers configure_logging gives it receive their records too.
+G_LOGGER = logging.getLogger("superpaper")
 # Whether to log detail that only helps when debugging. Set by configure_logging.
 DEBUG = False
 

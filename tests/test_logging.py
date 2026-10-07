@@ -56,6 +56,17 @@ def test_configuring_again_replaces_the_handlers(tmp_path):
     assert len(sp_logging.G_LOGGER.handlers) == 2
 
 
+def test_a_module_logger_writes_to_the_log_file(tmp_path):
+    log_file = tmp_path / "log"
+    sp_logging.configure_logging(debug=False, log_file=log_file)
+
+    logging.getLogger("superpaper.desktop.kde").info("from a module")
+    for handler in sp_logging.G_LOGGER.handlers:
+        handler.flush()
+
+    assert "from a module" in log_file.read_text(encoding="utf-8")
+
+
 def test_reading_settings_with_logging_on_adds_no_handlers(tmp_path):
     settings_file = tmp_path / "general_settings"
     settings_file.write_text("logging=true\n", encoding="utf-8")

@@ -33,6 +33,20 @@ def test_settings_a_file_leaves_out_keep_their_defaults(tmp_path):
     assert read_settings(path, "darwin") == Settings(logging=True, set_command="feh")
 
 
+def test_settings_command_preserves_equals(tmp_path):
+    settings_file = tmp_path / "general_settings"
+    settings_file.write_text("set_command=env FOO=bar setter {image}\n", encoding="utf-8")
+
+    assert read_settings(settings_file, "linux").set_command == "env FOO=bar setter {image}"
+
+
+def test_settings_without_a_command_have_none(tmp_path):
+    settings_file = tmp_path / "general_settings"
+    settings_file.write_text("logging=false\n", encoding="utf-8")
+
+    assert read_settings(settings_file, "linux").set_command == ""
+
+
 def test_an_empty_hotkey_means_no_hotkey(tmp_path):
     path = tmp_path / "general_settings"
     path.write_text("next wallpaper hotkey=\npause wallpaper hotkey= \n", encoding="utf-8")

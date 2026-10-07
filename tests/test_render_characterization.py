@@ -6,6 +6,7 @@ import PIL
 import pytest
 from PIL import Image
 
+from superpaper.desktop.process import Result
 from tests.conftest import monitor
 
 
@@ -73,7 +74,7 @@ def test_simple_render_fills_virtual_canvas(profile_modules, monkeypatch, tmp_pa
             (120, 120, 62),
         ]
     setter_options = {"display_system": layout, "paths": app_paths, "set_command": ""}
-    assert setter_calls == [((str(output), False, [str(source)]), setter_options)]
+    assert setter_calls == [((str(output), [str(source)]), setter_options)]
 
 
 def test_multi_render_preserves_monitor_gaps(profile_modules, monkeypatch, tmp_path, app_paths, display_layout):
@@ -111,7 +112,7 @@ def test_multi_render_preserves_monitor_gaps(profile_modules, monkeypatch, tmp_p
             (0, 0, 255),
         ]
     setter_options = {"display_system": layout, "paths": app_paths, "set_command": ""}
-    assert setter_calls == [((str(output), False, [str(red), str(blue)]), setter_options)]
+    assert setter_calls == [((str(output), [str(red), str(blue)]), setter_options)]
 
 
 def test_multi_render_skips_a_profile_set_up_for_other_displays(
@@ -222,7 +223,7 @@ def test_advanced_render_golden(
         assert image.size == (112, 36)
         digest = hashlib.sha256(image.tobytes()).hexdigest()
     assert digest == ADVANCED_GOLDENS[case], f"pixels changed (Pillow {PIL.__version__}, numpy {numpy.__version__})"
-    assert setter_calls == [(str(output), True, files)]
+    assert setter_calls == [(str(output), files)]
 
 
 @pytest.mark.parametrize(
@@ -253,3 +254,65 @@ def test_span_mode_picks_the_renderer(
     wpproc.change_wallpaper_job(profile, app_paths, display_system=display_layout()).join(timeout=10)
 
     assert called == [renderer]
+
+
+def test_a_wallpaper_goes_to_the_desktop_and_then_to_the_hook(
+    profile_modules, monkeypatch, app_paths, display_layout, caplog
+):
+    _, wpproc = profile_modules
+    handed = []
+
+    def desktop_setter(image, pieces, *, set_command, activities):
+        handed.append(("desktop", image, pieces, set_command))
+        return Result("the setter failed")
+
+    def hook(script, image, sources):
+        handed.append(("hook", script, image, sources))
+        return Result("python3 is not installed.")
+
+    monkeypatch.setattr(wpproc.desktop, "takes_pieces", lambda set_command: False)
+    monkeypatch.setattr(wpproc.desktop, "set_wallpaper", desktop_setter)
+    monkeypatch.setattr(wpproc.desktop, "run_hook", hook)
+    script = app_paths.config / "run-after-wp-change.py"
+    script.touch()
+    stale_crop = app_paths.cache / "p-b-crop-0.png"
+    stale_crop.touch()
+    output = str(app_paths.cache / "p-a.png")
+
+    wpproc.set_wallpaper(
+        output, ["/a.png", "/b c.png"], display_system=display_layout(), paths=app_paths, set_command="setter {image}"
+    )
+
+    assert handed == [
+        ("desktop", output, None, "setter {image}"),
+        ("hook", script, output, ["/a.png", "/b c.png"]),
+    ]
+    # Failures are logged, not raised, and the previous wallpaper's crops go either way.
+    errors = [record.getMessage() for record in caplog.records if record.levelname == "ERROR"]
+    assert errors == ["the setter failed", "python3 is not installed."]
+    assert not stale_crop.exists()
+
+
+def test_a_desktop_that_takes_pieces_gets_one_per_display(profile_modules, monkeypatch, app_paths, display_layout):
+    _, wpproc = profile_modules
+    layout = configure_render(wpproc, monkeypatch, display_layout)
+    handed = []
+
+    def desktop_setter(image, pieces, *, set_command, activities):
+        handed.append((pieces, activities))
+        return Result()
+
+    monkeypatch.setattr(wpproc.desktop, "takes_pieces", lambda set_command: True)
+    monkeypatch.setattr(wpproc.desktop, "set_wallpaper", desktop_setter)
+    output = write_gradient(app_paths.cache / "p-a.png", (5, 3), lambda x, y: (x, y, 0))
+
+    wpproc.set_wallpaper(output, [], display_system=layout, paths=app_paths)
+
+    pieces = [str(app_paths.cache / "p-a-crop-0.png"), str(app_paths.cache / "p-a-crop-1.png")]
+    [(handed_pieces, activities)] = handed
+    assert handed_pieces == pieces
+    with Image.open(pieces[0]) as first, Image.open(pieces[1]) as second:
+        assert pixels(first) == [(0, 0, 0), (1, 0, 0), (0, 1, 0), (1, 1, 0)]
+        assert pixels(second) == [(3, 1, 0), (4, 1, 0), (3, 2, 0), (4, 2, 0)]
+    # KDE finds them again for an activity named after the profile.
+    assert activities.cached_pieces("p") == pieces

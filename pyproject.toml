@@ -63,8 +63,9 @@ superpaper = "superpaper.__main__:main"
 # ---------------------------------------------------------------------------
 # setuptools: package discovery, dynamic version, bundled data
 # ---------------------------------------------------------------------------
-[tool.setuptools]
-packages = ["superpaper"]
+# Every package under superpaper/ (superpaper, superpaper.desktop, ...).
+[tool.setuptools.packages.find]
+include = ["superpaper*"]
 
 [tool.setuptools.dynamic]
 version = { attr = "superpaper.__version__.__version__" }
