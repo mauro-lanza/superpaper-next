@@ -25,12 +25,14 @@ class RecordingTimer:
 
 
 PATHS = AppPaths(config=Path("/config"), profiles=Path("/config/profiles"), cache=Path("/cache"))
+LAYOUT = SimpleNamespace(name="the detected display layout")
 
 
 def controller(tray, active_profile=None, timer=None):
     icon = object.__new__(tray.TaskBarIcon)
     icon.paths = PATHS
     icon.g_settings = Settings()
+    icon.display_system = LAYOUT
     icon.refresh_displays = lambda: None
     icon.job_lock = Lock()
     icon.active_profile = active_profile
@@ -305,3 +307,36 @@ def test_wallpaper_changes_use_the_settings_current_at_the_time(headless_tray_mo
     icon.change_wallpaper(profile("active"), advance=True, skip_if_busy=True)
 
     assert changes == [(PATHS, "first {image}"), (PATHS, "second {image}")]
+
+
+def test_wallpaper_changes_use_the_displays_current_at_the_time(headless_tray_module, monkeypatch):
+    tray = headless_tray_module
+    layouts = []
+    monkeypatch.setattr(
+        tray, "change_wallpaper_job", lambda selected, paths, **options: layouts.append(options["display_system"])
+    )
+    icon = controller(tray)
+    icon.change_wallpaper(profile("active"), advance=True, skip_if_busy=True)
+
+    # After a refresh (a saved display setting, a profile switch) ticks use the new layout;
+    # the editor's Apply renders for its own, unsaved one.
+    refreshed = SimpleNamespace(name="refreshed")
+    icon.display_system = refreshed
+    icon.change_wallpaper(profile("active"), advance=True, skip_if_busy=True)
+    unsaved = SimpleNamespace(name="unsaved")
+    icon.change_wallpaper(profile("active"), force=True, display_system=unsaved)
+
+    assert layouts == [LAYOUT, refreshed, unsaved]
+
+
+def test_a_failed_display_refresh_keeps_the_previous_layout(headless_tray_module, monkeypatch, tmp_path):
+    tray = headless_tray_module
+    monkeypatch.setattr(tray.wpproc, "get_monitors", list)
+    monkeypatch.setattr(tray.wpproc.time, "sleep", lambda _delay: None)
+    icon = controller(tray)
+    icon.paths = AppPaths(config=tmp_path, profiles=tmp_path / "profiles", cache=tmp_path)
+
+    with pytest.raises(tray.wpproc.DisplayDetectionError):
+        tray.TaskBarIcon.refresh_displays(icon)
+
+    assert icon.display_system is LAYOUT

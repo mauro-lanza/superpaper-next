@@ -399,25 +399,3 @@ def find_coeffs(source_coords, target_coords):
     # res = np.dot(np.linalg.inv(A.T * A) * A.T, B)
     res = np.linalg.solve(A, B)
     return np.array(res).reshape(8)
-
-
-# if __name__ == "__main__":
-# from PIL import Image
-
-# RESOLUTION_ARRAY = [(3840, 2160), (1440, 2560)]
-# DISPLAY_OFFSET_ARRAY = [(0, 200), (3840, 0)]
-
-# file = "~/Pictures/triangles.jpg"
-# img = Image.open(file)
-# cropped_images = []
-
-# get_backprojected_display_system(plot=True)
-
-# canvas_tuple_eff = tuple(compute_working_canvas(crop_tuples))
-# img_workingsize = resize_to_fill(img, canvas_tuple_eff)
-
-# for coeffs, res in zip(persp_coeffs, RESOLUTION_ARRAY):
-#     persp_crop = img_workingsize.transform(res, Image.PERSPECTIVE, coeffs,
-#                                             Image.LANCZOS)
-#     cropped_images.append(persp_crop)
-#     persp_crop.show()

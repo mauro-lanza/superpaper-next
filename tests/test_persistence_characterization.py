@@ -163,9 +163,13 @@ def test_identical_sources_are_written_with_their_own_display_numbers(profile_mo
 
 
 # Profiles from before display layouts existed corrected positions with ppi=,
-# diagonal_inches=, bezels= and offsets=. Parsing turns them into per-display pixel
-# offsets for the displays present at the time; for two displays of 1920x1080 and
-# 1280x1024 (profile_modules) these are the offsets that reach the renderer.
+# diagonal_inches=, bezels= and offsets=. Earlier versions turned them into per-display
+# pixel offsets while parsing, for the displays present then; display_corrections does it
+# for the layout being rendered. For displays of 1920x1080 and 1280x1024 these are the
+# offsets that reach the renderer.
+TWO_RESOLUTIONS = [(1920, 1080), (1280, 1024)]
+
+
 @pytest.mark.parametrize(
     ("lines", "ppimode", "ppi_array", "manual_offsets"),
     [
@@ -188,8 +192,37 @@ def test_legacy_corrections_become_pixel_offsets(profile_modules, tmp_path, line
     path = tmp_path / "legacy.profile"
     path.write_text(f"name=legacy\nspanmode=advanced\n{lines}\ndisplay0paths={tmp_path}\n", encoding="utf-8")
 
+    corrections = data.ProfileData(path, persist_selection=False).display_corrections(TWO_RESOLUTIONS)
+
+    assert corrections.ppimode is ppimode
+    assert corrections.ppi_array == ppi_array
+    assert corrections.manual_offsets == manual_offsets
+
+
+def test_corrections_follow_the_displays_present(profile_modules, tmp_path):
+    data, _ = profile_modules
+    path = tmp_path / "legacy.profile"
+    path.write_text(f"name=legacy\nppi=100;80\nbezels=5.0\ndisplay0paths={tmp_path}\n", encoding="utf-8")
     profile = data.ProfileData(path, persist_selection=False)
 
-    assert profile.ppimode is ppimode
-    assert profile.ppi_array == ppi_array
-    assert profile.manual_offsets == manual_offsets
+    # A third display plugged in later is shifted by the bezels to its left too.
+    three = profile.display_corrections([*TWO_RESOLUTIONS, (1920, 1080)])
+
+    assert three.manual_offsets == [(0, 0), (20, 0), (20, 0)]
+    assert profile.display_corrections(TWO_RESOLUTIONS).manual_offsets == [(0, 0), (20, 0)]
+
+
+@pytest.mark.parametrize(
+    ("displays", "manual_offsets"),
+    [(1, [(1, 2)]), (2, [(1, 2), (3, -4)]), (3, [(1, 2), (3, -4), (0, 0)])],
+)
+def test_command_line_offsets_apply_to_the_displays_present(profile_modules, tmp_path, displays, manual_offsets):
+    data, _ = profile_modules
+    image = tmp_path / "wallpaper.png"
+    image.touch()
+    profile = data.CLIProfileData([str(image)], advanced=True, offsets=["1", "2", "3", "-4"])
+
+    corrections = profile.display_corrections(displays * [(1920, 1080)])
+
+    assert corrections.ppimode is False
+    assert corrections.manual_offsets == manual_offsets

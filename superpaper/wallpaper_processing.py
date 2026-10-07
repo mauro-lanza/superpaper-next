@@ -62,14 +62,6 @@ elif sys.platform == "darwin":
 
 # Global constants
 
-NUM_DISPLAYS = 0
-# list of display resolutions (width,height), use tuples.
-RESOLUTION_ARRAY = []
-# list of display offsets (width,height), use tuples.
-DISPLAY_OFFSET_ARRAY = []
-
-# Lazily initialized in load_system() before any wallpaper processing runs.
-G_ACTIVE_DISPLAYSYSTEM: DisplaySystem = None  # pyright: ignore[reportAssignmentType]  # ty:ignore[invalid-assignment]
 G_ACTIVE_PROFILE = None
 G_WALLPAPER_CHANGE_LOCK = Lock()
 G_WALLPAPER_CHANGE_PENDING = Lock()
@@ -279,14 +271,15 @@ class DisplaySystem:
     in advanced mode.
     """
 
-    def __init__(self, config_dir: Path, *, max_attempts=3, retry_delay=0.25, update_globals=True):
+    def __init__(self, config_dir: Path, *, max_attempts=3, retry_delay=0.25):
+        """Detect the displays and load the layout saved for them from ``config_dir``.
+
+        A wallpaper change is given the layout it renders for, so replacing the layout
+        a running slideshow uses never touches one that a change is still using.
+        """
         # display_systems.dat and the .persp files that hold the user's layout live here.
         self.config_dir = config_dir
-        self.disp_list = get_display_data(
-            max_attempts=max_attempts,
-            retry_delay=retry_delay,
-            update_globals=False,
-        )
+        self.disp_list = get_display_data(max_attempts=max_attempts, retry_delay=retry_delay)
         self.compute_ppinorm_resolutions()
 
         # Data
@@ -311,8 +304,6 @@ class DisplaySystem:
                     )
                     show_message_dialog(msg)
                     USER_TOLD_OF_PHYS_FAIL = True
-        if update_globals:
-            publish_display_system(self)
 
     def __eq__(self, other):
         # return bool(tuple(self.disp_list) == tuple(other.disp_list))
@@ -325,6 +316,14 @@ class DisplaySystem:
 
     def __hash__(self):
         return hash(tuple(self.disp_list))
+
+    def resolutions(self):
+        """Each display's resolution in pixels, in desktop order."""
+        return [display.resolution for display in self.disp_list]
+
+    def digital_offsets(self):
+        """Each display's top-left corner on the desktop, in desktop order."""
+        return [display.digital_offset for display in self.disp_list]
 
     def max_ppi(self):
         """Return maximum pixel density."""
@@ -613,9 +612,6 @@ class DisplaySystem:
         with open(archive_file, "w") as configfile:
             config.write(configfile)
 
-        # Once profile is saved make it available for wallpaper setter
-        refresh_display_data(self.config_dir)
-
     def load_system(self):
         """Try to load system data from database based on initialization data,
         i.e. the Display list. If no pre-existing system is found, try to guess
@@ -815,42 +811,11 @@ def str_to_list(joined_list, item_len=1, strings=False):
         return conv_list
 
 
-def extract_global_vars(disp_list):
-    res_arr = []
-    off_arr = []
-    for disp in disp_list:
-        res_arr.append(disp.resolution)
-        off_arr.append(disp.digital_offset)
-    return [res_arr, off_arr]
-
-
-def update_display_globals(display_list):
-    """Publish legacy display globals while the wallpaper state is locked."""
-    resolution_array, display_offset_array = extract_global_vars(display_list)
-    global NUM_DISPLAYS, RESOLUTION_ARRAY, DISPLAY_OFFSET_ARRAY
-    with G_WALLPAPER_CHANGE_LOCK:
-        NUM_DISPLAYS = len(display_list)
-        RESOLUTION_ARRAY = resolution_array
-        DISPLAY_OFFSET_ARRAY = display_offset_array
-
-
-def publish_display_system(display_system):
-    """Publish an active display system and its legacy arrays as one locked generation."""
-    resolution_array, display_offset_array = extract_global_vars(display_system.disp_list)
-    global G_ACTIVE_DISPLAYSYSTEM, NUM_DISPLAYS, RESOLUTION_ARRAY, DISPLAY_OFFSET_ARRAY
-    with G_WALLPAPER_CHANGE_LOCK:
-        NUM_DISPLAYS = len(display_system.disp_list)
-        RESOLUTION_ARRAY = resolution_array
-        DISPLAY_OFFSET_ARRAY = display_offset_array
-        G_ACTIVE_DISPLAYSYSTEM = display_system
-
-
-def get_display_data(*, max_attempts=3, retry_delay=0.25, update_globals=False):
+def get_display_data(*, max_attempts=3, retry_delay=0.25):
     """
-    Updates global display variables: number of displays, resolutions and offsets.
-
-    Returns a list of Display objects, one for each monitor. Offsets are sanitized
-    so that they are always non-negative.
+    Detect the displays: a list of Display objects, one for each monitor, sorted by
+    their position on the desktop. Offsets are sanitized so that they are always
+    non-negative.
     """
     # https://github.com/rr-/screeninfo
     if max_attempts < 1:
@@ -890,28 +855,17 @@ def get_display_data(*, max_attempts=3, retry_delay=0.25, update_globals=False):
             disp.translate_offset((leftmost_offset, topmost_offset))
     # sort display list by digital offsets
     display_list.sort(key=lambda x: x.digital_offset)
-    resolution_array, display_offset_array = extract_global_vars(display_list)
-
-    if update_globals:
-        update_display_globals(display_list)
 
     if sp_logging.DEBUG:
         sp_logging.G_LOGGER.info(
-            "get_display_data output: NUM_DISPLAYS = %s, RES_ARR = %s, OFF_ARR = %s",
+            "get_display_data output: %s displays, resolutions %s, offsets %s",
             len(display_list),
-            resolution_array,
-            display_offset_array,
+            [disp.resolution for disp in display_list],
+            [disp.digital_offset for disp in display_list],
         )
         for disp in display_list:
             sp_logging.G_LOGGER.info(str(disp))
     return display_list
-
-
-def refresh_display_data(config_dir: Path, *, max_attempts=3, retry_delay=0.25):
-    """Build and atomically publish a complete display-system generation."""
-    candidate = DisplaySystem(config_dir, max_attempts=max_attempts, retry_delay=retry_delay, update_globals=False)
-    publish_display_system(candidate)
-    return candidate
 
 
 def compute_canvas(res_array, offset_array):
@@ -1057,7 +1011,7 @@ def alternating_outputfile(cache_dir: Path, prof_name):
     return (outputfile, outputfile_old)
 
 
-def span_single_image_simple(profile, force, *, paths: AppPaths, set_command=""):
+def span_single_image_simple(profile, force, *, display_system: DisplaySystem, paths: AppPaths, set_command=""):
     """
     Spans a single image across all monitors. No corrections.
 
@@ -1081,13 +1035,13 @@ def span_single_image_simple(profile, force, *, paths: AppPaths, set_command="")
             file,
         )
         return
-    canvas_tuple = tuple(compute_canvas(RESOLUTION_ARRAY, DISPLAY_OFFSET_ARRAY))
+    canvas_tuple = tuple(compute_canvas(display_system.resolutions(), display_system.digital_offsets()))
     img_resize = resize_to_fill(img, canvas_tuple, zoom=profile.zoom, offset=profile.offsets)
 
     outputfile, outputfile_old = alternating_outputfile(paths.cache, profile.name)
     img_resize.save(outputfile, quality=95)  # set quality if jpg is used, png unaffected
     if profile.name == G_ACTIVE_PROFILE or force:
-        set_wallpaper(outputfile, force, [file], paths=paths, set_command=set_command)
+        set_wallpaper(outputfile, force, [file], display_system=display_system, paths=paths, set_command=set_command)
     if os.path.exists(outputfile_old):
         os.remove(outputfile_old)
     return 0
@@ -1127,7 +1081,7 @@ def translate_to_group_coordinates(group_crop_list):
 
 # Take pixel densities of displays into account to have the image match
 # physically between displays.
-def span_single_image_advanced(profile, force, *, paths: AppPaths, set_command=""):
+def span_single_image_advanced(profile, force, *, display_system: DisplaySystem, paths: AppPaths, set_command=""):
     """
     Applies wallpaper using PPI, bezel, offset corrections.
 
@@ -1152,28 +1106,29 @@ def span_single_image_advanced(profile, force, *, paths: AppPaths, set_command="
 
     # Cropping now sections of the image to be shown, USE EFFECTIVE WORKING
     # SIZES. Also EFFECTIVE SIZE Offsets are now required.
-    manual_offsets = profile.manual_offsets
+    resolutions = display_system.resolutions()
+    manual_offsets = profile.display_corrections(resolutions).manual_offsets
     cropped_images = {}
-    crop_tuples = G_ACTIVE_DISPLAYSYSTEM.get_ppi_norm_crops(manual_offsets)
+    crop_tuples = display_system.get_ppi_norm_crops(manual_offsets)
     sp_logging.G_LOGGER.info(
-        "G_A_DSYS.use_perspective: %s, prof.perspective: %s",
-        G_ACTIVE_DISPLAYSYSTEM.use_perspective,
+        "use_perspective: %s, prof.perspective: %s",
+        display_system.use_perspective,
         profile.perspective,
     )
     persp_dat = None
-    if G_ACTIVE_DISPLAYSYSTEM.use_perspective:
-        persp_dat = G_ACTIVE_DISPLAYSYSTEM.get_persp_data(profile.perspective)
+    if display_system.use_perspective:
+        persp_dat = display_system.get_persp_data(profile.perspective)
 
     if profile.spangroups:
         spangroups = profile.spangroups
     else:
-        spangroups = [list(range(NUM_DISPLAYS))]
+        spangroups = [list(range(len(resolutions)))]
 
     grp_crop_tuples = translate_to_group_coordinates([[crop_tuples[index] for index in grp] for grp in spangroups])
-    grp_res_array = [[RESOLUTION_ARRAY[index] for index in grp] for grp in spangroups]
+    grp_res_array = [[resolutions[index] for index in grp] for grp in spangroups]
     # Per-display outer bezel sizes (ppi-normalized), grouped to match the
     # crops, so the working canvas can include outer bezels like the preview.
-    bezels_px = G_ACTIVE_DISPLAYSYSTEM.bezels_in_px()
+    bezels_px = display_system.bezels_in_px()
     grp_bezels = [[bezels_px[index] for index in grp] for grp in spangroups]
     grp_persp_dat = group_persp_data(persp_dat, spangroups)
 
@@ -1217,7 +1172,7 @@ def span_single_image_advanced(profile, force, *, paths: AppPaths, set_command="
             # offsets.
             img_workingsize = resize_to_fill(img, canvas_tuple_eff, zoom=profile.zoom, offset=profile.offsets)
             # Simultaneously make crops at working size and then resize down to actual
-            # resolution from RESOLUTION_ARRAY as needed.
+            # display resolution as needed.
             for crop_tup, (i_res, res) in zip(grp_crops, enumerate(grp_res_arr)):
                 crop_img = img_workingsize.crop(crop_tup)
                 if crop_img.size == res:
@@ -1229,40 +1184,42 @@ def span_single_image_advanced(profile, force, *, paths: AppPaths, set_command="
                     cropped_images[grp[i_res]] = crop_img
     # Combine crops to a single canvas of the size of the actual desktop
     # actual combined size of the display resolutions
-    canvas_tuple_fin = tuple(compute_canvas(RESOLUTION_ARRAY, DISPLAY_OFFSET_ARRAY))
+    offsets = display_system.digital_offsets()
+    canvas_tuple_fin = tuple(compute_canvas(resolutions, offsets))
     combined_image = Image.new("RGB", canvas_tuple_fin, color=0)
     combined_image.load()
-    # for i in range(len(cropped_images)):
-    # combined_image.paste(cropped_images[i], DISPLAY_OFFSET_ARRAY[i])
     for crp_id in cropped_images:
-        combined_image.paste(cropped_images[crp_id], DISPLAY_OFFSET_ARRAY[crp_id])
+        combined_image.paste(cropped_images[crp_id], offsets[crp_id])
 
     # Saving combined image
     outputfile, outputfile_old = alternating_outputfile(paths.cache, profile.name)
     combined_image.save(outputfile, quality=95)  # set quality if jpg is used, png unaffected
     if profile.name == G_ACTIVE_PROFILE or force:
-        set_wallpaper(outputfile, force, files, paths=paths, set_command=set_command)
+        set_wallpaper(outputfile, force, files, display_system=display_system, paths=paths, set_command=set_command)
     if os.path.exists(outputfile_old):
         os.remove(outputfile_old)
     return 0
 
 
-def set_multi_image_wallpaper(profile, force, *, paths: AppPaths, set_command=""):
+def set_multi_image_wallpaper(profile, force, *, display_system: DisplaySystem, paths: AppPaths, set_command=""):
     """Sets a distinct image on each monitor.
 
     Since most platforms only support setting a single image
     as the wallpaper this has to be accomplished by creating a
     composite image based on the monitor offsets and then setting
-    the resulting image as the wallpaper.
+    the resulting image as the wallpaper. A profile set up for a different
+    number of displays than ``display_system`` has is not rendered.
     """
+    resolutions = display_system.resolutions()
+    offsets = display_system.digital_offsets()
     files = profile.next_wallpaper_files()
-    if len(files) != NUM_DISPLAYS:
+    if len(files) != len(resolutions):
         sp_logging.G_LOGGER.error("No complete wallpaper selection is available for profile '%s'.", profile.name)
         return
     if sp_logging.DEBUG:
         sp_logging.G_LOGGER.info(str(files))
     img_resized = []
-    for file, res in zip(files, RESOLUTION_ARRAY):
+    for file, res in zip(files, resolutions):
         # image = Image.open(file)
         try:
             image = Image.open(file)
@@ -1277,16 +1234,16 @@ def set_multi_image_wallpaper(profile, force, *, paths: AppPaths, set_command=""
             )
             return
         img_resized.append(resize_to_fill(image, res, zoom=profile.zoom, offset=profile.offsets))
-    canvas_tuple = tuple(compute_canvas(RESOLUTION_ARRAY, DISPLAY_OFFSET_ARRAY))
+    canvas_tuple = tuple(compute_canvas(resolutions, offsets))
     combined_image = Image.new("RGB", canvas_tuple, color=0)
     combined_image.load()
     for i in range(len(files)):
-        combined_image.paste(img_resized[i], DISPLAY_OFFSET_ARRAY[i])
+        combined_image.paste(img_resized[i], offsets[i])
 
     outputfile, outputfile_old = alternating_outputfile(paths.cache, profile.name)
     combined_image.save(outputfile, quality=95)  # set quality if jpg is used, png unaffected
     if profile.name == G_ACTIVE_PROFILE or force:
-        set_wallpaper(outputfile, force, files, paths=paths, set_command=set_command)
+        set_wallpaper(outputfile, force, files, display_system=display_system, paths=paths, set_command=set_command)
     if os.path.exists(outputfile_old):
         os.remove(outputfile_old)
     return 0
@@ -1298,14 +1255,24 @@ def set_multi_image_wallpaper(profile, force, *, paths: AppPaths, set_command=""
 #         raise ctypes.WinError(ctypes.get_last_error())
 
 
-def set_wallpaper(outputfile, force=False, source_files=None, *, paths: AppPaths, set_command=""):
+def set_wallpaper(
+    outputfile,
+    force=False,
+    source_files=None,
+    *,
+    display_system: DisplaySystem | None,
+    paths: AppPaths,
+    set_command="",
+):
     """
     Master method to set the composed image as wallpaper.
 
     After the final background image is created, this method
     is called to communicate with the host system to set the
     desktop background. For Linux hosts there is a separate method.
-    ``set_command`` is the user's own setter command, if any (Linux only).
+    Desktops that take one image per display (KDE, macOS) get ``outputfile`` cut
+    for ``display_system``. ``set_command`` is the user's own setter command, if any
+    (Linux only).
     """
     if IS_WINDOWS:
         set_wallpaper_win(outputfile)
@@ -1331,7 +1298,7 @@ def set_wallpaper(outputfile, force=False, source_files=None, *, paths: AppPaths
     #             sp_logging.G_LOGGER.info("SystemParametersInfo wallpaper set failed with \
     # spi_success: '%s'", spi_success)
     elif IS_LINUX:
-        set_wallpaper_linux(outputfile, force, paths=paths, set_command=set_command)
+        set_wallpaper_linux(outputfile, force, display_system=display_system, paths=paths, set_command=set_command)
     elif IS_MACOS:
         # script = """/usr/bin/osascript<<END
         #             tell application "Finder"
@@ -1339,7 +1306,7 @@ def set_wallpaper(outputfile, force=False, source_files=None, *, paths: AppPaths
         #             end tell
         #             END"""
         # subprocess.Popen(script % outputfile, shell=True)
-        set_wallpaper_macos(outputfile, image_piece_list=None, force=force)
+        set_wallpaper_macos(outputfile, image_piece_list=None, force=force, display_system=display_system)
     else:
         sp_logging.G_LOGGER.info("Unknown platform: %s", sys.platform)
     script_file = os.path.join(paths.config, "run-after-wp-change.py")
@@ -1353,7 +1320,7 @@ def set_wallpaper(outputfile, force=False, source_files=None, *, paths: AppPaths
     return 0
 
 
-def set_wallpaper_macos(outputfile, image_piece_list=None, force=False):
+def set_wallpaper_macos(outputfile, image_piece_list=None, force=False, *, display_system: DisplaySystem | None):
     """
     MacOS has a separate desktop for each screen, each of which has their own
     background image property. This means that the wallpaper has to be set
@@ -1385,7 +1352,7 @@ def set_wallpaper_macos(outputfile, image_piece_list=None, force=False):
     profname = None
     if outputfile:
         profname = os.path.splitext(os.path.basename(outputfile))[0][:-2]
-        img_names = special_image_cropper(outputfile)
+        img_names = special_image_cropper(outputfile, display_system)
     elif not outputfile and image_piece_list:
         if sp_logging.DEBUG:
             sp_logging.G_LOGGER.info("KDE: Using image piece list!")
@@ -1409,7 +1376,9 @@ def set_wallpaper_macos(outputfile, image_piece_list=None, force=False):
         remove_old_temp_files(outputfile)
 
 
-def set_wallpaper_linux(outputfile, force=False, *, paths: AppPaths, set_command=""):
+def set_wallpaper_linux(
+    outputfile, force=False, *, display_system: DisplaySystem | None, paths: AppPaths, set_command=""
+):
     """
     Wallpaper setter for Linux hosts.
 
@@ -1501,7 +1470,9 @@ def set_wallpaper_linux(outputfile, force=False, *, paths: AppPaths, set_command
                     sys.exit(1)
         # elif desk_env in ["/usr/share/xsessions/plasma", "plasma"]:
         elif running_kde():
-            kdeplasma_actions(outputfile, force=force, profile_name=G_ACTIVE_PROFILE, paths=paths)
+            kdeplasma_actions(
+                outputfile, force=force, profile_name=G_ACTIVE_PROFILE, display_system=display_system, paths=paths
+            )
         elif "i3" in desk_env or desk_env == "/usr/share/xsessions/bspwm":
             subprocess.run(["feh", "--bg-scale", "--no-xinerama", outputfile], env=host_spawn_env())
         else:
@@ -1513,7 +1484,9 @@ settings file superpaper/general_settings. Exiting."
             sys.exit(1)
     else:
         if running_kde():
-            kdeplasma_actions(outputfile, force=force, profile_name=G_ACTIVE_PROFILE, paths=paths)
+            kdeplasma_actions(
+                outputfile, force=force, profile_name=G_ACTIVE_PROFILE, display_system=display_system, paths=paths
+            )
         else:
             sp_logging.G_LOGGER.info(
                 "DESKTOP_SESSION variable is empty, \
@@ -1536,18 +1509,18 @@ def set_wallpaper_piecewise(image_piece_list, *, paths: AppPaths):
     """
     if IS_LINUX:
         if running_kde():
-            kdeplasma_actions(None, image_piece_list, profile_name=G_ACTIVE_PROFILE, paths=paths)
+            kdeplasma_actions(None, image_piece_list, profile_name=G_ACTIVE_PROFILE, display_system=None, paths=paths)
         # desk_env = os.environ.get("DESKTOP_SESSION")
         # elif desk_env in ["xfce", "xubuntu", "ubuntustudio"]:
         # xfce_actions(None, image_piece_list)
     elif IS_MACOS:
-        set_wallpaper_macos(None, image_piece_list=image_piece_list)
+        set_wallpaper_macos(None, image_piece_list=image_piece_list, display_system=None)
     else:
         pass
     return 0
 
 
-def special_image_cropper(outputfile):
+def special_image_cropper(outputfile, display_system: DisplaySystem | None):
     """
     Crops input image into monitor specific pieces based on display offsets.
 
@@ -1555,11 +1528,14 @@ def special_image_cropper(outputfile):
     This means that the composed image needs to be re-cut into pieces which
     are saved separately.
     """
+    if display_system is None:
+        message = "Cutting a wallpaper into one image per display needs the display layout."
+        raise ValueError(message)
     # file needs to be split into monitor pieces since KDE/XFCE are special
     img = Image.open(outputfile)
     outputname = os.path.splitext(outputfile)[0]
     img_names = []
-    for crop_id, (res, offset) in enumerate(zip(RESOLUTION_ARRAY, DISPLAY_OFFSET_ARRAY)):
+    for crop_id, (res, offset) in enumerate(zip(display_system.resolutions(), display_system.digital_offsets())):
         left = offset[0]
         top = offset[1]
         right = left + res[0]
@@ -1964,7 +1940,15 @@ for(var idx = 0; idx < allDesktops.length; idx++) {
         sp_logging.G_LOGGER.error(traceback.format_exc())
 
 
-def kdeplasma_actions(outputfile, image_piece_list=None, force=False, profile_name=None, *, paths: AppPaths):
+def kdeplasma_actions(
+    outputfile,
+    image_piece_list=None,
+    force=False,
+    profile_name=None,
+    *,
+    display_system: DisplaySystem | None,
+    paths: AppPaths,
+):
     """
     Sets the multi monitor wallpaper on KDE.
 
@@ -1991,7 +1975,7 @@ def kdeplasma_actions(outputfile, image_piece_list=None, force=False, profile_na
 
         # Get the current profile's images
         if outputfile and os.path.isfile(outputfile):
-            current_img_names = special_image_cropper(outputfile)
+            current_img_names = special_image_cropper(outputfile, display_system)
         elif image_piece_list:
             current_img_names = image_piece_list
         else:
@@ -2117,7 +2101,7 @@ for(var idx = 0; idx < allDesktops.length; idx++) {{
     profname = None
     if outputfile:
         profname = os.path.splitext(os.path.basename(outputfile))[0][:-2]
-        img_names = special_image_cropper(outputfile)
+        img_names = special_image_cropper(outputfile, display_system)
     elif not outputfile and image_piece_list:
         if sp_logging.DEBUG:
             sp_logging.G_LOGGER.info("KDE: Using image piece list!")
@@ -2184,46 +2168,37 @@ def xfce_actions(outputfile):
         remove_old_temp_files(outputfile)
 
 
-def _change_wallpaper(profile, force, advance, display_system, paths: AppPaths, set_command):
-    """Resolve a selection and render it using already-locked display state."""
-    global G_ACTIVE_DISPLAYSYSTEM, NUM_DISPLAYS, RESOLUTION_ARRAY, DISPLAY_OFFSET_ARRAY
-    previous_display_system = G_ACTIVE_DISPLAYSYSTEM
-    previous_num_displays = NUM_DISPLAYS
-    previous_resolutions = RESOLUTION_ARRAY
-    previous_offsets = DISPLAY_OFFSET_ARRAY
-    if display_system is not None:
-        G_ACTIVE_DISPLAYSYSTEM = display_system
-        NUM_DISPLAYS = len(display_system.disp_list)
-        RESOLUTION_ARRAY, DISPLAY_OFFSET_ARRAY = extract_global_vars(display_system.disp_list)
-    try:
-        if (advance or not profile.has_valid_selection()) and not profile.advance_wallpaper():
-            sp_logging.G_LOGGER.error("Wallpaper change skipped: profile '%s' has no complete selection.", profile.name)
-            return
-        if profile.spanmode.startswith("single") and profile.ppimode is False:
-            span_single_image_simple(profile, force, paths=paths, set_command=set_command)
-        elif (profile.spanmode.startswith("single") and profile.ppimode is True) or profile.spanmode.startswith(
-            "advanced"
-        ):
-            span_single_image_advanced(profile, force, paths=paths, set_command=set_command)
-        elif profile.spanmode.startswith("multi"):
-            set_multi_image_wallpaper(profile, force, paths=paths, set_command=set_command)
+def _change_wallpaper(profile, force, advance, display_system: DisplaySystem, paths: AppPaths, set_command):
+    """Resolve a selection and render it for ``display_system``."""
+    if (advance or not profile.has_valid_selection()) and not profile.advance_wallpaper():
+        sp_logging.G_LOGGER.error("Wallpaper change skipped: profile '%s' has no complete selection.", profile.name)
+        return
+    if profile.spanmode.startswith("single"):
+        # A single image with legacy corrections (offsets=, ppi=, ...) needs the advanced renderer.
+        if profile.display_corrections(display_system.resolutions()).ppimode:
+            span_single_image_advanced(
+                profile, force, display_system=display_system, paths=paths, set_command=set_command
+            )
         else:
-            sp_logging.G_LOGGER.info("Unkown profile spanmode: %s", profile.spanmode)
-    finally:
-        G_ACTIVE_DISPLAYSYSTEM = previous_display_system
-        NUM_DISPLAYS = previous_num_displays
-        RESOLUTION_ARRAY = previous_resolutions
-        DISPLAY_OFFSET_ARRAY = previous_offsets
+            span_single_image_simple(
+                profile, force, display_system=display_system, paths=paths, set_command=set_command
+            )
+    elif profile.spanmode.startswith("advanced"):
+        span_single_image_advanced(profile, force, display_system=display_system, paths=paths, set_command=set_command)
+    elif profile.spanmode.startswith("multi"):
+        set_multi_image_wallpaper(profile, force, display_system=display_system, paths=paths, set_command=set_command)
+    else:
+        sp_logging.G_LOGGER.info("Unkown profile spanmode: %s", profile.spanmode)
 
 
 def change_wallpaper_job(
     profile,
     paths: AppPaths,
     *,
+    display_system: DisplaySystem,
     set_command="",
     force=False,
     advance=False,
-    display_system=None,
     skip_if_busy=False,
 ):
     """Centralized wallpaper method that calls setter algorithm based on input prof settings.
@@ -2231,8 +2206,8 @@ def change_wallpaper_job(
     When advance, cycle to the next image before rendering (slideshow / manual next).
     Otherwise the current persistent selection is rendered unchanged; if none has
     been established yet, the first image is picked once and saved as the selection.
-    The rendered image goes to ``paths.cache``; ``set_command`` is the user's own
-    wallpaper setter command, if any.
+    The wallpaper is rendered for ``display_system`` into ``paths.cache``;
+    ``set_command`` is the user's own wallpaper setter command, if any.
     """
     if not (
         profile.spanmode.startswith("single")
@@ -2289,7 +2264,7 @@ def run_profile_job(profile, change, startup=False):
     return (repeating_timer, thrd)
 
 
-def quick_profile_job(profile, *, paths: AppPaths, set_command=""):
+def quick_profile_job(profile, *, display_system: DisplaySystem, paths: AppPaths, set_command=""):
     """
     At startup and profile change, switch to old temp wallpaper.
 
@@ -2327,14 +2302,14 @@ def quick_profile_job(profile, *, paths: AppPaths, set_command=""):
             thrd.start()
         elif IS_WINDOWS:
             # Skip quick switch on Windows if not using perspective corrections.
-            if profile.spanmode == "advanced" and G_ACTIVE_DISPLAYSYSTEM.use_perspective:
+            if profile.spanmode == "advanced" and display_system.use_perspective:
                 if (
-                    profile.perspective == "default" and G_ACTIVE_DISPLAYSYSTEM.default_perspective is not None
+                    profile.perspective == "default" and display_system.default_perspective is not None
                 ) or profile.perspective not in ["default", "disabled"]:
                     thrd = Thread(
                         target=locked_setter,
                         args=(set_wallpaper, os.path.join(cache_dir, files[0])),
-                        kwargs={"paths": paths, "set_command": set_command},
+                        kwargs={"display_system": display_system, "paths": paths, "set_command": set_command},
                         daemon=True,
                     )
                     thrd.start()
@@ -2344,7 +2319,7 @@ def quick_profile_job(profile, *, paths: AppPaths, set_command=""):
             thrd = Thread(
                 target=locked_setter,
                 args=(set_wallpaper, os.path.join(cache_dir, files[0])),
-                kwargs={"paths": paths, "set_command": set_command},
+                kwargs={"display_system": display_system, "paths": paths, "set_command": set_command},
                 daemon=True,
             )
             thrd.start()

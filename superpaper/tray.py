@@ -465,23 +465,28 @@ Check that it is formatted properly and valid keys."
                     wpproc.G_ACTIVE_PROFILE = None
 
     def refresh_displays(self):
-        """Detect the displays again and make them what wallpaper changes use."""
-        wpproc.refresh_display_data(self.paths.config)
+        """Detect the displays and load their saved layout; later wallpaper changes use it.
+
+        A change already under way keeps the layout it started with, so this never
+        waits for one. If detection fails, the previous layout stays in use.
+        """
+        self.display_system = wpproc.DisplaySystem(self.paths.config)
 
     def change_wallpaper(self, profile, *, force=False, advance=False, skip_if_busy=False, display_system=None):
-        """Start one wallpaper change for ``profile``, with the settings as they are now.
+        """Start one wallpaper change for ``profile``, with the settings and displays as they are now.
 
-        The slideshow timer calls this on every tick, so a changed custom command
-        applies from the next tick on.
+        The slideshow timer calls this on every tick, so a changed custom command or
+        display layout applies from the next tick on. ``display_system`` renders for
+        another layout instead, such as the editor's unsaved one.
         """
         return change_wallpaper_job(
             profile,
             self.paths,
+            display_system=display_system if display_system is not None else self.display_system,
             set_command=self.g_settings.set_command,
             force=force,
             advance=advance,
             skip_if_busy=skip_if_busy,
-            display_system=display_system,
         )
 
     def _run_profile(self, profile, *, startup=False):
@@ -531,7 +536,12 @@ Check that it is formatted properly and valid keys."
                 # Restore the last rendered wallpaper without cycling, then arm
                 # the slideshow timer (if any). The wallpaper is not changed on
                 # launch; cycling only happens later on the timer's schedule.
-                quick_profile_job(profile, paths=self.paths, set_command=self.g_settings.set_command)
+                quick_profile_job(
+                    profile,
+                    display_system=self.display_system,
+                    paths=self.paths,
+                    set_command=self.g_settings.set_command,
+                )
                 self.repeating_timer, thrd = self._run_profile(profile, startup=True)
 
     def start_profile(self, event, profile, force_reload=False):

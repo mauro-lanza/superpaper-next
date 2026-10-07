@@ -72,7 +72,7 @@ def saved_layouts(tmp_path):
 
 def display_system(wpproc, monkeypatch, config_dir, monitors):
     monkeypatch.setattr(wpproc, "get_monitors", lambda: monitors)
-    return wpproc.DisplaySystem(config_dir, update_globals=False)
+    return wpproc.DisplaySystem(config_dir)
 
 
 @pytest.mark.parametrize(("monitors", "key"), [(DUAL_MONITORS, DUAL_KEY), (LAPTOP_MONITORS, LAPTOP_KEY)])

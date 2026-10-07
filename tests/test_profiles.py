@@ -103,3 +103,15 @@ def test_advance_replaces_duplicate_multi_selection(profile_modules, tmp_path):
 
     assert len(set(advanced)) == 2
     assert "selected=" + ";".join(advanced) in profile_path.read_text(encoding="utf-8")
+
+
+def test_a_multi_image_selection_has_one_image_per_configured_display(profile_modules, tmp_path):
+    data, _ = profile_modules
+    images = [tmp_path / f"{name}.png" for name in "abc"]
+    for image in images:
+        image.touch()
+    profile = data.ProfileData(write_profile(tmp_path / "test.profile", spanmode="multi", sources=images))
+
+    # How many displays are connected now is the renderer's concern, not the selection's.
+    assert profile.advance_wallpaper() == [str(image) for image in images]
+    assert profile.has_valid_selection() is True

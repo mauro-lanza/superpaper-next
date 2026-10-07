@@ -192,28 +192,30 @@ def test_setimages_dispatches_one_shot_render(monkeypatch, tmp_path, app_paths):
             self.joined = True
 
     job = Job()
+    layout = SimpleNamespace(name="detected")
 
-    def refresh(config_dir):
+    def detect(config_dir):
         assert config_dir == app_paths.config
-        captured["refreshes"] = captured.get("refreshes", 0) + 1
+        captured["detections"] = captured.get("detections", 0) + 1
+        return layout
 
     def profile_factory(files, advanced, perspective, groups, offsets):
         captured["profile_args"] = (files, advanced, perspective, groups, offsets)
         return profile
 
-    def render(profile, paths, *, set_command, force):
-        captured["render"] = (profile, paths, set_command, force)
+    def render(profile, paths, *, display_system, set_command, force):
+        captured["render"] = (profile, paths, display_system, set_command, force)
         return job
 
     monkeypatch.setattr(sys, "argv", ["superpaper", "--setimages", str(image)])
     monkeypatch.setattr(cli, "CLIProfileData", profile_factory)
-    monkeypatch.setattr(cli, "refresh_display_data", refresh)
+    monkeypatch.setattr(cli, "DisplaySystem", detect)
     monkeypatch.setattr(cli, "change_wallpaper_job", render)
 
     assert cli.cli_logic(app_paths) == 0
     assert captured["profile_args"] == ([str(image)], False, None, None, None)
-    assert captured["render"] == (profile, app_paths, "", True)
-    assert captured["refreshes"] == 1
+    assert captured["render"] == (profile, app_paths, layout, "", True)
+    assert captured["detections"] == 1
     assert job.joined is True
 
 
@@ -245,7 +247,7 @@ def test_advanced_cli_arguments_are_preserved(monkeypatch, tmp_path, app_paths):
             "setter {image}",
         ],
     )
-    monkeypatch.setattr(cli, "refresh_display_data", lambda config_dir: display_system)
+    monkeypatch.setattr(cli, "DisplaySystem", lambda config_dir: display_system)
 
     def profile_factory(*args):
         captured["profile_args"] = args
@@ -255,14 +257,15 @@ def test_advanced_cli_arguments_are_preserved(monkeypatch, tmp_path, app_paths):
     monkeypatch.setattr(
         cli,
         "change_wallpaper_job",
-        lambda rendered_profile, paths, *, set_command, force: captured.update(
-            render=(rendered_profile, paths, set_command, force)
+        lambda rendered_profile, paths, *, display_system, set_command, force: captured.update(
+            render=(rendered_profile, paths, display_system, set_command, force)
         ),
     )
 
     assert cli.cli_logic(app_paths) == 0
     assert captured["profile_args"] == ([str(image)], True, "desk", [[0], [1, 2]], ["1", "2"])
-    assert captured["render"] == (profile, app_paths, "setter {image}", True)
+    # The layout that knows the perspective is the one the wallpaper is rendered for.
+    assert captured["render"] == (profile, app_paths, display_system, "setter {image}", True)
 
 
 def test_cli_help_exits_successfully(monkeypatch, tmp_path):
@@ -291,9 +294,7 @@ def test_profile_launch_returns_after_tray_loop(monkeypatch, app_paths):
     tray_calls = []
     tray.tray_loop = lambda paths, settings, profile=None: tray_calls.append(profile)
     monkeypatch.setitem(sys.modules, "superpaper.tray", tray)
-    monkeypatch.setattr(cli.wpproc, "NUM_DISPLAYS", 2)
-    monkeypatch.setattr(cli.wpproc, "RESOLUTION_ARRAY", [(1920, 1080), (1280, 1024)])
-    monkeypatch.setattr(cli, "refresh_display_data", lambda config_dir: None)
+    monkeypatch.setattr(cli, "DisplaySystem", lambda config_dir: None)
     monkeypatch.setattr(sys, "argv", ["superpaper", "--profile", "saved"])
 
     assert cli.cli_logic(app_paths) == 0
@@ -317,9 +318,7 @@ def test_invalid_profile_id_fails_before_inventory_or_display_data(monkeypatch, 
 
     profiles = app_paths.profiles
     (profiles / "existing.profile").write_text("name=existing\n", encoding="utf-8")
-    monkeypatch.setattr(cli.wpproc, "NUM_DISPLAYS", 0)
-    monkeypatch.setattr(cli.wpproc, "RESOLUTION_ARRAY", [])
-    monkeypatch.setattr(cli, "refresh_display_data", lambda config_dir: pytest.fail("display data was requested"))
+    monkeypatch.setattr(cli, "DisplaySystem", lambda config_dir: pytest.fail("display data was requested"))
     monkeypatch.setattr(cli, "discover_profile_inventory", lambda paths: pytest.fail("inventory was constructed"))
     monkeypatch.setattr(sys, "argv", ["superpaper", "--profile", "../invalid"])
 
@@ -342,9 +341,7 @@ def test_profile_lookup_accepts_valid_unicode(monkeypatch, app_paths):
 
     tray.tray_loop = tray_loop
     monkeypatch.setitem(sys.modules, "superpaper.tray", tray)
-    monkeypatch.setattr(cli.wpproc, "NUM_DISPLAYS", 2)
-    monkeypatch.setattr(cli.wpproc, "RESOLUTION_ARRAY", [(1920, 1080), (1280, 1024)])
-    monkeypatch.setattr(cli, "refresh_display_data", lambda config_dir: None)
+    monkeypatch.setattr(cli, "DisplaySystem", lambda config_dir: None)
     monkeypatch.setattr(sys, "argv", ["superpaper", "--profile", "Työ"])
 
     with pytest.raises(SystemExit):
@@ -371,9 +368,7 @@ def test_profile_launch_accepts_profiles_saved_by_older_versions(monkeypatch, tm
     calls = []
     tray.tray_loop = lambda paths, settings, profile=None: calls.append(profile)
     monkeypatch.setitem(sys.modules, "superpaper.tray", tray)
-    monkeypatch.setattr(cli.wpproc, "NUM_DISPLAYS", 2)
-    monkeypatch.setattr(cli.wpproc, "RESOLUTION_ARRAY", [(1920, 1080), (1280, 1024)])
-    monkeypatch.setattr(cli, "refresh_display_data", lambda config_dir: None)
+    monkeypatch.setattr(cli, "DisplaySystem", lambda config_dir: None)
     monkeypatch.setattr(sys, "argv", ["superpaper", "--profile", "saved"])
 
     assert cli.cli_logic(app_paths) == 0
@@ -393,9 +388,7 @@ def test_profile_lookup_rejects_malformed_content_before_tray(monkeypatch, app_p
     calls = []
     tray.tray_loop = lambda paths, settings, profile=None: calls.append(profile)
     monkeypatch.setitem(sys.modules, "superpaper.tray", tray)
-    monkeypatch.setattr(cli.wpproc, "NUM_DISPLAYS", 2)
-    monkeypatch.setattr(cli.wpproc, "RESOLUTION_ARRAY", [(1920, 1080), (1280, 1024)])
-    monkeypatch.setattr(cli, "refresh_display_data", lambda config_dir: None)
+    monkeypatch.setattr(cli, "DisplaySystem", lambda config_dir: None)
     monkeypatch.setattr(sys, "argv", ["superpaper", "--profile", "saved"])
 
     with pytest.raises(SystemExit):
