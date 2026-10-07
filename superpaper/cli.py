@@ -5,13 +5,14 @@ import os
 import sys
 from typing import NoReturn
 
+import superpaper.desktop as desktop
 import superpaper.sp_logging as sp_logging
 import superpaper.wallpaper_processing as wpproc
 from superpaper.data import CLIProfileData, discover_profile_inventory
+from superpaper.desktop.spanmode import set_spanmode
 from superpaper.paths import AppPaths, ensure_dirs
 from superpaper.profile_id import ProfileId, ProfileIdError
 from superpaper.settings import SETTINGS_FILE, read_settings, write_settings
-from superpaper.spanmode import set_spanmode
 from superpaper.wallpaper_processing import DisplaySystem, change_wallpaper_job
 
 
@@ -176,6 +177,9 @@ def cli_logic(paths: AppPaths):
         if len(args.command) > 1:
             _exit_with_error("Remember to put the custom command in quotes.")
         set_command = args.command[0]
+    problem = desktop.setter_problem(set_command)
+    if problem:
+        _exit_with_error(problem)
 
     if display_system is None:  # the perspective check above already detected them
         display_system = _detect_displays(paths)

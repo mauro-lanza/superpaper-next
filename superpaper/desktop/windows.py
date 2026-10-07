@@ -1,3 +1,5 @@
+"""Set the wallpaper on Windows, through Active Desktop."""
+
 import ctypes
 
 # pywin32 ships type stubs but the compiled modules are Windows-only, so the
@@ -7,7 +9,18 @@ import pywintypes  # pyright: ignore[reportMissingModuleSource]  # ty:ignore[unr
 import win32gui  # pyright: ignore[reportMissingModuleSource]  # ty:ignore[unresolved-import]
 from win32com.shell import shell, shellcon  # pyright: ignore[reportMissingModuleSource]  # ty:ignore[unresolved-import]
 
+from superpaper.desktop.process import Result
+
 user32 = ctypes.windll.user32  # pyright: ignore[reportAttributeAccessIssue]  # ty:ignore[unresolved-attribute]
+
+
+def set_wallpaper(image: str) -> Result:
+    """Show ``image``, which spans the displays when Windows is set to span."""
+    try:
+        set_wallpaper_win(image)
+    except Exception as error:  # COM and Win32 failures come in many types
+        return Result(f"Windows did not take the wallpaper: {error}")
+    return Result()
 
 
 def _make_filter(class_name: str | None, title: str | None):

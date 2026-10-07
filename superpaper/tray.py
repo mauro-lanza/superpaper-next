@@ -2,13 +2,13 @@
 # from configuration_dialogs import * # Katso ensin että tuleeko tästä liian pitkä dialogien kanssa.
 
 import os
-import subprocess
 import sys
 from threading import Lock
 
 import wx  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-import]
 import wx.adv  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-import]
 
+import superpaper.desktop as desktop
 import superpaper.sp_logging as sp_logging
 import superpaper.wallpaper_processing as wpproc
 from superpaper.__version__ import __version__
@@ -18,13 +18,13 @@ from superpaper.data import (
     read_active_profile,
     write_active_profile,
 )
+from superpaper.desktop.linux import running_kde
 from superpaper.gui import ConfigFrame
 from superpaper.message_dialog import show_message_dialog
 from superpaper.paths import AppPaths, resource
 from superpaper.profile_id import ProfileId, ProfileIdError
 from superpaper.settings import SETTINGS_FILE, Settings, read_settings
 from superpaper.sni_tray import build_tray, sni_supported
-from superpaper.sp_platform import IS_MACOS, IS_WINDOWS, host_spawn_env
 from superpaper.wallpaper_processing import (
     change_wallpaper_job,
     quick_profile_job,
@@ -176,14 +176,19 @@ hotkeys will not work. Exception: %s",
                 # KDE auto-open-config workaround (wx clicks don't work).
                 self._use_sni = False
                 self.set_icon(str(resource("superpaper.png")))
-                if wpproc.running_kde():
+                if running_kde():
                     sp_logging.G_LOGGER.info("Native SNI tray unavailable: auto-opening configuration GUI")
                     wx.CallAfter(self.configure_wallpapers, None)
-        elif wpproc.running_kde():
+        elif running_kde():
             # KDE Plasma 6 workaround: tray icon clicks don't work with wxPython
             # Automatically open the config GUI on startup
             sp_logging.G_LOGGER.info("KDE Plasma detected: Auto-opening configuration GUI")
             wx.CallAfter(self.configure_wallpapers, None)
+        # Say once, now, if wallpapers can't be set here, rather than on every change.
+        problem = desktop.setter_problem(self.g_settings.set_command)
+        if problem:
+            sp_logging.G_LOGGER.error("%s", problem)
+            wx.CallAfter(show_message_dialog, problem, "Error")
 
     def register_hotkeys(self):
         """Registers system-wide hotkeys for profiles and application interaction."""
@@ -257,7 +262,7 @@ hotkeys will not work. Exception: %s",
 Check that it is formatted properly and valid keys."
                             sp_logging.G_LOGGER.warning(msg)
                             sp_logging.G_LOGGER.warning(sys.exc_info()[0])
-                            if not wpproc.running_kde():
+                            if not running_kde():
                                 show_message_dialog(msg, "Error")
                     if self.g_settings.hk_binding_pause not in self.seen_binding:
                         try:
@@ -273,7 +278,7 @@ Check that it is formatted properly and valid keys."
 Check that it is formatted properly and valid keys."
                             sp_logging.G_LOGGER.warning(msg)
                             sp_logging.G_LOGGER.warning(sys.exc_info()[0])
-                            if not wpproc.running_kde():
+                            if not running_kde():
                                 show_message_dialog(msg, "Error")
                     # try:
                     # self.hk.register(('control', 'super', 'shift', 'q'),
@@ -303,13 +308,13 @@ Check that it is formatted properly and valid keys."
 Check that it is formatted properly and valid keys."
                                 sp_logging.G_LOGGER.warning(msg)
                                 sp_logging.G_LOGGER.warning(sys.exc_info()[0])
-                                if not wpproc.running_kde():
+                                if not running_kde():
                                     show_message_dialog(msg, "Error")
                         elif profile.hk_binding in self.seen_binding:
                             msg = f"Could not register hotkey: '{profile.hk_binding}' for profile: '{profile.name}'.\n\
 It is already registered for another action."
                             sp_logging.G_LOGGER.warning(msg)
-                            if not wpproc.running_kde():
+                            if not running_kde():
                                 show_message_dialog(msg, "Error")
                 # except (SystemHotkeyError, SystemRegisterError, UnregisterError, InvalidKeyError):
                 except Exception:
@@ -341,7 +346,7 @@ It is already registered for another action."
 Check that it is formatted properly and valid keys."
             sp_logging.G_LOGGER.warning(msg)
             sp_logging.G_LOGGER.warning(sys.exc_info()[0])
-            if not wpproc.running_kde():
+            if not running_kde():
                 show_message_dialog(msg, "Error")
 
     def get_profile_by_name(self, name):
@@ -413,26 +418,10 @@ Check that it is formatted properly and valid keys."
 
     def open_config(self, event):
         """Opens Superpaper's config folder."""
-        config = os.fspath(self.paths.config)
-        if IS_WINDOWS:
-            try:
-                # os.startfile is Windows-only; the branch is IS_WINDOWS-guarded.
-                os.startfile(config)  # pyright: ignore[reportAttributeAccessIssue]
-            except BaseException as e:
-                sp_logging.G_LOGGER.error("open_config failed for %s: %s", config, e, exc_info=True)
-                show_message_dialog("There was an error trying to open the config folder.")
-        elif IS_MACOS:
-            try:
-                subprocess.check_call(["open", config], env=host_spawn_env())
-            except (subprocess.CalledProcessError, OSError) as e:
-                sp_logging.G_LOGGER.error("open_config failed for %s: %s", config, e, exc_info=True)
-                show_message_dialog("There was an error trying to open the config folder.")
-        else:
-            try:
-                subprocess.check_call(["xdg-open", config], env=host_spawn_env())
-            except (subprocess.CalledProcessError, OSError) as e:
-                sp_logging.G_LOGGER.error("open_config failed for %s: %s", config, e, exc_info=True)
-                show_message_dialog("There was an error trying to open the config folder.")
+        result = desktop.open_folder(self.paths.config)
+        if not result.ok:
+            sp_logging.G_LOGGER.error("open_config failed for %s: %s", self.paths.config, result.problem)
+            show_message_dialog("There was an error trying to open the config folder.")
 
     def configure_wallpapers(self, event):
         """Opens wallpaper configuration panel."""

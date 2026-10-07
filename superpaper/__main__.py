@@ -11,8 +11,8 @@ __author__ = "Henri Hänninen"
 import os
 import sys
 
+from superpaper.desktop.spanmode import set_spanmode
 from superpaper.paths import ensure_dirs, resolve_paths
-from superpaper.spanmode import set_spanmode
 
 
 def main():

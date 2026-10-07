@@ -14,6 +14,11 @@ HEADLESS_MODULES = (
     "superpaper.__main__",
     "superpaper.cli",
     "superpaper.data",
+    "superpaper.desktop",
+    "superpaper.desktop.kde",
+    "superpaper.desktop.linux",
+    "superpaper.desktop.process",
+    "superpaper.desktop.spanmode",
     "superpaper.files",
     "superpaper.message_dialog",
     "superpaper.paths",
@@ -23,7 +28,6 @@ HEADLESS_MODULES = (
     "superpaper.sni_tray",
     "superpaper.sp_logging",
     "superpaper.sp_platform",
-    "superpaper.spanmode",
     "superpaper.wallpaper_processing",
 )
 

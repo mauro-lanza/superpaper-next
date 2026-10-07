@@ -25,9 +25,9 @@ def cli_subprocess_env(tmp_path):
 def run_module_cli(tmp_path, *args):
     script = (
         "import runpy, sys, types; "
-        "spanmode = types.ModuleType('superpaper.spanmode'); "
+        "spanmode = types.ModuleType('superpaper.desktop.spanmode'); "
         "spanmode.set_spanmode = lambda: None; "
-        "sys.modules['superpaper.spanmode'] = spanmode; "
+        "sys.modules['superpaper.desktop.spanmode'] = spanmode; "
         # One fake monitor, so that runs on headless machines reach the code under test.
         "import screeninfo; "
         "screeninfo.get_monitors = lambda: [types.SimpleNamespace("
@@ -93,9 +93,9 @@ def test_module_missing_profile_exits_nonzero(tmp_path):
 def test_missing_wxpython_is_explained(tmp_path):
     script = (
         "import runpy, sys, types; "
-        "spanmode = types.ModuleType('superpaper.spanmode'); "
+        "spanmode = types.ModuleType('superpaper.desktop.spanmode'); "
         "spanmode.set_spanmode = lambda: None; "
-        "sys.modules['superpaper.spanmode'] = spanmode; "
+        "sys.modules['superpaper.desktop.spanmode'] = spanmode; "
         "sys.modules['wx'] = None; "
         "sys.argv = ['superpaper']; "
         "runpy.run_module('superpaper', run_name='__main__')"
