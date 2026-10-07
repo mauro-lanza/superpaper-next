@@ -56,7 +56,7 @@ def test_dispatched_tick_cannot_resurrect_stopped_timer(profile_modules, manual_
 )
 def test_run_profile_job_matrix(
     profile_modules,
-    monkeypatch,
+    manual_clock,
     slideshow_profile,
     slideshow,
     startup,
@@ -65,30 +65,19 @@ def test_run_profile_job_matrix(
 ):
     _, wpproc = profile_modules
     slideshow_profile.slideshow = slideshow
-    calls = []
+    changes = []
     thread = object()
-    timer = object()
-    monkeypatch.setattr(wpproc, "refresh_display_data", lambda: calls.append("refresh"))
-    monkeypatch.setattr(wpproc, "change_wallpaper_job", lambda profile: calls.append(("change", profile)) or thread)
-    monkeypatch.setattr(
-        wpproc,
-        "RepeatedTimer",
-        lambda *args, **kwargs: calls.append(("timer", args, kwargs)) or timer,
-    )
 
-    result_timer, result_thread = wpproc.run_profile_job(slideshow_profile, startup=startup)
+    def change(profile, **options):
+        changes.append((profile, options))
+        return thread
 
-    assert calls[0] == "refresh"
+    timer, result_thread = wpproc.run_profile_job(slideshow_profile, change, startup=startup)
+
     assert (result_thread is thread) is expect_change
-    assert (result_timer is timer) is expect_timer
-    timer_calls = [call for call in calls if isinstance(call, tuple) and call[0] == "timer"]
+    assert changes == ([(slideshow_profile, {})] if expect_change else [])
+    assert (timer is not None) is expect_timer
     if expect_timer:
-        assert timer_calls == [
-            (
-                "timer",
-                (12.5, wpproc.change_wallpaper_job, slideshow_profile),
-                {"advance": True, "skip_if_busy": True},
-            )
-        ]
-    else:
-        assert timer_calls == []
+        assert manual_clock.timers[0].interval == 12.5
+        manual_clock.timers[0].fire()
+        assert changes[-1] == (slideshow_profile, {"advance": True, "skip_if_busy": True})

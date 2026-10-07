@@ -4,21 +4,39 @@ from types import ModuleType, SimpleNamespace
 
 import pytest
 
+from superpaper.paths import AppPaths
+
 
 @pytest.fixture(autouse=True)
-def isolated_paths(monkeypatch, tmp_path):
-    config_home = tmp_path / "config"
-    cache_home = tmp_path / "cache"
-    config_home.mkdir()
-    cache_home.mkdir()
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(config_home))
-    monkeypatch.setenv("XDG_CACHE_HOME", str(cache_home))
-    for name in ("DESKTOP_SESSION", "KDE_FULL_SESSION", "XDG_SESSION_DESKTOP"):
+def isolated_environment(monkeypatch, tmp_path_factory):
+    """Keep every test away from the real home directory and the desktop session."""
+    monkeypatch.setenv("HOME", str(tmp_path_factory.mktemp("home")))
+    for name in (
+        "XDG_CONFIG_HOME",
+        "XDG_CACHE_HOME",
+        "SNAP_USER_DATA",
+        "SNAP_USER_COMMON",
+        "SUPERPAPER_CONFIG_HOME",
+        "SUPERPAPER_CACHE_HOME",
+        "DESKTOP_SESSION",
+        "KDE_FULL_SESSION",
+        "XDG_SESSION_DESKTOP",
+    ):
         monkeypatch.delenv(name, raising=False)
 
 
 @pytest.fixture
-def profile_modules(monkeypatch, tmp_path):
+def app_paths(tmp_path):
+    """Superpaper's directories for one test: created, and without example profiles."""
+    config = tmp_path / "config"
+    paths = AppPaths(config=config, profiles=config / "profiles", cache=tmp_path / "cache")
+    paths.profiles.mkdir(parents=True)
+    paths.cache.mkdir()
+    return paths
+
+
+@pytest.fixture
+def profile_modules(monkeypatch):
     from superpaper import data
     from superpaper import wallpaper_processing as wpproc
 
@@ -26,10 +44,6 @@ def profile_modules(monkeypatch, tmp_path):
     monkeypatch.setattr(wpproc, "RESOLUTION_ARRAY", [(1920, 1080), (1280, 1024)])
     monkeypatch.setattr(wpproc, "DISPLAY_OFFSET_ARRAY", [(0, 0), (1920, 0)])
     monkeypatch.setattr(data, "show_message_dialog", lambda *args, **kwargs: None)
-    # Remembered selections live in the cache directory; give each test its own.
-    cache = tmp_path / "superpaper-cache"
-    cache.mkdir()
-    monkeypatch.setattr(data.sp_paths, "TEMP_PATH", str(cache))
     return data, wpproc
 
 

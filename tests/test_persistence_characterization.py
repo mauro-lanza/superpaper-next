@@ -1,5 +1,6 @@
 import os
 
+from superpaper.settings import read_settings, write_settings
 from tests.conftest import write_profile
 
 
@@ -92,8 +93,7 @@ def test_selection_rewrite_preserves_other_profile_lines(profile_modules, tmp_pa
     )
 
 
-def test_general_settings_round_trip_is_canonical(profile_modules, monkeypatch, tmp_path):
-    data, _ = profile_modules
+def test_general_settings_round_trip_is_canonical(tmp_path):
     settings_path = tmp_path / "general_settings"
     settings_path.write_text(
         "logging=FALSE\n"
@@ -107,10 +107,9 @@ def test_general_settings_round_trip_is_canonical(profile_modules, monkeypatch, 
         "unknown_setting=retired\n",
         encoding="utf-8",
     )
-    monkeypatch.setattr(data, "CONFIG_PATH", str(tmp_path))
 
-    settings = data.GeneralSettingsData()
-    settings.save_settings()
+    settings = read_settings(settings_path, "linux")
+    write_settings(settings_path, settings)
 
     assert settings.set_command == "env FOO=bar setter --arg=a=b {image}"
     expected = (
@@ -123,7 +122,7 @@ def test_general_settings_round_trip_is_canonical(profile_modules, monkeypatch, 
         "browse_default_dir=/tmp/wallpapers\n"
         "warn_large_img=false"
     )
-    assert settings_path.read_bytes() == platform_bytes(expected)
+    assert settings_path.read_bytes() == expected.encode()
 
 
 def test_profile_read_does_not_modify_bytes(profile_modules, tmp_path):

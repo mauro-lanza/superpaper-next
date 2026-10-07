@@ -47,7 +47,7 @@ def test_display_detection_retries_exceptions(profile_modules, monkeypatch):
     assert len(wpproc.get_display_data(max_attempts=2, retry_delay=0)) == 1
 
 
-def test_detection_failure_preserves_globals(profile_modules, monkeypatch):
+def test_detection_failure_preserves_globals(profile_modules, monkeypatch, tmp_path):
     _, wpproc = profile_modules
     resolutions = wpproc.RESOLUTION_ARRAY
     offsets = wpproc.DISPLAY_OFFSET_ARRAY
@@ -57,7 +57,7 @@ def test_detection_failure_preserves_globals(profile_modules, monkeypatch):
     monkeypatch.setattr(wpproc.time, "sleep", lambda _delay: None)
 
     with pytest.raises(wpproc.DisplayDetectionError):
-        wpproc.refresh_display_data(max_attempts=2, retry_delay=0)
+        wpproc.refresh_display_data(tmp_path, max_attempts=2, retry_delay=0)
 
     assert wpproc.NUM_DISPLAYS == 2
     assert wpproc.RESOLUTION_ARRAY is resolutions
@@ -65,7 +65,7 @@ def test_detection_failure_preserves_globals(profile_modules, monkeypatch):
     assert wpproc.G_ACTIVE_DISPLAYSYSTEM is active
 
 
-def test_late_refresh_failure_preserves_globals(profile_modules, monkeypatch):
+def test_late_refresh_failure_preserves_globals(profile_modules, monkeypatch, tmp_path):
     _, wpproc = profile_modules
     resolutions = wpproc.RESOLUTION_ARRAY
     offsets = wpproc.DISPLAY_OFFSET_ARRAY
@@ -77,7 +77,7 @@ def test_late_refresh_failure_preserves_globals(profile_modules, monkeypatch):
     )
 
     with pytest.raises(ValueError, match="bad config"):
-        wpproc.refresh_display_data(retry_delay=0)
+        wpproc.refresh_display_data(tmp_path, retry_delay=0)
 
     assert wpproc.NUM_DISPLAYS == 2
     assert wpproc.RESOLUTION_ARRAY is resolutions
@@ -85,7 +85,7 @@ def test_late_refresh_failure_preserves_globals(profile_modules, monkeypatch):
     assert wpproc.G_ACTIVE_DISPLAYSYSTEM is active
 
 
-def test_direct_display_system_failure_preserves_globals(profile_modules, monkeypatch):
+def test_direct_display_system_failure_preserves_globals(profile_modules, monkeypatch, tmp_path):
     _, wpproc = profile_modules
     resolutions = wpproc.RESOLUTION_ARRAY
     offsets = wpproc.DISPLAY_OFFSET_ARRAY
@@ -95,34 +95,34 @@ def test_direct_display_system_failure_preserves_globals(profile_modules, monkey
     )
 
     with pytest.raises(ValueError, match="bad config"):
-        wpproc.DisplaySystem(retry_delay=0)
+        wpproc.DisplaySystem(tmp_path, retry_delay=0)
 
     assert wpproc.NUM_DISPLAYS == 2
     assert wpproc.RESOLUTION_ARRAY is resolutions
     assert wpproc.DISPLAY_OFFSET_ARRAY is offsets
 
 
-def test_direct_display_system_success_publishes_active_generation(profile_modules, monkeypatch):
+def test_direct_display_system_success_publishes_active_generation(profile_modules, monkeypatch, tmp_path):
     _, wpproc = profile_modules
     monkeypatch.setattr(wpproc, "get_monitors", lambda: [monitor(2560, 1440)])
     monkeypatch.setattr(wpproc.DisplaySystem, "load_system", lambda _self: None)
     monkeypatch.setattr(wpproc.DisplaySystem, "load_perspectives", lambda _self: None)
 
-    display_system = wpproc.DisplaySystem(retry_delay=0)
+    display_system = wpproc.DisplaySystem(tmp_path, retry_delay=0)
 
     assert display_system is wpproc.G_ACTIVE_DISPLAYSYSTEM
     assert wpproc.NUM_DISPLAYS == 1
     assert wpproc.RESOLUTION_ARRAY == [(2560, 1440)]
 
 
-def test_successful_refresh_commits_coherent_state(profile_modules, monkeypatch):
+def test_successful_refresh_commits_coherent_state(profile_modules, monkeypatch, tmp_path):
     _, wpproc = profile_modules
     monitors = [monitor(1280, 1024, x=0), monitor(1920, 1080, x=-1920)]
     monkeypatch.setattr(wpproc, "get_monitors", lambda: monitors)
     monkeypatch.setattr(wpproc.DisplaySystem, "load_system", lambda _self: None)
     monkeypatch.setattr(wpproc.DisplaySystem, "load_perspectives", lambda _self: None)
 
-    display_system = wpproc.refresh_display_data(retry_delay=0)
+    display_system = wpproc.refresh_display_data(tmp_path, retry_delay=0)
 
     assert display_system is wpproc.G_ACTIVE_DISPLAYSYSTEM
     assert wpproc.NUM_DISPLAYS == 2
@@ -130,7 +130,7 @@ def test_successful_refresh_commits_coherent_state(profile_modules, monkeypatch)
     assert wpproc.DISPLAY_OFFSET_ARRAY == [(0, 0), (1920, 0)]
 
 
-def test_refresh_waits_for_active_render(profile_modules, monkeypatch):
+def test_refresh_waits_for_active_render(profile_modules, monkeypatch, app_paths):
     _, wpproc = profile_modules
     render_started = Event()
     release_render = Event()
@@ -144,12 +144,12 @@ def test_refresh_waits_for_active_render(profile_modules, monkeypatch):
         def has_valid_selection():
             return True
 
-    def render(_profile, _force):
+    def render(_profile, _force, **_kwargs):
         render_started.set()
         release_render.wait(timeout=1)
 
     monkeypatch.setattr(wpproc, "span_single_image_simple", render)
-    render_thread = wpproc.change_wallpaper_job(Profile())
+    render_thread = wpproc.change_wallpaper_job(Profile(), app_paths)
     assert render_started.wait(timeout=1)
 
     publish_finished = Event()
@@ -168,7 +168,7 @@ def test_refresh_waits_for_active_render(profile_modules, monkeypatch):
     assert publish_finished.is_set()
 
 
-def test_wallpaper_changes_do_not_queue(profile_modules, monkeypatch):
+def test_wallpaper_changes_do_not_queue(profile_modules, monkeypatch, app_paths):
     _, wpproc = profile_modules
     render_started = Event()
     release_render = Event()
@@ -182,15 +182,15 @@ def test_wallpaper_changes_do_not_queue(profile_modules, monkeypatch):
         def has_valid_selection():
             return True
 
-    def render(_profile, _force):
+    def render(_profile, _force, **_kwargs):
         render_started.set()
         release_render.wait(timeout=1)
 
     monkeypatch.setattr(wpproc, "span_single_image_simple", render)
-    first = wpproc.change_wallpaper_job(Profile())
+    first = wpproc.change_wallpaper_job(Profile(), app_paths)
     assert render_started.wait(timeout=1)
 
-    assert wpproc.change_wallpaper_job(Profile(), advance=True, skip_if_busy=True) is None
+    assert wpproc.change_wallpaper_job(Profile(), app_paths, advance=True, skip_if_busy=True) is None
     release_render.set()
     first.join(timeout=1)
 

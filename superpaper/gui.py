@@ -4,6 +4,7 @@ New wallpaper configuration GUI for Superpaper.
 
 import copy
 import os
+import sys
 import tempfile
 import time
 from operator import itemgetter
@@ -25,7 +26,6 @@ from superpaper.configuration_dialogs import (
 )
 from superpaper.data import (
     CLIProfileData,
-    GeneralSettingsData,
     TempProfileData,
     delete_managed_profile,
     managed_profile_for_selection,
@@ -34,12 +34,10 @@ from superpaper.data import (
     save_managed_profile,
 )
 from superpaper.message_dialog import show_message_dialog
+from superpaper.paths import resource
 from superpaper.profile_id import ProfileId, ProfileIdError
-from superpaper.sp_paths import RESOURCES_PATH, TRAY_ICON
-from superpaper.wallpaper_processing import (
-    change_wallpaper_job,
-    resize_to_fill,
-)
+from superpaper.settings import read_settings
+from superpaper.wallpaper_processing import resize_to_fill
 
 
 class ConfigFrame(wx.Frame):
@@ -52,7 +50,7 @@ class ConfigFrame(wx.Frame):
         self.frame_sizer.Add(config_panel, 1, wx.EXPAND)
         self.SetAutoLayout(True)
         self.SetSizer(self.frame_sizer)
-        self.SetIcon(wx.Icon(TRAY_ICON, wx.BITMAP_TYPE_PNG))
+        self.SetIcon(wx.Icon(str(resource("superpaper.png")), wx.BITMAP_TYPE_PNG))
         self.Fit()
         self.Layout()
         self.Center()
@@ -67,6 +65,7 @@ class WallpaperSettingsPanel(wx.Panel):
         wx.Panel.__init__(self, parent)
         self.frame = parent
         self.parent_tray_obj = parent_tray_obj
+        self.paths = parent_tray_obj.paths
         self.current_profile_id = None
         self.expected_source_digest = None
         self.loaded_profile = None
@@ -81,7 +80,7 @@ class WallpaperSettingsPanel(wx.Panel):
         # bottom_half: bottom button row
         self.sizer_bottom_buttonrow = wx.BoxSizer(wx.HORIZONTAL)
 
-        self.defdir = GeneralSettingsData().browse_default_dir
+        self.defdir = read_settings(parent_tray_obj.settings_path, sys.platform).browse_default_dir
         # settings GUI properties
         self.tc_width = 160  # standard width for wx.TextCtrl etc elements.
         self.show_advanced_settings = False
@@ -107,7 +106,7 @@ class WallpaperSettingsPanel(wx.Panel):
         self._system_clean = None
         # This is staged dialog state. Do not publish it until Apply/Save; live
         # field edits must not alter the display system used by background jobs.
-        self.display_sys = wpproc.DisplaySystem(update_globals=False)
+        self.display_sys = wpproc.DisplaySystem(self.paths.config, update_globals=False)
         # self.wpprev_pnl = WallpaperPreviewPanel(self.frame, self.display_sys)
         self.wpprev_pnl = WallpaperPreviewPanel(self, self.display_sys)
         self.sizer_top_half.Add(self.wpprev_pnl, 1, wx.CENTER | wx.EXPAND, 5)
@@ -1291,7 +1290,7 @@ class WallpaperSettingsPanel(wx.Panel):
             groups = self.read_spangroups()
             if groups is not None:
                 num_groups = len(groups.keys())
-        dlg = BrowsePaths(self, multiple_image_area, self.defdir, num_groups)
+        dlg = BrowsePaths(self, multiple_image_area, self.defdir, self.parent_tray_obj.settings_path, num_groups)
         res = dlg.ShowModal()
         if res == wx.ID_OK:
             path_list_data = dlg.path_list_data
@@ -1332,7 +1331,7 @@ class WallpaperSettingsPanel(wx.Panel):
         if name and name != "Create a new profile":
             profile = self.parent_tray_obj.get_profile_by_name(name)
             if profile is None:
-                profile = open_profile(name)
+                profile = open_profile(self.paths, name)
             if profile is not None:
                 self.populate_fields(profile)
                 return
@@ -1347,7 +1346,7 @@ class WallpaperSettingsPanel(wx.Panel):
         profile are left untouched. Use Save to persist the changes.
         """
         tmp_profile, _groups = self._collect_temp_profile(resolve_selection=True)
-        if not tmp_profile.test_save(managed=False):
+        if not tmp_profile.test_save():
             sp_logging.G_LOGGER.info("onApply: validation failed, nothing applied.")
             return
         busy = wx.BusyCursor()
@@ -1365,7 +1364,9 @@ class WallpaperSettingsPanel(wx.Panel):
             # display settings — bezels, sizes, positions — are reflected. This
             # deliberately does NOT reload from disk (refresh_display_data), which
             # lets the user test system tweaks via Apply before committing them.
-            thrd = change_wallpaper_job(preview_profile, force=True, display_system=copy.deepcopy(self.display_sys))
+            thrd = self.parent_tray_obj.change_wallpaper(
+                preview_profile, force=True, display_system=copy.deepcopy(self.display_sys)
+            )
             # Pump the event loop while rendering so the GUI stays responsive.
             while thrd is not None and thrd.is_alive():
                 wx.YieldIfNeeded()
@@ -1554,7 +1555,7 @@ class WallpaperSettingsPanel(wx.Panel):
 
         # test collected data and save if it is valid, otherwise pass
         current_profile_id = self.current_profile_id
-        if tmp_profile.test_save(current_profile_id=current_profile_id):
+        if tmp_profile.test_save(profiles_dir=self.paths.profiles, current_profile_id=current_profile_id):
             old_profile_binding = self.loaded_profile.hk_binding if self.loaded_profile is not None else None
             active = self.parent_tray_obj.active_profile
             saving_active_profile = (
@@ -1562,6 +1563,7 @@ class WallpaperSettingsPanel(wx.Panel):
             )
             try:
                 saved_file = save_managed_profile(
+                    self.paths,
                     tmp_profile,
                     current_profile_id=current_profile_id,
                     expected_source_digest=self.expected_source_digest,
@@ -1584,7 +1586,7 @@ class WallpaperSettingsPanel(wx.Panel):
             self.choice_profiles.SetSelection(self.choice_profiles.FindString(tmp_profile.name))
             # Update wallpaper preview from selected profile. The profile's
             # persistent selection (if any) is what next_wallpaper_files returns.
-            saved_profile = open_profile(ProfileId.parse(tmp_profile.name))
+            saved_profile = open_profile(self.paths, ProfileId.parse(tmp_profile.name))
             if saved_profile is None:
                 show_message_dialog("The saved profile could not be reloaded.", "Error")
                 del busy
@@ -1675,7 +1677,7 @@ class WallpaperSettingsPanel(wx.Panel):
         result = dlg.ShowModal()
         if result == wx.ID_YES:
             try:
-                delete_managed_profile(profile)
+                delete_managed_profile(self.paths, profile)
             except (OSError, ValueError) as error:
                 show_message_dialog(str(error), "Error")
                 return
@@ -1696,7 +1698,7 @@ class WallpaperSettingsPanel(wx.Panel):
     def onAlignTest(self, event):
         """Align test, takes alignment settings from open profile and sets a test image wp."""
         # Use the settings currently written out in the fields!
-        testimage = [os.path.join(RESOURCES_PATH, "test.png")]
+        testimage = [str(resource("test.png"))]
         if not os.path.isfile(testimage[0]):
             msg = f"Test image not found in {testimage}."
             show_message_dialog(msg, "Error")
@@ -1725,11 +1727,11 @@ class WallpaperSettingsPanel(wx.Panel):
         busy = wx.BusyCursor()
 
         # Use the simplified CLI profile class
-        wpproc.refresh_display_data()
+        wpproc.refresh_display_data(self.paths.config)
         profile = CLIProfileData(
             testimage, advanced=True, perspective=perspective, spangroups=None, offsets=flat_offsets
         )
-        thrd = change_wallpaper_job(profile, force=True)
+        thrd = self.parent_tray_obj.change_wallpaper(profile, force=True)
         # Pump the event loop while rendering so the GUI stays responsive
         # instead of freezing.
         while thrd is not None and thrd.is_alive():
@@ -1765,7 +1767,7 @@ class WallpaperSettingsPanel(wx.Panel):
 
     def onHelp(self, event):
         """Open help dialog."""
-        HelpFrame(self)
+        HelpFrame(self.parent_tray_obj.settings_path, self)
 
     def onHelpHotkey(self, evt):
         """Popup hotkey help."""
@@ -2769,8 +2771,8 @@ class WallpaperPreviewPanel(wx.Panel):
 
     def create_bezel_buttons(self):
         # load icons into bitmaps
-        rb_png = os.path.join(RESOURCES_PATH, "icons8-merge-vertical-96.png")
-        bb_png = os.path.join(RESOURCES_PATH, "icons8-merge-horizontal-96.png")
+        rb_png = str(resource("icons8-merge-vertical-96.png"))
+        bb_png = str(resource("icons8-merge-horizontal-96.png"))
         rb_img = wx.Image(rb_png, type=wx.BITMAP_TYPE_ANY)
         bb_img = wx.Image(bb_png, type=wx.BITMAP_TYPE_ANY)
         rb_bmp = rb_img.Scale(20, 20).Resize(wx.Size(20, 20), wx.Point((0, 0))).ConvertToBitmap()

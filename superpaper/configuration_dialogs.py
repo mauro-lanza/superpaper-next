@@ -3,20 +3,19 @@ GUI dialogs for Superpaper.
 """
 
 import os
+import sys
 import time
+from dataclasses import replace
 
 import wx  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-import]
 import wx.adv  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-import]
 
 import superpaper.perspective as persp
 import superpaper.wallpaper_processing as wpproc
-from superpaper.data import (
-    CLIProfileData,
-    GeneralSettingsData,
-)
+from superpaper.data import CLIProfileData
 from superpaper.message_dialog import show_message_dialog
-from superpaper.sp_paths import RESOURCES_PATH, TRAY_ICON
-from superpaper.wallpaper_processing import change_wallpaper_job
+from superpaper.paths import resource
+from superpaper.settings import read_settings, write_settings
 
 
 def source_icon(path, size):
@@ -50,7 +49,7 @@ def source_icon(path, size):
 class BrowsePaths(wx.Dialog):
     """Path picker dialog class."""
 
-    def __init__(self, parent, use_multi_image, defdir, num_span_groups=None):
+    def __init__(self, parent, use_multi_image, defdir, settings_path, num_span_groups=None):
         wx.Dialog.__init__(
             self,
             parent,
@@ -79,6 +78,7 @@ class BrowsePaths(wx.Dialog):
         sizer_buttons = wx.BoxSizer(wx.HORIZONTAL)
 
         self.defdir = defdir
+        self.settings_path = settings_path  # where the default directory is remembered
         self.dir3 = wx.GenericDirCtrl(
             self,
             -1,
@@ -228,17 +228,17 @@ class BrowsePaths(wx.Dialog):
         sel_path = self.dir3.GetPath()
         if os.path.isdir(sel_path):
             self.defdir = sel_path
-            current_settings = GeneralSettingsData()
-            current_settings.browse_default_dir = self.defdir.strip()
-            current_settings.save_settings()
+            self._remember_default_dir(self.defdir.strip())
         else:
             pass
 
     def onClrDefDir(self, event):
         self.defdir = ""
-        current_settings = GeneralSettingsData()
-        current_settings.browse_default_dir = ""
-        current_settings.save_settings()
+        self._remember_default_dir("")
+
+    def _remember_default_dir(self, directory):
+        settings = read_settings(self.settings_path, sys.platform)
+        write_settings(self.settings_path, replace(settings, browse_default_dir=directory))
 
     def onCheckboxShowHidden(self, event):
         self.dir3.ShowHidden(self.cb_showhidden.GetValue())
@@ -265,7 +265,7 @@ class DisplayPositionEntry(wx.Frame):
     def __init__(self, parent, dragged_positions=False):
         wx.Frame.__init__(self, parent.frame, -1, "Enter display positions")
         self.ToggleWindowStyle(wx.STAY_ON_TOP)
-        self.SetIcon(wx.Icon(TRAY_ICON, wx.BITMAP_TYPE_PNG))
+        self.SetIcon(wx.Icon(str(resource("superpaper.png")), wx.BITMAP_TYPE_PNG))
         self.Bind(wx.EVT_CLOSE, self.OnClose)
 
         self.tc_width = 100
@@ -585,7 +585,7 @@ class PerspectiveConfig(wx.Dialog):
         self.persp_dict = self.display_sys.perspective_dict
         self.test_image = None
         self.help_bmp = wx.ArtProvider.GetBitmap(wx.ART_QUESTION, wx.ART_BUTTON, wx.Size(20, 20))
-        self.warn_large_img = GeneralSettingsData().warn_large_img
+        self.warn_large_img = read_settings(parent.parent_tray_obj.settings_path, sys.platform).warn_large_img
 
         sizer_main = wx.BoxSizer(wx.VERTICAL)
 
@@ -1070,7 +1070,7 @@ class PerspectiveConfig(wx.Dialog):
         if image:
             testimage = [os.path.realpath(image)]
         else:
-            testimage = [os.path.join(RESOURCES_PATH, "test.png")]
+            testimage = [str(resource("test.png"))]
         if not os.path.isfile(testimage[0]):
             msg = f"Test image not found in {testimage}."
             show_message_dialog(msg, "Error")
@@ -1104,11 +1104,11 @@ class PerspectiveConfig(wx.Dialog):
 
         wx.Yield()
         # Use the simplified CLI profile class
-        wpproc.refresh_display_data()
+        wpproc.refresh_display_data(self.frame.paths.config)
         profile = CLIProfileData(
             testimage, advanced=True, perspective=perspective, spangroups=None, offsets=flat_offsets
         )
-        thrd = change_wallpaper_job(profile, force=True)
+        thrd = self.frame.parent_tray_obj.change_wallpaper(profile, force=True)
         while thrd is not None and thrd.is_alive():
             time.sleep(0.5)
         del busy
@@ -1315,7 +1315,7 @@ class SettingsPanel(wx.Panel):
 
     def update_fields(self):
         """Updates dialog field contents."""
-        g_settings = GeneralSettingsData()
+        g_settings = read_settings(self.parent_tray_obj.settings_path, sys.platform)
         self.cb_logging.SetValue(g_settings.logging)
         self.cb_usehotkeys.SetValue(g_settings.use_hotkeys)
         self.cb_warn_large.SetValue(g_settings.warn_large_img)
@@ -1325,28 +1325,23 @@ class SettingsPanel(wx.Panel):
 
     def show_hkbinding(self, hktuple):
         """Formats hotkey tuple as a readable string."""
-        hkstring = "+".join(hktuple)
-        return hkstring
+        return "+".join(hktuple) if hktuple else ""
 
     def onSave(self, event):
         """Saves settings to file."""
-        current_settings = GeneralSettingsData()
-
-        current_settings.logging = self.cb_logging.GetValue()
-        current_settings.use_hotkeys = self.cb_usehotkeys.GetValue()
-        current_settings.warn_large_img = self.cb_warn_large.GetValue()
-        if self.tc_hk_next.GetLineText(0):
-            current_settings.hk_binding_next = tuple(self.tc_hk_next.GetLineText(0).strip().split("+"))
-        else:
-            current_settings.hk_binding_next = None
-        if self.tc_hk_pause.GetLineText(0):
-            current_settings.hk_binding_pause = tuple(self.tc_hk_pause.GetLineText(0).strip().split("+"))
-        else:
-            current_settings.hk_binding_pause = None
-
-        current_settings.set_command = self.tc_setcmd.GetLineText(0).strip()
-
-        current_settings.save_settings()
+        settings_path = self.parent_tray_obj.settings_path
+        hk_next = self.tc_hk_next.GetLineText(0)
+        hk_pause = self.tc_hk_pause.GetLineText(0)
+        settings = replace(
+            read_settings(settings_path, sys.platform),
+            logging=self.cb_logging.GetValue(),
+            use_hotkeys=self.cb_usehotkeys.GetValue(),
+            warn_large_img=self.cb_warn_large.GetValue(),
+            hk_binding_next=tuple(hk_next.strip().split("+")) if hk_next else None,
+            hk_binding_pause=tuple(hk_pause.strip().split("+")) if hk_pause else None,
+            set_command=self.tc_setcmd.GetLineText(0).strip(),
+        )
+        write_settings(settings_path, settings)
         # after saving file apply in tray object
         self.parent_tray_obj.read_general_settings()
 
@@ -1358,14 +1353,14 @@ class SettingsPanel(wx.Panel):
 class HelpFrame(wx.Frame):
     """Help dialog frame."""
 
-    def __init__(self, parent=None):
+    def __init__(self, settings_path, parent=None):
         wx.Frame.__init__(self, parent=parent, title="Superpaper Help")
         self.frame_sizer = wx.BoxSizer(wx.VERTICAL)
-        help_panel = HelpPanel(self)
+        help_panel = HelpPanel(self, settings_path)
         self.frame_sizer.Add(help_panel, 1, wx.EXPAND)
         self.SetAutoLayout(True)
         self.SetSizer(self.frame_sizer)
-        self.SetIcon(wx.Icon(TRAY_ICON, wx.BITMAP_TYPE_PNG))
+        self.SetIcon(wx.Icon(str(resource("superpaper.png")), wx.BITMAP_TYPE_PNG))
         self.Fit()
         self.Layout()
         self.Center()
@@ -1375,15 +1370,15 @@ class HelpFrame(wx.Frame):
 class HelpPanel(wx.Panel):
     """Help dialog contents."""
 
-    def __init__(self, parent):
+    def __init__(self, parent, settings_path):
         wx.Panel.__init__(self, parent)
         self.frame = parent
+        self.settings_path = settings_path
         self.sizer_main = wx.BoxSizer(wx.VERTICAL)
         self.sizer_helpcontent = wx.BoxSizer(wx.VERTICAL)
         self.sizer_buttons = wx.BoxSizer(wx.HORIZONTAL)
 
-        current_settings = GeneralSettingsData()
-        show_help = current_settings.show_help
+        show_help = read_settings(settings_path, sys.platform).show_help
 
         # st_show_at_start = wx.StaticText(self, -1, "Show this help at start")
         self.cb_show_at_start = wx.CheckBox(self, -1, "Show this help at start")
@@ -1448,18 +1443,10 @@ Tips:
 
     def onClose(self, event):
         """Closes help dialog. Saves checkbox state as needed."""
-        if self.cb_show_at_start.GetValue() is True:
-            current_settings = GeneralSettingsData()
-            if current_settings.show_help is False:
-                current_settings.show_help = True
-                current_settings.save_settings()
-        else:
-            # Save that the help at start is not wanted.
-            current_settings = GeneralSettingsData()
-            show_help = current_settings.show_help
-            if show_help:
-                current_settings.show_help = False
-                current_settings.save_settings()
+        show_help = self.cb_show_at_start.GetValue()
+        settings = read_settings(self.settings_path, sys.platform)
+        if settings.show_help != show_help:
+            write_settings(self.settings_path, replace(settings, show_help=show_help))
         self.frame.Close(True)
 
 

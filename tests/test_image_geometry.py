@@ -26,7 +26,7 @@ def test_resize_to_fill_alignment(profile_modules):
     assert left.getpixel((0, 0))[0] < right.getpixel((0, 0))[0]
 
 
-def test_simple_renderer_ignores_empty_selection(profile_modules, monkeypatch):
+def test_simple_renderer_ignores_empty_selection(profile_modules, monkeypatch, app_paths):
     _, wpproc = profile_modules
 
     class EmptyProfile:
@@ -44,5 +44,5 @@ def test_simple_renderer_ignores_empty_selection(profile_modules, monkeypatch):
 
     monkeypatch.setattr(wpproc, "set_wallpaper", record_setter)
 
-    assert wpproc.span_single_image_simple(EmptyProfile(), force=True) is None
+    assert wpproc.span_single_image_simple(EmptyProfile(), force=True, paths=app_paths) is None
     assert setter_called is False

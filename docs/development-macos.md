@@ -31,9 +31,10 @@ in wxPython, which installs from PyPI on macOS.
   uv pip install pyobjc
   ```
 
-- **Config is written into the installed package directory.** `sp_paths.py`
-  falls through to the portable (executable-relative) branch on macOS rather
-  than using `~/Library/Application Support`.
+- **Config is written into the installed package directory.** `paths.py`
+  uses the portable (executable-relative) location on macOS rather than
+  `~/Library/Application Support`. To keep the files elsewhere, set
+  `SUPERPAPER_CONFIG_HOME` and `SUPERPAPER_CACHE_HOME` to the directories to use.
 
 Both are tracked under #113.
 
