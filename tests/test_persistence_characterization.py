@@ -1,5 +1,8 @@
 import os
 
+import pytest
+
+from superpaper.settings import read_settings, write_settings
 from tests.conftest import write_profile
 
 
@@ -92,8 +95,7 @@ def test_selection_rewrite_preserves_other_profile_lines(profile_modules, tmp_pa
     )
 
 
-def test_general_settings_round_trip_is_canonical(profile_modules, monkeypatch, tmp_path):
-    data, _ = profile_modules
+def test_general_settings_round_trip_is_canonical(tmp_path):
     settings_path = tmp_path / "general_settings"
     settings_path.write_text(
         "logging=FALSE\n"
@@ -107,10 +109,9 @@ def test_general_settings_round_trip_is_canonical(profile_modules, monkeypatch, 
         "unknown_setting=retired\n",
         encoding="utf-8",
     )
-    monkeypatch.setattr(data, "CONFIG_PATH", str(tmp_path))
 
-    settings = data.GeneralSettingsData()
-    settings.save_settings()
+    settings = read_settings(settings_path, "linux")
+    write_settings(settings_path, settings)
 
     assert settings.set_command == "env FOO=bar setter --arg=a=b {image}"
     expected = (
@@ -123,7 +124,7 @@ def test_general_settings_round_trip_is_canonical(profile_modules, monkeypatch, 
         "browse_default_dir=/tmp/wallpapers\n"
         "warn_large_img=false"
     )
-    assert settings_path.read_bytes() == platform_bytes(expected)
+    assert settings_path.read_bytes() == expected.encode()
 
 
 def test_profile_read_does_not_modify_bytes(profile_modules, tmp_path):
@@ -159,3 +160,36 @@ def test_identical_sources_are_written_with_their_own_display_numbers(profile_mo
     profile.paths_array = ["/images", "/images"]
 
     assert profile.serialize().splitlines()[-2:] == ["display0paths=/images", "display1paths=/images"]
+
+
+# Profiles from before display layouts existed corrected positions with ppi=,
+# diagonal_inches=, bezels= and offsets=. Parsing turns them into per-display pixel
+# offsets for the displays present at the time; for two displays of 1920x1080 and
+# 1280x1024 (profile_modules) these are the offsets that reach the renderer.
+@pytest.mark.parametrize(
+    ("lines", "ppimode", "ppi_array", "manual_offsets"),
+    [
+        ("", False, [100, 100], [(0, 0), (0, 0)]),
+        ("offsets=10,20;30,-40", True, [100, 100], [(10, 20), (30, -40)]),
+        ("offsets=10,20", True, [100, 100], [(10, 20), (0, 0)]),
+        ("offsets=10,x;3", True, [100, 100], [(0, 0), (0, 0)]),
+        ("bezels=5.0", False, [100, 100], [(0, 0), (0, 0)]),
+        ("ppi=100;80", True, [100, 80], [(0, 0), (0, 0)]),
+        ("ppi=100;80\nbezels=5.0", True, [100, 80], [(0, 0), (20, 0)]),
+        ("ppi=100;80\nbezels=5.0\noffsets=10,20;30,-40", True, [100, 80], [(10, 20), (50, -40)]),
+        ("ppi=100;80\nbezels=5.0;7.5;2.0", True, [100, 80], [(0, 0), (20, 0)]),
+        ("diagonal_inches=24.0;19.0\nbezels=5.0", True, [91.7877987534291, 86.27367393593732], [(0, 0), (18, 0)]),
+        ("diagonal_inches=24.0\nbezels=5.0", False, [100, 100], [(0, 0), (0, 0)]),
+        ("ppi=0;0\nbezels=5.0", True, [0, 0], [(0, 0), (0, 0)]),
+    ],
+)
+def test_legacy_corrections_become_pixel_offsets(profile_modules, tmp_path, lines, ppimode, ppi_array, manual_offsets):
+    data, _ = profile_modules
+    path = tmp_path / "legacy.profile"
+    path.write_text(f"name=legacy\nspanmode=advanced\n{lines}\ndisplay0paths={tmp_path}\n", encoding="utf-8")
+
+    profile = data.ProfileData(path, persist_selection=False)
+
+    assert profile.ppimode is ppimode
+    assert profile.ppi_array == ppi_array
+    assert profile.manual_offsets == manual_offsets

@@ -17,6 +17,7 @@ import sys
 import time
 import traceback
 from operator import itemgetter
+from pathlib import Path
 from threading import Lock, Thread, Timer
 from typing import Any
 
@@ -26,7 +27,7 @@ from screeninfo import get_monitors
 import superpaper.perspective as persp
 import superpaper.sp_logging as sp_logging
 from superpaper.message_dialog import show_message_dialog
-from superpaper.sp_paths import CONFIG_PATH, TEMP_PATH
+from superpaper.paths import AppPaths
 from superpaper.sp_platform import IS_LINUX, IS_MACOS, IS_WINDOWS, host_spawn_env
 
 # Disables PIL.Image.DecompressionBombError.
@@ -73,7 +74,6 @@ G_ACTIVE_PROFILE = None
 G_WALLPAPER_CHANGE_LOCK = Lock()
 G_WALLPAPER_CHANGE_PENDING = Lock()
 G_SUPPORTED_IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".bmp", ".gif", ".tiff", ".webp")
-G_SET_COMMAND_STRING: str = ""
 
 
 def is_supported_image(filename: str) -> bool:
@@ -279,7 +279,9 @@ class DisplaySystem:
     in advanced mode.
     """
 
-    def __init__(self, *, max_attempts=3, retry_delay=0.25, update_globals=True):
+    def __init__(self, config_dir: Path, *, max_attempts=3, retry_delay=0.25, update_globals=True):
+        # display_systems.dat and the .persp files that hold the user's layout live here.
+        self.config_dir = config_dir
         self.disp_list = get_display_data(
             max_attempts=max_attempts,
             retry_delay=retry_delay,
@@ -557,7 +559,7 @@ class DisplaySystem:
 
     def save_system(self):
         """Save the current DisplaySystem instance user given data
-        in a central file (CONFIG_PATH/display_systems.dat).
+        in a central file (config_dir/display_systems.dat).
 
         Data is saved with a DisplaySystem specific has as the key,
         and data saved include:
@@ -566,7 +568,7 @@ class DisplaySystem:
             - display diagonal sizes if any of them are manually changed
             - rotation angles of displays for perspective correction
         """
-        archive_file = os.path.join(CONFIG_PATH, "display_systems.dat")
+        archive_file = os.path.join(self.config_dir, "display_systems.dat")
         instance_key = str(hash(self))
 
         # collect data for saving
@@ -612,13 +614,13 @@ class DisplaySystem:
             config.write(configfile)
 
         # Once profile is saved make it available for wallpaper setter
-        refresh_display_data()
+        refresh_display_data(self.config_dir)
 
     def load_system(self):
         """Try to load system data from database based on initialization data,
         i.e. the Display list. If no pre-existing system is found, try to guess
         the system topology and update disp_list"""
-        archive_file = os.path.join(CONFIG_PATH, "display_systems.dat")
+        archive_file = os.path.join(self.config_dir, "display_systems.dat")
         instance_key = str(hash(self))
         found_match = False
 
@@ -657,11 +659,14 @@ class DisplaySystem:
                 use_perspective,
                 def_perspective,
             )
-            self.update_bezels(bezel_mms)
-            self.update_ppinorm_offsets(ppi_norm_offsets)  # Bezels & user diagonals always included.
+            # Diagonal overrides first: the bezels were saved in millimetres using the
+            # pixel densities they imply, so converting with the detected densities would
+            # make every save drift the bezels a little further.
             if diagonal_inches:
                 sp_logging.G_LOGGER.info("Updating diagonal_inches")
                 self.update_display_diags(diagonal_inches, reset_offsets=False)
+            self.update_bezels(bezel_mms)
+            self.update_ppinorm_offsets(ppi_norm_offsets)  # Bezels & user diagonals always included.
             self.use_perspective = use_perspective
             if def_perspective == "None":
                 self.default_perspective = None
@@ -711,7 +716,7 @@ class DisplaySystem:
     def save_perspectives(self):
         """Save perspective data dict to file."""
         instance_key = str(hash(self))
-        persp_file = os.path.join(CONFIG_PATH, instance_key + ".persp")
+        persp_file = os.path.join(self.config_dir, instance_key + ".persp")
 
         # load previous configs if file is found
         config = configparser.ConfigParser()
@@ -735,7 +740,7 @@ class DisplaySystem:
     def load_perspectives(self):
         """Load perspective data dict from file."""
         instance_key = str(hash(self))
-        persp_file = os.path.join(CONFIG_PATH, instance_key + ".persp")
+        persp_file = os.path.join(self.config_dir, instance_key + ".persp")
         # check if file exists and load saved perspective dicts
         if os.path.exists(persp_file):
             config = configparser.ConfigParser()
@@ -902,9 +907,9 @@ def get_display_data(*, max_attempts=3, retry_delay=0.25, update_globals=False):
     return display_list
 
 
-def refresh_display_data(*, max_attempts=3, retry_delay=0.25):
+def refresh_display_data(config_dir: Path, *, max_attempts=3, retry_delay=0.25):
     """Build and atomically publish a complete display-system generation."""
-    candidate = DisplaySystem(max_attempts=max_attempts, retry_delay=retry_delay, update_globals=False)
+    candidate = DisplaySystem(config_dir, max_attempts=max_attempts, retry_delay=retry_delay, update_globals=False)
     publish_display_system(candidate)
     return candidate
 
@@ -1032,7 +1037,7 @@ def compute_working_canvas(crop_tuples, bezels=None):
     return canvas_size
 
 
-def alternating_outputfile(prof_name):
+def alternating_outputfile(cache_dir: Path, prof_name):
     """Return alternating output filename and old filename.
 
     This is done so that the cache doesn't become a huge dump of unused files,
@@ -1043,16 +1048,16 @@ def alternating_outputfile(prof_name):
         ftype = "jpg"
     else:
         ftype = "png"
-    outputfile = os.path.join(TEMP_PATH, prof_name + "-a." + ftype)
+    outputfile = os.path.join(cache_dir, prof_name + "-a." + ftype)
     if os.path.isfile(outputfile):
         outputfile_old = outputfile
-        outputfile = os.path.join(TEMP_PATH, prof_name + "-b." + ftype)
+        outputfile = os.path.join(cache_dir, prof_name + "-b." + ftype)
     else:
-        outputfile_old = os.path.join(TEMP_PATH, prof_name + "-b." + ftype)
+        outputfile_old = os.path.join(cache_dir, prof_name + "-b." + ftype)
     return (outputfile, outputfile_old)
 
 
-def span_single_image_simple(profile, force):
+def span_single_image_simple(profile, force, *, paths: AppPaths, set_command=""):
     """
     Spans a single image across all monitors. No corrections.
 
@@ -1079,10 +1084,10 @@ def span_single_image_simple(profile, force):
     canvas_tuple = tuple(compute_canvas(RESOLUTION_ARRAY, DISPLAY_OFFSET_ARRAY))
     img_resize = resize_to_fill(img, canvas_tuple, zoom=profile.zoom, offset=profile.offsets)
 
-    outputfile, outputfile_old = alternating_outputfile(profile.name)
+    outputfile, outputfile_old = alternating_outputfile(paths.cache, profile.name)
     img_resize.save(outputfile, quality=95)  # set quality if jpg is used, png unaffected
     if profile.name == G_ACTIVE_PROFILE or force:
-        set_wallpaper(outputfile, force, [file])
+        set_wallpaper(outputfile, force, [file], paths=paths, set_command=set_command)
     if os.path.exists(outputfile_old):
         os.remove(outputfile_old)
     return 0
@@ -1122,7 +1127,7 @@ def translate_to_group_coordinates(group_crop_list):
 
 # Take pixel densities of displays into account to have the image match
 # physically between displays.
-def span_single_image_advanced(profile, force):
+def span_single_image_advanced(profile, force, *, paths: AppPaths, set_command=""):
     """
     Applies wallpaper using PPI, bezel, offset corrections.
 
@@ -1233,16 +1238,16 @@ def span_single_image_advanced(profile, force):
         combined_image.paste(cropped_images[crp_id], DISPLAY_OFFSET_ARRAY[crp_id])
 
     # Saving combined image
-    outputfile, outputfile_old = alternating_outputfile(profile.name)
+    outputfile, outputfile_old = alternating_outputfile(paths.cache, profile.name)
     combined_image.save(outputfile, quality=95)  # set quality if jpg is used, png unaffected
     if profile.name == G_ACTIVE_PROFILE or force:
-        set_wallpaper(outputfile, force, files)
+        set_wallpaper(outputfile, force, files, paths=paths, set_command=set_command)
     if os.path.exists(outputfile_old):
         os.remove(outputfile_old)
     return 0
 
 
-def set_multi_image_wallpaper(profile, force):
+def set_multi_image_wallpaper(profile, force, *, paths: AppPaths, set_command=""):
     """Sets a distinct image on each monitor.
 
     Since most platforms only support setting a single image
@@ -1278,10 +1283,10 @@ def set_multi_image_wallpaper(profile, force):
     for i in range(len(files)):
         combined_image.paste(img_resized[i], DISPLAY_OFFSET_ARRAY[i])
 
-    outputfile, outputfile_old = alternating_outputfile(profile.name)
+    outputfile, outputfile_old = alternating_outputfile(paths.cache, profile.name)
     combined_image.save(outputfile, quality=95)  # set quality if jpg is used, png unaffected
     if profile.name == G_ACTIVE_PROFILE or force:
-        set_wallpaper(outputfile, force, files)
+        set_wallpaper(outputfile, force, files, paths=paths, set_command=set_command)
     if os.path.exists(outputfile_old):
         os.remove(outputfile_old)
     return 0
@@ -1293,13 +1298,14 @@ def set_multi_image_wallpaper(profile, force):
 #         raise ctypes.WinError(ctypes.get_last_error())
 
 
-def set_wallpaper(outputfile, force=False, source_files=None):
+def set_wallpaper(outputfile, force=False, source_files=None, *, paths: AppPaths, set_command=""):
     """
     Master method to set the composed image as wallpaper.
 
     After the final background image is created, this method
     is called to communicate with the host system to set the
     desktop background. For Linux hosts there is a separate method.
+    ``set_command`` is the user's own setter command, if any (Linux only).
     """
     if IS_WINDOWS:
         set_wallpaper_win(outputfile)
@@ -1325,7 +1331,7 @@ def set_wallpaper(outputfile, force=False, source_files=None):
     #             sp_logging.G_LOGGER.info("SystemParametersInfo wallpaper set failed with \
     # spi_success: '%s'", spi_success)
     elif IS_LINUX:
-        set_wallpaper_linux(outputfile, force)
+        set_wallpaper_linux(outputfile, force, paths=paths, set_command=set_command)
     elif IS_MACOS:
         # script = """/usr/bin/osascript<<END
         #             tell application "Finder"
@@ -1336,7 +1342,7 @@ def set_wallpaper(outputfile, force=False, source_files=None):
         set_wallpaper_macos(outputfile, image_piece_list=None, force=force)
     else:
         sp_logging.G_LOGGER.info("Unknown platform: %s", sys.platform)
-    script_file = os.path.join(CONFIG_PATH, "run-after-wp-change.py")
+    script_file = os.path.join(paths.config, "run-after-wp-change.py")
     if os.path.isfile(script_file):
         # The script gets the wallpaper image, then each source image as its own argument.
         hook = ["python3", script_file, str(outputfile), *map(str, source_files or [])]
@@ -1403,7 +1409,7 @@ def set_wallpaper_macos(outputfile, image_piece_list=None, force=False):
         remove_old_temp_files(outputfile)
 
 
-def set_wallpaper_linux(outputfile, force=False):
+def set_wallpaper_linux(outputfile, force=False, *, paths: AppPaths, set_command=""):
     """
     Wallpaper setter for Linux hosts.
 
@@ -1413,11 +1419,11 @@ def set_wallpaper_linux(outputfile, force=False):
     desktop.
 
     On systems where the variable is set, a native way of setting the
-    wallpaper can be used. These are DE specific.
+    wallpaper can be used. These are DE specific. A ``set_command`` replaces
+    all of that.
     """
     sp_logging.G_LOGGER.info("set_wallpaper_linux: Starting for file: %s", outputfile)
     file = "file://" + outputfile
-    set_command = G_SET_COMMAND_STRING
     if sp_logging.DEBUG:
         sp_logging.G_LOGGER.info(file)
 
@@ -1495,7 +1501,7 @@ def set_wallpaper_linux(outputfile, force=False):
                     sys.exit(1)
         # elif desk_env in ["/usr/share/xsessions/plasma", "plasma"]:
         elif running_kde():
-            kdeplasma_actions(outputfile, force=force, profile_name=G_ACTIVE_PROFILE)
+            kdeplasma_actions(outputfile, force=force, profile_name=G_ACTIVE_PROFILE, paths=paths)
         elif "i3" in desk_env or desk_env == "/usr/share/xsessions/bspwm":
             subprocess.run(["feh", "--bg-scale", "--no-xinerama", outputfile], env=host_spawn_env())
         else:
@@ -1507,7 +1513,7 @@ settings file superpaper/general_settings. Exiting."
             sys.exit(1)
     else:
         if running_kde():
-            kdeplasma_actions(outputfile, force=force, profile_name=G_ACTIVE_PROFILE)
+            kdeplasma_actions(outputfile, force=force, profile_name=G_ACTIVE_PROFILE, paths=paths)
         else:
             sp_logging.G_LOGGER.info(
                 "DESKTOP_SESSION variable is empty, \
@@ -1516,7 +1522,7 @@ attempting to use feh to set the wallpaper."
             subprocess.run(["feh", "--bg-scale", "--no-xinerama", outputfile], env=host_spawn_env())
 
 
-def set_wallpaper_piecewise(image_piece_list):
+def set_wallpaper_piecewise(image_piece_list, *, paths: AppPaths):
     """
     Wallpaper setter that takes already cropped images and sets them
     directly to corresponding monitors on systems where wallpapers
@@ -1530,7 +1536,7 @@ def set_wallpaper_piecewise(image_piece_list):
     """
     if IS_LINUX:
         if running_kde():
-            kdeplasma_actions(None, image_piece_list, profile_name=G_ACTIVE_PROFILE)
+            kdeplasma_actions(None, image_piece_list, profile_name=G_ACTIVE_PROFILE, paths=paths)
         # desk_env = os.environ.get("DESKTOP_SESSION")
         # elif desk_env in ["xfce", "xubuntu", "ubuntustudio"]:
         # xfce_actions(None, image_piece_list)
@@ -1571,7 +1577,7 @@ def remove_old_temp_files(outputfile):
     This method looks for previous temp images and deletes them.
 
     Currently only used to delete the monitor specific crops that are
-    needed for KDE and XFCE.
+    needed for KDE and XFCE. They are kept beside ``outputfile``.
     """
     opbase = os.path.basename(outputfile)
     opname = os.path.splitext(opbase)[0]
@@ -1589,9 +1595,10 @@ def remove_old_temp_files(outputfile):
         match_string = match_string.strip()
         if sp_logging.DEBUG:
             sp_logging.G_LOGGER.info("Removing images matching with: '%s'", match_string)
-        for temp_file in os.listdir(TEMP_PATH):
+        cache_dir = os.path.dirname(outputfile)
+        for temp_file in os.listdir(cache_dir):
             if match_string in temp_file:
-                os.remove(os.path.join(TEMP_PATH, temp_file))
+                os.remove(os.path.join(cache_dir, temp_file))
 
 
 def _escape_js_string(s):
@@ -1687,9 +1694,9 @@ def get_kde_activity_mapping():
         return activity_map
 
 
-def kde_load_desktop_mapping_cache():
+def kde_load_desktop_mapping_cache(config_dir: Path):
     """Load cached desktop-to-activity mapping from file."""
-    cache_file = os.path.join(CONFIG_PATH, "kde_desktop_mapping.json")
+    cache_file = os.path.join(config_dir, "kde_desktop_mapping.json")
     try:
         if os.path.isfile(cache_file):
             with open(cache_file) as f:
@@ -1709,9 +1716,9 @@ def kde_load_desktop_mapping_cache():
     return {}
 
 
-def kde_save_desktop_mapping_cache(mapping):
+def kde_save_desktop_mapping_cache(config_dir: Path, mapping):
     """Save desktop-to-activity mapping to file."""
-    cache_file = os.path.join(CONFIG_PATH, "kde_desktop_mapping.json")
+    cache_file = os.path.join(config_dir, "kde_desktop_mapping.json")
     try:
         with open(cache_file, "w") as f:
             json.dump(mapping, f, indent=2)
@@ -1720,18 +1727,18 @@ def kde_save_desktop_mapping_cache(mapping):
         sp_logging.G_LOGGER.error("Failed to save desktop mapping cache: %s", e)
 
 
-def kde_get_desktop_to_activity_mapping():
+def kde_get_desktop_to_activity_mapping(config_dir: Path):
     """
     Query KDE to get which desktop containment belongs to which activity.
     Returns dict mapping desktop_id -> activity_id
 
     This function builds up knowledge progressively. Each time it's called,
     it knows for certain which desktops belong to the CURRENT activity,
-    and uses cached information for other activities.
+    and uses cached information (kept in ``config_dir``) for other activities.
     """
     try:
         # Load cached mapping
-        desktop_to_activity = kde_load_desktop_mapping_cache()
+        desktop_to_activity = kde_load_desktop_mapping_cache(config_dir)
 
         qdbus = _get_qdbus_cmd()
         if not qdbus:
@@ -1815,7 +1822,7 @@ print(result.join(';'));
 
         # Save updated mapping
         if mapping_updated:
-            kde_save_desktop_mapping_cache(desktop_to_activity)
+            kde_save_desktop_mapping_cache(config_dir, desktop_to_activity)
 
         sp_logging.G_LOGGER.info("Current activity: %s", current_activity_id)
         sp_logging.G_LOGGER.info("Active desktops: %s", active_desktop_ids)
@@ -1829,19 +1836,20 @@ print(result.join(';'));
         return desktop_to_activity
 
 
-def kde_set_activity_wallpapers(activity_wallpapers_map):
+def kde_set_activity_wallpapers(activity_wallpapers_map, config_dir: Path):
     """
     Set wallpapers for specific activities in KDE Plasma.
 
     Args:
         activity_wallpapers_map: dict mapping activity_id -> list of image file paths
+        config_dir: where the desktop-to-activity mapping is remembered
     """
     if not activity_wallpapers_map:
         sp_logging.G_LOGGER.info("No activity wallpapers to set")
         return
 
     # Get desktop-to-activity mapping
-    desktop_to_activity = kde_get_desktop_to_activity_mapping()
+    desktop_to_activity = kde_get_desktop_to_activity_mapping(config_dir)
     if not desktop_to_activity:
         sp_logging.G_LOGGER.error("Failed to get desktop-activity mapping, cannot set wallpapers")
         return
@@ -1956,7 +1964,7 @@ for(var idx = 0; idx < allDesktops.length; idx++) {
         sp_logging.G_LOGGER.error(traceback.format_exc())
 
 
-def kdeplasma_actions(outputfile, image_piece_list=None, force=False, profile_name=None):
+def kdeplasma_actions(outputfile, image_piece_list=None, force=False, profile_name=None, *, paths: AppPaths):
     """
     Sets the multi monitor wallpaper on KDE.
 
@@ -1999,13 +2007,13 @@ def kdeplasma_actions(outputfile, image_piece_list=None, force=False, profile_na
                 # Try to find existing temp files for a profile matching this activity name
                 matching_files = [
                     i
-                    for i in os.listdir(TEMP_PATH)
-                    if os.path.isfile(os.path.join(TEMP_PATH, i)) and i.startswith(act_name + "-") and "-crop-" in i
+                    for i in os.listdir(paths.cache)
+                    if os.path.isfile(os.path.join(paths.cache, i)) and i.startswith(act_name + "-") and "-crop-" in i
                 ]
 
                 if matching_files:
                     matching_files.sort()
-                    full_paths = [os.path.join(TEMP_PATH, f) for f in matching_files]
+                    full_paths = [os.path.join(paths.cache, f) for f in matching_files]
                     activity_wallpapers[act_id] = full_paths
                     sp_logging.G_LOGGER.info(
                         "Activity '%s' using cached wallpapers from profile '%s'",
@@ -2023,7 +2031,7 @@ def kdeplasma_actions(outputfile, image_piece_list=None, force=False, profile_na
 
         # Apply wallpapers to all activities at once
         if activity_wallpapers:
-            kde_set_activity_wallpapers(activity_wallpapers)
+            kde_set_activity_wallpapers(activity_wallpapers, paths.config)
 
             # Clean up old temp files
             if outputfile:
@@ -2176,7 +2184,7 @@ def xfce_actions(outputfile):
         remove_old_temp_files(outputfile)
 
 
-def _change_wallpaper(profile, force, advance, display_system=None):
+def _change_wallpaper(profile, force, advance, display_system, paths: AppPaths, set_command):
     """Resolve a selection and render it using already-locked display state."""
     global G_ACTIVE_DISPLAYSYSTEM, NUM_DISPLAYS, RESOLUTION_ARRAY, DISPLAY_OFFSET_ARRAY
     previous_display_system = G_ACTIVE_DISPLAYSYSTEM
@@ -2192,13 +2200,13 @@ def _change_wallpaper(profile, force, advance, display_system=None):
             sp_logging.G_LOGGER.error("Wallpaper change skipped: profile '%s' has no complete selection.", profile.name)
             return
         if profile.spanmode.startswith("single") and profile.ppimode is False:
-            span_single_image_simple(profile, force)
+            span_single_image_simple(profile, force, paths=paths, set_command=set_command)
         elif (profile.spanmode.startswith("single") and profile.ppimode is True) or profile.spanmode.startswith(
             "advanced"
         ):
-            span_single_image_advanced(profile, force)
+            span_single_image_advanced(profile, force, paths=paths, set_command=set_command)
         elif profile.spanmode.startswith("multi"):
-            set_multi_image_wallpaper(profile, force)
+            set_multi_image_wallpaper(profile, force, paths=paths, set_command=set_command)
         else:
             sp_logging.G_LOGGER.info("Unkown profile spanmode: %s", profile.spanmode)
     finally:
@@ -2208,12 +2216,23 @@ def _change_wallpaper(profile, force, advance, display_system=None):
         DISPLAY_OFFSET_ARRAY = previous_offsets
 
 
-def change_wallpaper_job(profile, force=False, advance=False, display_system=None, skip_if_busy=False):
+def change_wallpaper_job(
+    profile,
+    paths: AppPaths,
+    *,
+    set_command="",
+    force=False,
+    advance=False,
+    display_system=None,
+    skip_if_busy=False,
+):
     """Centralized wallpaper method that calls setter algorithm based on input prof settings.
     When force, skip the profile name check.
     When advance, cycle to the next image before rendering (slideshow / manual next).
     Otherwise the current persistent selection is rendered unchanged; if none has
     been established yet, the first image is picked once and saved as the selection.
+    The rendered image goes to ``paths.cache``; ``set_command`` is the user's own
+    wallpaper setter command, if any.
     """
     if not (
         profile.spanmode.startswith("single")
@@ -2234,7 +2253,7 @@ def change_wallpaper_job(profile, force=False, advance=False, display_system=Non
             G_WALLPAPER_CHANGE_PENDING.acquire()
         try:
             with G_WALLPAPER_CHANGE_LOCK:
-                _change_wallpaper(profile, force, advance, display_system)
+                _change_wallpaper(profile, force, advance, display_system, paths, set_command)
         finally:
             G_WALLPAPER_CHANGE_PENDING.release()
 
@@ -2243,36 +2262,26 @@ def change_wallpaper_job(profile, force=False, advance=False, display_system=Non
     return thrd
 
 
-def run_profile_job(profile, startup=False):
-    """This method executes the input profile as the profile is configured.
+def run_profile_job(profile, change, startup=False):
+    """Start running ``profile``: set its wallpaper now and arm its slideshow.
 
-    When ``startup`` is True the wallpaper is not changed immediately: the
-    currently shown wallpaper is kept and, for slideshow profiles, only the
-    repeating timer is armed so cycling happens later on its own schedule
-    instead of on every app launch.
+    ``change(profile, advance=..., skip_if_busy=...)`` starts one wallpaper change; the
+    slideshow timer calls it on every tick. When ``startup`` is True the wallpaper is not
+    changed immediately: the currently shown wallpaper is kept and, for slideshow
+    profiles, only the repeating timer is armed so cycling happens later on its own
+    schedule instead of on every app launch.
     """
-    global G_ACTIVE_DISPLAYSYSTEM
-    # get_display_data()  # Check here so new profile has fresh data.
-    refresh_display_data()  # Refresh available display data.
-
     repeating_timer = None
     thrd = None
     if sp_logging.DEBUG:
         sp_logging.G_LOGGER.info("running profile job with profile: %s", profile.name)
 
-    if not profile.slideshow:
-        # if sp_logging.DEBUG:
-        #     sp_logging.G_LOGGER.info("Running a one-off wallpaper change.")
-        if not startup:
-            thrd = change_wallpaper_job(profile)
-    elif profile.slideshow:
-        # if sp_logging.DEBUG:
-        #     sp_logging.G_LOGGER.info("Running wallpaper slideshow.")
-        if not startup:
-            thrd = change_wallpaper_job(profile)
+    if not startup:
+        thrd = change(profile)
+    if profile.slideshow:
         repeating_timer = RepeatedTimer(
             profile.delay_list[0],
-            change_wallpaper_job,
+            change,
             profile,
             advance=True,
             skip_if_busy=True,
@@ -2280,7 +2289,7 @@ def run_profile_job(profile, startup=False):
     return (repeating_timer, thrd)
 
 
-def quick_profile_job(profile):
+def quick_profile_job(profile, *, paths: AppPaths, set_command=""):
     """
     At startup and profile change, switch to old temp wallpaper.
 
@@ -2289,26 +2298,32 @@ def quick_profile_job(profile):
     temp image of the requested profile as the wallpaper.
     """
 
-    def locked_setter(setter, *args):
+    def locked_setter(setter, *args, **kwargs):
         with G_WALLPAPER_CHANGE_PENDING, G_WALLPAPER_CHANGE_LOCK:
-            setter(*args)
+            setter(*args, **kwargs)
 
     # Look for old temp image. The setter worker takes the render lock, so the
     # UI thread never blocks behind an in-progress render.
+    cache_dir = paths.cache
     files = [
         i
-        for i in os.listdir(TEMP_PATH)
-        if os.path.isfile(os.path.join(TEMP_PATH, i)) and (i.startswith((profile.name + "-a", profile.name + "-b")))
+        for i in os.listdir(cache_dir)
+        if os.path.isfile(os.path.join(cache_dir, i)) and (i.startswith((profile.name + "-a", profile.name + "-b")))
     ]
     if sp_logging.DEBUG:
         sp_logging.G_LOGGER.info("quickswitch file lookup: %s", files)
     if files:
-        image_pieces = [os.path.join(TEMP_PATH, i) for i in files if "-crop-" in i]
+        image_pieces = [os.path.join(cache_dir, i) for i in files if "-crop-" in i]
         if use_image_pieces() and image_pieces:
             image_pieces.sort()
             if sp_logging.DEBUG:
                 sp_logging.G_LOGGER.info("Use wallpaper crop pieces: %s", image_pieces)
-            thrd = Thread(target=locked_setter, args=(set_wallpaper_piecewise, image_pieces), daemon=True)
+            thrd = Thread(
+                target=locked_setter,
+                args=(set_wallpaper_piecewise, image_pieces),
+                kwargs={"paths": paths},
+                daemon=True,
+            )
             thrd.start()
         elif IS_WINDOWS:
             # Skip quick switch on Windows if not using perspective corrections.
@@ -2318,7 +2333,8 @@ def quick_profile_job(profile):
                 ) or profile.perspective not in ["default", "disabled"]:
                     thrd = Thread(
                         target=locked_setter,
-                        args=(set_wallpaper, os.path.join(TEMP_PATH, files[0])),
+                        args=(set_wallpaper, os.path.join(cache_dir, files[0])),
+                        kwargs={"paths": paths, "set_command": set_command},
                         daemon=True,
                     )
                     thrd.start()
@@ -2327,7 +2343,8 @@ def quick_profile_job(profile):
         else:
             thrd = Thread(
                 target=locked_setter,
-                args=(set_wallpaper, os.path.join(TEMP_PATH, files[0])),
+                args=(set_wallpaper, os.path.join(cache_dir, files[0])),
+                kwargs={"paths": paths, "set_command": set_command},
                 daemon=True,
             )
             thrd.start()

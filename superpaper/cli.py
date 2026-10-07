@@ -1,7 +1,6 @@
 """CLI for Superpaper. --help switch prints usage."""
 
 import argparse
-import logging
 import os
 import sys
 from typing import NoReturn
@@ -9,13 +8,18 @@ from typing import NoReturn
 import superpaper.sp_logging as sp_logging
 import superpaper.wallpaper_processing as wpproc
 from superpaper.data import CLIProfileData, discover_profile_inventory
+from superpaper.paths import AppPaths, ensure_dirs
 from superpaper.profile_id import ProfileId, ProfileIdError
+from superpaper.settings import SETTINGS_FILE, read_settings, write_settings
 from superpaper.spanmode import set_spanmode
 from superpaper.wallpaper_processing import change_wallpaper_job, refresh_display_data
 
 
-def start_tray(profile: ProfileId | None = None) -> None:
-    """Run the tray applet, or explain what is missing if wxPython is not installed."""
+def start_tray(paths: AppPaths, profile: ProfileId | None = None, *, debug: bool = False) -> None:
+    """Run the tray applet, or explain what is missing if wxPython is not installed.
+
+    A first start writes the default settings, so that the file is there to edit.
+    """
     try:
         from superpaper.tray import tray_loop
     except ModuleNotFoundError as error:
@@ -25,7 +29,14 @@ def start_tray(profile: ProfileId | None = None) -> None:
             "Superpaper's tray icon and settings window need wxPython. Install it from your "
             "distribution's packages, or install Superpaper with the [gui] extra."
         )
-    tray_loop(profile=profile)
+    settings_file = paths.config / SETTINGS_FILE
+    settings = read_settings(settings_file, sys.platform)
+    if not settings_file.exists():
+        write_settings(settings_file, settings)
+    sp_logging.configure_logging(
+        debug=debug or settings.logging, log_file=paths.cache / "log" if settings.logging else None
+    )
+    tray_loop(paths, settings, profile=profile)
 
 
 def _exit_with_error(message: str) -> NoReturn:
@@ -33,18 +44,19 @@ def _exit_with_error(message: str) -> NoReturn:
     sys.exit(1)
 
 
-def _refresh_displays() -> None:
+def _refresh_displays(paths: AppPaths) -> wpproc.DisplaySystem:
     try:
-        refresh_display_data()
+        return refresh_display_data(paths.config)
     except wpproc.DisplayDetectionError as error:
         _exit_with_error(f"No displays could be detected: {error}")
 
 
-def cli_logic():
+def cli_logic(paths: AppPaths):
     """
     CLI command parsing and enacting.
 
     Allows setting a wallpaper using Superpaper features without running the full application.
+    Superpaper's directories are created only once the arguments are known to be usable.
     """
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -100,24 +112,10 @@ def cli_logic():
     parser.add_argument("-d", "--debug", action="store_true", help="Run the full application with debugging.")
     args = parser.parse_args()
 
-    if args.debug:
-        sp_logging.DEBUG = True
-        sp_logging.G_LOGGER.setLevel(logging.INFO)
-        # Install exception handler
-        # sys.excepthook = custom_exception_handler
-        console_handler = logging.StreamHandler()
-        sp_logging.CONSOLE_HANDLER = console_handler
-        sp_logging.G_LOGGER.addHandler(console_handler)
-        sp_logging.G_LOGGER.info(f"Input images: {args.setimages}")
-        sp_logging.G_LOGGER.info(f"Input profile: {args.profile}")
-        sp_logging.G_LOGGER.info(f"Input perspective: {args.perspective}")
-        sp_logging.G_LOGGER.info(f"Input spangroups: {args.spangroups}")
-        sp_logging.G_LOGGER.info(f"Input offsets: {args.offsets}")
-        sp_logging.G_LOGGER.info(f"User defined command: {args.command}")
-        sp_logging.G_LOGGER.info(f"Debugging: {args.debug}")
     if args.debug and len(sys.argv) == 2:
+        ensure_dirs(paths)
         set_spanmode()
-        start_tray()
+        start_tray(paths, debug=True)
         return 0
     if args.setimages and not args.profile:
         for filename in args.setimages:
@@ -128,24 +126,34 @@ def cli_logic():
             profile_id = ProfileId.parse(args.profile)
         except ProfileIdError as error:
             _exit_with_error(f"Invalid profile name: {error}")
-        _refresh_displays()
-        inventory = discover_profile_inventory()
+        ensure_dirs(paths)
+        _refresh_displays(paths)
+        inventory = discover_profile_inventory(paths)
         if inventory.find(profile_id) is None:
             names = [entry.profile_id.value for entry in inventory.entries]
             _exit_with_error(
                 f"No profile was found by the given name: {args.profile}. Valid profile names are: {names}"
             )
         set_spanmode()
-        start_tray(profile=profile_id)
+        start_tray(paths, profile=profile_id, debug=args.debug)
         return 0
     else:
         _exit_with_error(
             "Pass either image(s) to set as the wallpaper with '-s' or '--setimages', "
             "or a profile to start Superpaper with using '-p' or '--profile'."
         )
+    sp_logging.configure_logging(debug=args.debug)
+    if args.debug:
+        sp_logging.G_LOGGER.info(f"Input images: {args.setimages}")
+        sp_logging.G_LOGGER.info(f"Input perspective: {args.perspective}")
+        sp_logging.G_LOGGER.info(f"Input spangroups: {args.spangroups}")
+        sp_logging.G_LOGGER.info(f"Input offsets: {args.offsets}")
+        sp_logging.G_LOGGER.info(f"User defined command: {args.command}")
+    ensure_dirs(paths)
+    display_system = None
     if args.perspective:
-        _refresh_displays()
-        perspectives = wpproc.G_ACTIVE_DISPLAYSYSTEM.perspective_dict
+        display_system = _refresh_displays(paths)
+        perspectives = display_system.perspective_dict
         if args.perspective not in perspectives:
             _exit_with_error(f"Valid perspective profile names are: {list(perspectives)}")
     spangrp = None
@@ -163,16 +171,17 @@ def cli_logic():
             "Number of offset pixels not even. If passing manual offsets, give width and height offset "
             "for each display, even if not actually offsetting every display."
         )
+    set_command = ""
     if args.command:
         if len(args.command) > 1:
             _exit_with_error("Remember to put the custom command in quotes.")
-        wpproc.G_SET_COMMAND_STRING = args.command[0]
+        set_command = args.command[0]
 
-    if not args.perspective:  # the perspective check above already refreshed them
-        _refresh_displays()
+    if display_system is None:  # the perspective check above already refreshed them
+        _refresh_displays(paths)
     set_spanmode()
     profile = CLIProfileData(args.setimages, args.advanced, args.perspective, spangrp, args.offsets)
-    job_thread = change_wallpaper_job(profile, force=True)
+    job_thread = change_wallpaper_job(profile, paths, set_command=set_command, force=True)
     if job_thread is not None:
         job_thread.join()
     return 0

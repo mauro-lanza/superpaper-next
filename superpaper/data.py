@@ -9,7 +9,6 @@ from __future__ import annotations
 import datetime
 import hashlib
 import json
-import logging
 import math
 import os
 import random
@@ -21,13 +20,11 @@ from io import StringIO
 from pathlib import Path
 
 import superpaper.sp_logging as sp_logging
-import superpaper.sp_paths as sp_paths
 import superpaper.wallpaper_processing as wpproc
 from superpaper.files import write_atomically
 from superpaper.message_dialog import show_message_dialog
+from superpaper.paths import AppPaths
 from superpaper.profile_id import ManagedPathError, ProfileId, ProfileIdError, collision_key, profile_path
-from superpaper.sp_paths import CONFIG_PATH, TEMP_PATH
-from superpaper.sp_platform import IS_MACOS
 
 
 class ProfileDiagnosticKind(Enum):
@@ -88,13 +85,13 @@ def _content_digest(content: bytes) -> bytes:
     return hashlib.sha256(content).digest()
 
 
-def discover_profile_inventory() -> ProfileInventory:
+def discover_profile_inventory(paths: AppPaths) -> ProfileInventory:
     """Load every profile in the profiles directory and explain the ones that can't load.
 
     A profile's identity is its filename stem. Symlinked profiles are followed, so
     profiles kept in a dotfile repository work.
     """
-    root = Path(sp_paths.PROFILES_PATH)
+    root = paths.profiles
     try:
         leaves = sorted(root.iterdir(), key=lambda path: path.name)
     except OSError as error:
@@ -110,7 +107,7 @@ def discover_profile_inventory() -> ProfileInventory:
         except ProfileIdError as error:
             diagnostics.append(ProfileDiscoveryDiagnostic(path, ProfileDiagnosticKind.INVALID_FILENAME, str(error)))
             continue
-        loaded = _load_managed_profile(path, profile_id)
+        loaded = _load_managed_profile(path, profile_id, paths.cache)
         if isinstance(loaded, ProfileDiscoveryEntry):
             entries.append(loaded)
         else:
@@ -118,7 +115,9 @@ def discover_profile_inventory() -> ProfileInventory:
     return ProfileInventory(tuple(entries), tuple(diagnostics))
 
 
-def _load_managed_profile(path: Path, profile_id: ProfileId) -> ProfileDiscoveryEntry | ProfileDiscoveryDiagnostic:
+def _load_managed_profile(
+    path: Path, profile_id: ProfileId, cache_dir: Path
+) -> ProfileDiscoveryEntry | ProfileDiscoveryDiagnostic:
     if not path.is_file():
         return ProfileDiscoveryDiagnostic(
             path, ProfileDiagnosticKind.NOT_REGULAR_FILE, "Not a regular file.", profile_id
@@ -131,7 +130,13 @@ def _load_managed_profile(path: Path, profile_id: ProfileId) -> ProfileDiscovery
     try:
         text = content.decode("utf-8")
         _validate_profile_syntax(text)
-        profile = ProfileData(os.fspath(path), profile_id, profile_text=text, source_digest=digest)
+        profile = ProfileData(
+            os.fspath(path),
+            profile_id,
+            profile_text=text,
+            source_digest=digest,
+            selection_file=_selection_path(cache_dir, profile_id),
+        )
     except Exception as error:  # a hand-edited file can fail to parse in many ways
         return ProfileDiscoveryDiagnostic(path, ProfileDiagnosticKind.MALFORMED_CONTENT, str(error), profile_id, digest)
     return ProfileDiscoveryEntry(profile_id, path, profile)
@@ -181,9 +186,9 @@ def _validate_profile_syntax(text: str) -> None:
 
 
 # Profile and data handling, back-end interface.
-def list_profiles() -> list[ProfileData]:
+def list_profiles(paths: AppPaths) -> list[ProfileData]:
     """Return every usable profile, offering to delete the ones that fail to parse."""
-    inventory = discover_profile_inventory()
+    inventory = discover_profile_inventory(paths)
     for diagnostic in inventory.diagnostics:
         if diagnostic.kind is ProfileDiagnosticKind.MALFORMED_CONTENT:
             _prompt_to_delete_malformed_profile(diagnostic)
@@ -213,13 +218,13 @@ def _prompt_to_delete_malformed_profile(diagnostic: ProfileDiscoveryDiagnostic) 
     sp_logging.G_LOGGER.info("Removed profile: %s", path)
 
 
-def open_profile(profile: ProfileId | str) -> ProfileData | None:
+def open_profile(paths: AppPaths, profile: ProfileId | str) -> ProfileData | None:
     """Load one managed profile by name; None if it doesn't exist or can't be used."""
     try:
         profile_id = profile if isinstance(profile, ProfileId) else ProfileId.parse(profile)
     except ProfileIdError:
         return None
-    loaded = _load_managed_profile(Path(sp_paths.PROFILES_PATH) / profile_id.profile_filename, profile_id)
+    loaded = _load_managed_profile(paths.profiles / profile_id.profile_filename, profile_id, paths.cache)
     return loaded.profile if isinstance(loaded, ProfileDiscoveryEntry) else None
 
 
@@ -228,7 +233,9 @@ def parse_profile_file(path: str | os.PathLike[str]):
     return ProfileData(path, persist_selection=False)
 
 
-def validate_managed_profile_id(name: object, current_profile_id: ProfileId | None = None) -> ProfileId:
+def validate_managed_profile_id(
+    profiles_dir: Path, name: object, current_profile_id: ProfileId | None = None
+) -> ProfileId:
     """Return the identity a profile will be saved under, refusing names that can't be used.
 
     Re-saving a profile under its current name always works, so profiles from older
@@ -239,7 +246,7 @@ def validate_managed_profile_id(name: object, current_profile_id: ProfileId | No
         return current_profile_id
     profile_id = ProfileId.parse_new(name)
     try:
-        leaves = list(Path(sp_paths.PROFILES_PATH).iterdir())
+        leaves = list(profiles_dir.iterdir())
     except FileNotFoundError:
         return profile_id
     for path in leaves:
@@ -249,17 +256,17 @@ def validate_managed_profile_id(name: object, current_profile_id: ProfileId | No
     return profile_id
 
 
-def delete_managed_profile(profile: ProfileData) -> None:
+def delete_managed_profile(paths: AppPaths, profile: ProfileData) -> None:
     """Delete a loaded profile's file, refusing if the file changed after it was loaded."""
     if profile.profile_id is None or profile.source_digest is None:
         message = "Only a loaded managed profile can be deleted."
         raise ManagedPathError(message)
-    path = profile_path(Path(sp_paths.PROFILES_PATH), profile.profile_id, allow_missing=False)
+    path = profile_path(paths.profiles, profile.profile_id, allow_missing=False)
     if _content_digest(path.read_bytes()) != profile.source_digest:
         message = f"'{profile.profile_id.value}' changed on disk after it was loaded. Reload it before deleting."
         raise ManagedPathError(message)
     path.unlink()
-    _forget_selection(profile.profile_id)
+    _forget_selection(_selection_path(paths.cache, profile.profile_id))
 
 
 def managed_profile_for_selection(profiles: list[ProfileData], profile_id: ProfileId) -> ProfileData | None:
@@ -267,13 +274,13 @@ def managed_profile_for_selection(profiles: list[ProfileData], profile_id: Profi
     return next((profile for profile in profiles if profile.profile_id == profile_id), None)
 
 
-def _active_pointer_path() -> Path:
-    return Path(sp_paths.TEMP_PATH) / "running_profile"
+def _active_pointer_path(cache_dir: Path) -> Path:
+    return cache_dir / "running_profile"
 
 
-def read_active_profile() -> ProfileData | None:
+def read_active_profile(paths: AppPaths) -> ProfileData | None:
     """Return the profile that was running when Superpaper last exited, if it still exists."""
-    path = _active_pointer_path()
+    path = _active_pointer_path(paths.cache)
     if not path.is_file():
         return None
     try:
@@ -281,55 +288,54 @@ def read_active_profile() -> ProfileData | None:
         profile_id = ProfileId.parse(profname)
     except OSError, UnicodeError, IndexError, ProfileIdError:
         return None
-    profile = open_profile(profile_id)
+    profile = open_profile(paths, profile_id)
     if profile is None:
         sp_logging.G_LOGGER.info("The previously running profile '%s' no longer exists.", profname)
     return profile
 
 
-def write_active_profile(profile: ProfileId | str) -> None:
+def write_active_profile(cache_dir: Path, profile: ProfileId | str) -> None:
     """Remember which profile is running, for the next start."""
     profile_id = profile if isinstance(profile, ProfileId) else ProfileId.parse(profile)
-    write_atomically(_active_pointer_path(), profile_id.value.encode("utf-8"))
+    write_atomically(_active_pointer_path(cache_dir), profile_id.value.encode("utf-8"))
 
 
 # The current selection is runtime state that changes on every slideshow tick, so it
 # is remembered beside running_profile instead of inside the profile file. A profile
 # file then changes only when the user edits it. A selected= line written by an
 # older version is still honoured until a selection has been stored.
-def _selection_path(profile_id: ProfileId) -> Path:
-    return Path(sp_paths.TEMP_PATH) / "selections" / f"{profile_id.value}.json"
+def _selection_path(cache_dir: Path, profile_id: ProfileId) -> Path:
+    return cache_dir / "selections" / f"{profile_id.value}.json"
 
 
-def _read_stored_selection(profile_id: ProfileId) -> list[str] | None:
+def _read_stored_selection(path: Path) -> list[str] | None:
     """Return the remembered selection: [] once cleared, None if none was ever stored."""
     try:
-        stored = json.loads(_selection_path(profile_id).read_text(encoding="utf-8"))
+        stored = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
         return None
     except (OSError, ValueError) as error:
-        sp_logging.G_LOGGER.info("Ignoring the unreadable selection of '%s': %s", profile_id.value, error)
+        sp_logging.G_LOGGER.info("Ignoring the unreadable selection in %s: %s", path, error)
         return None
     if not isinstance(stored, list) or not all(isinstance(item, str) for item in stored):
-        sp_logging.G_LOGGER.info("Ignoring the malformed selection of '%s'.", profile_id.value)
+        sp_logging.G_LOGGER.info("Ignoring the malformed selection in %s.", path)
         return None
     return stored
 
 
-def _store_selection(profile_id: ProfileId, files: list[str]) -> None:
-    path = _selection_path(profile_id)
+def _store_selection(path: Path, files: list[str]) -> None:
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         write_atomically(path, json.dumps(files).encode("utf-8"))
     except OSError as error:
-        sp_logging.G_LOGGER.info("Could not remember the selection of '%s': %s", profile_id.value, error)
+        sp_logging.G_LOGGER.info("Could not remember the selection in %s: %s", path, error)
 
 
-def _forget_selection(profile_id: ProfileId) -> None:
+def _forget_selection(path: Path) -> None:
     try:
-        _selection_path(profile_id).unlink(missing_ok=True)
+        path.unlink(missing_ok=True)
     except OSError as error:
-        sp_logging.G_LOGGER.info("Could not forget the selection of '%s': %s", profile_id.value, error)
+        sp_logging.G_LOGGER.info("Could not forget the selection in %s: %s", path, error)
 
 
 def _parse_selected(value: str) -> list[str] | None:
@@ -337,9 +343,9 @@ def _parse_selected(value: str) -> list[str] | None:
     return [path for path in value.strip().split(";") if path] or None
 
 
-def _selection_to_carry_over(profile_id: ProfileId, source_content: bytes) -> list[str] | None:
+def _selection_to_carry_over(selection_file: Path, source_content: bytes) -> list[str] | None:
     """Return the selection a save keeps when the editor didn't choose one."""
-    stored = _read_stored_selection(profile_id)
+    stored = _read_stored_selection(selection_file)
     if stored is not None:
         return stored or None
     legacy_lines = [
@@ -351,6 +357,7 @@ def _selection_to_carry_over(profile_id: ProfileId, source_content: bytes) -> li
 
 
 def save_managed_profile(
+    paths: AppPaths,
     profile: TempProfileData,
     *,
     current_profile_id: ProfileId | None = None,
@@ -365,26 +372,28 @@ def save_managed_profile(
     ``update_active``, repoints the running profile, undoing earlier steps if a later
     one fails.
     """
-    root = Path(sp_paths.PROFILES_PATH)
+    root = paths.profiles
     try:
-        destination_id = validate_managed_profile_id(profile.name, current_profile_id)
+        destination_id = validate_managed_profile_id(root, profile.name, current_profile_id)
         destination = profile_path(root, destination_id)
     except (OSError, ManagedPathError, ProfileIdError, ValueError) as error:
         raise ProfileTransactionError(_DESTINATION_WRITE, error) from error
     content = profile.serialize(include_selection=False).encode("utf-8")
+    destination_selection = _selection_path(paths.cache, destination_id)
 
     if current_profile_id is None:
         _write_profile(destination, content)
         if profile.selected:
-            _store_selection(destination_id, profile.selected)
+            _store_selection(destination_selection, profile.selected)
         return destination
 
     source_path, source_content = _read_unchanged_source(root, current_profile_id, expected_source_digest)
-    selection = profile.selected or _selection_to_carry_over(current_profile_id, source_content)
+    source_selection = _selection_path(paths.cache, current_profile_id)
+    selection = profile.selected or _selection_to_carry_over(source_selection, source_content)
     if destination_id == current_profile_id:
         _write_profile(source_path, content)
         if selection:
-            _store_selection(destination_id, selection)
+            _store_selection(destination_selection, selection)
         return source_path
 
     _write_profile(destination, content)
@@ -394,15 +403,15 @@ def save_managed_profile(
         raise ProfileTransactionError(_SOURCE_REMOVAL, error, _undo_create(destination)) from error
     if update_active:
         try:
-            write_active_profile(destination_id)
+            write_active_profile(paths.cache, destination_id)
         except (OSError, ValueError) as error:
             rollback_errors = _undo_remove(source_path, source_content)
             if not rollback_errors:
                 rollback_errors = _undo_create(destination)
             raise ProfileTransactionError(_ACTIVE_POINTER_UPDATE, error, rollback_errors) from error
     if selection:
-        _store_selection(destination_id, selection)
-    _forget_selection(current_profile_id)
+        _store_selection(destination_selection, selection)
+    _forget_selection(source_selection)
     return destination
 
 
@@ -448,140 +457,6 @@ def _undo_remove(path: Path, content: bytes) -> tuple[OSError, ...]:
     return ()
 
 
-class GeneralSettingsData:
-    """Object to store and save application wide settings."""
-
-    def __init__(self):
-        self.logging = False
-        self.use_hotkeys = True
-        self.hk_binding_next = None
-        self.hk_binding_pause = None
-        self.set_command = ""
-        self.browse_default_dir = ""
-        self.show_help = True
-        self.warn_large_img = True
-        self.parse_settings()
-
-    def parse_settings(self):
-        """Parse general_settings file. Create it if it doesn't exists."""
-        # Re-reading settings must clear a command that was removed from disk.
-        self.set_command = ""
-        fname = os.path.join(CONFIG_PATH, "general_settings")
-        if os.path.isfile(fname):
-            with open(fname) as general_settings_file:
-                for line in general_settings_file:
-                    words = line.strip().split("=", 1)
-                    if words[0] == "logging":
-                        wrds1 = words[1].strip().lower()
-                        if wrds1 == "true":
-                            self.logging = True
-                            sp_logging.LOGGING = True
-                            sp_logging.DEBUG = True
-                            sp_logging.G_LOGGER = logging.getLogger("default")
-                            sp_logging.G_LOGGER.setLevel(logging.INFO)
-                            # Install exception handler
-                            sys.excepthook = sp_logging.custom_exception_handler
-                            file_handler = logging.FileHandler(os.path.join(TEMP_PATH, "log"), mode="w")
-                            sp_logging.FILE_HANDLER = file_handler
-                            sp_logging.G_LOGGER.addHandler(file_handler)
-                            console_handler = logging.StreamHandler()
-                            sp_logging.CONSOLE_HANDLER = console_handler
-                            sp_logging.G_LOGGER.addHandler(console_handler)
-                            sp_logging.G_LOGGER.info("Enabled logging to file.")
-                    elif words[0] == "use hotkeys":
-                        wrds1 = words[1].strip().lower()
-                        if wrds1 == "true":
-                            self.use_hotkeys = True
-                        else:
-                            self.use_hotkeys = False
-                        if sp_logging.DEBUG:
-                            sp_logging.G_LOGGER.info("use_hotkeys: %s", self.use_hotkeys)
-                    elif words[0] == "next wallpaper hotkey":
-                        binding_strings = words[1].strip().split("+")
-                        if binding_strings:
-                            self.hk_binding_next = tuple(binding_strings)
-                        if sp_logging.DEBUG:
-                            sp_logging.G_LOGGER.info("hk_binding_next: %s", self.hk_binding_next)
-                    elif words[0] == "pause wallpaper hotkey":
-                        binding_strings = words[1].strip().split("+")
-                        if binding_strings:
-                            self.hk_binding_pause = tuple(binding_strings)
-                        if sp_logging.DEBUG:
-                            sp_logging.G_LOGGER.info("hk_binding_pause: %s", self.hk_binding_pause)
-                    elif words[0] == "set_command":
-                        self.set_command = words[1].strip()
-                    elif words[0].strip() == "show_help_at_start":
-                        show_state = words[1].strip().lower()
-                        if show_state == "false":
-                            self.show_help = False
-                        else:
-                            pass
-                    elif words[0].strip() == "warn_large_img":
-                        show_state = words[1].strip().lower()
-                        if show_state == "false":
-                            self.warn_large_img = False
-                        else:
-                            pass
-                    elif words[0].strip() == "browse_default_dir":
-                        self.browse_default_dir = words[1].strip()
-                    else:
-                        sp_logging.G_LOGGER.info(
-                            "GeneralSettings parse Exception: Unkown general setting: %s", words[0]
-                        )
-        else:
-            # if file does not exist, create it and write default values.
-            with open(fname, "x") as general_settings_file:
-                general_settings_file.write("logging=false\n")
-                if IS_MACOS:
-                    general_settings_file.write("use hotkeys=false\n")
-                else:
-                    general_settings_file.write("use hotkeys=true\n")
-                general_settings_file.write("next wallpaper hotkey=control+super+w\n")
-                self.hk_binding_next = ("control", "super", "w")
-                general_settings_file.write("pause wallpaper hotkey=control+super+shift+p\n")
-                self.hk_binding_pause = ("control", "super", "shift", "p")
-                general_settings_file.write("set_command=\n")
-                general_settings_file.write("browse_default_dir=\n")
-                general_settings_file.write("warn_large_img=true")
-        wpproc.G_SET_COMMAND_STRING = self.set_command
-
-    def save_settings(self):
-        """Save the current state of the general settings object."""
-
-        fname = os.path.join(CONFIG_PATH, "general_settings")
-        with open(fname, "w") as general_settings_file:
-            if self.logging:
-                general_settings_file.write("logging=true\n")
-            else:
-                general_settings_file.write("logging=false\n")
-
-            if self.use_hotkeys:
-                general_settings_file.write("use hotkeys=true\n")
-            else:
-                general_settings_file.write("use hotkeys=false\n")
-
-            if self.hk_binding_next:
-                hk_string = "+".join(self.hk_binding_next)
-                general_settings_file.write(f"next wallpaper hotkey={hk_string}\n")
-
-            if self.hk_binding_pause:
-                hk_string_p = "+".join(self.hk_binding_pause)
-                general_settings_file.write(f"pause wallpaper hotkey={hk_string_p}\n")
-
-            if self.show_help:
-                general_settings_file.write("show_help_at_start=true\n")
-            else:
-                general_settings_file.write("show_help_at_start=false\n")
-
-            general_settings_file.write(f"set_command={self.set_command}\n")
-            general_settings_file.write(f"browse_default_dir={self.browse_default_dir}\n")
-
-            if self.warn_large_img:
-                general_settings_file.write("warn_large_img=true")
-            else:
-                general_settings_file.write("warn_large_img=false")
-
-
 class ProfileDataException(Exception):
     """ProfileData initialization error handler."""
 
@@ -609,6 +484,7 @@ class ProfileData:
         profile_text: str | None = None,
         source_digest: bytes | None = None,
         persist_selection: bool = True,
+        selection_file: Path | None = None,
     ):
         if not wpproc.RESOLUTION_ARRAY:
             msg = "Cannot parse profile, monitor resolution data is missing."
@@ -637,13 +513,16 @@ class ProfileData:
         self.selected = None
 
         self.parse_profile(StringIO(profile_text) if profile_text is not None else self.file)
-        if profile_id is not None:
-            # The filename is the identity; a name= line that disagrees (a file renamed
-            # by hand, or a case-only rename on Windows) is corrected on the next save.
-            if self.name != profile_id.value:
-                sp_logging.G_LOGGER.info("%s calls itself '%s'; using its filename.", self.file, self.name)
-                self.name = profile_id.value
-            stored_selection = _read_stored_selection(profile_id)
+        # The filename is the identity; a name= line that disagrees (a file renamed
+        # by hand, or a case-only rename on Windows) is corrected on the next save.
+        if profile_id is not None and self.name != profile_id.value:
+            sp_logging.G_LOGGER.info("%s calls itself '%s'; using its filename.", self.file, self.name)
+            self.name = profile_id.value
+        # A saved profile remembers its selection in selection_file; a stored one
+        # supersedes a selected= line written by an older version.
+        self.selection_file = selection_file
+        if selection_file is not None:
+            stored_selection = _read_stored_selection(selection_file)
             if stored_selection is not None:
                 self.selected = stored_selection or None
         self.profile_id: ProfileId | None = profile_id
@@ -907,16 +786,15 @@ class ProfileData:
     def _write_selected(self):
         """Remember the current selection across restarts.
 
-        A saved profile's selection is stored beside running_profile, so the profile
-        file itself is left alone; a file opened by path keeps it in its own
-        selected= line.
+        A saved profile's selection goes to its selection_file, so the profile file
+        itself is left alone; a file opened by path keeps it in its own selected= line.
         """
         if not self.persist_selection:
             return
-        if self.profile_id is None:
+        if self.selection_file is None:
             self._write_selected_unmanaged()
             return
-        _store_selection(self.profile_id, list(self.selected or []))
+        _store_selection(self.selection_file, list(self.selected or []))
 
     def _write_selected_unmanaged(self):
         """Retain explicit arbitrary-file parser behavior outside managed storage."""
@@ -1239,13 +1117,16 @@ class TempProfileData:
         lines.extend(f"display{index}paths={paths}" for index, paths in enumerate(self.paths_array))
         return "\n".join(lines) + "\n"
 
-    def test_save(self, *, current_profile_id: ProfileId | None = None, managed: bool = True):
-        """Tests whether the user input for profile settings is valid."""
+    def test_save(self, *, profiles_dir: Path | None = None, current_profile_id: ProfileId | None = None):
+        """Tests whether the user input for profile settings is valid.
+
+        With ``profiles_dir``, the name must also be usable for a profile saved there.
+        """
         valid_profile = False
         if self.name is not None and self.name.strip() != "":
-            if managed:
+            if profiles_dir is not None:
                 try:
-                    validate_managed_profile_id(self.name, current_profile_id)
+                    validate_managed_profile_id(profiles_dir, self.name, current_profile_id)
                 except (OSError, ProfileIdError, ValueError) as error:
                     show_message_dialog(str(error), "Error")
                     return False

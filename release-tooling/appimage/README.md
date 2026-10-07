@@ -59,8 +59,8 @@ the host's loader cache (which would reintroduce the same version skew).
 ## Notes
 
 - The AppDir layout matches Superpaper's frozen resource resolution
-  (`PATH = dirname(dirname(exe))` in `superpaper/sp_paths.py`): the executable
-  lives at `usr/bin/superpaper`, so resources are staged at
+  (`install_dir()` in `superpaper/paths.py` is `dirname(dirname(exe))`): the
+  executable lives at `usr/bin/superpaper`, so resources are staged at
   `usr/superpaper/resources/`.
 - **Icons.** The build renders the SVG master
   (`superpaper/resources/superpaper.svg`) into the hicolor theme: the scalable

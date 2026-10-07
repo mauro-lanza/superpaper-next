@@ -1,4 +1,5 @@
-"""Everything outside the wx UI must import without optional or platform-native packages.
+"""Everything outside the wx UI must import without optional or platform-native packages,
+and importing must not touch the filesystem.
 
 This is the one structural test. It runs in a fresh interpreter so that nothing an
 earlier test imported can mask a failure, and it pretends to be a KDE session because
@@ -15,18 +16,19 @@ HEADLESS_MODULES = (
     "superpaper.data",
     "superpaper.files",
     "superpaper.message_dialog",
+    "superpaper.paths",
     "superpaper.perspective",
     "superpaper.profile_id",
+    "superpaper.settings",
     "superpaper.sni_tray",
     "superpaper.sp_logging",
-    "superpaper.sp_paths",
     "superpaper.sp_platform",
     "superpaper.spanmode",
     "superpaper.wallpaper_processing",
 )
 
 
-def test_headless_modules_import_on_kde_without_optional_packages(tmp_path):
+def test_headless_modules_import_on_kde_without_optional_packages_and_create_nothing(tmp_path):
     env = dict(os.environ)
     env.update(
         HOME=str(tmp_path),
@@ -50,3 +52,4 @@ def test_headless_modules_import_on_kde_without_optional_packages(tmp_path):
     result = subprocess.run([sys.executable, "-c", script], env=env, capture_output=True, text=True, check=False)
 
     assert result.returncode == 0, result.stderr
+    assert list(tmp_path.iterdir()) == []

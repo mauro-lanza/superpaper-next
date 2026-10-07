@@ -1,10 +1,13 @@
+from pathlib import Path
 from threading import Lock
 from types import SimpleNamespace
 from unittest.mock import Mock, call
 
 import pytest
 
+from superpaper.paths import AppPaths
 from superpaper.profile_id import ProfileId
+from superpaper.settings import Settings
 
 
 class RecordingTimer:
@@ -21,8 +24,14 @@ class RecordingTimer:
         self.is_running = False
 
 
+PATHS = AppPaths(config=Path("/config"), profiles=Path("/config/profiles"), cache=Path("/cache"))
+
+
 def controller(tray, active_profile=None, timer=None):
     icon = object.__new__(tray.TaskBarIcon)
+    icon.paths = PATHS
+    icon.g_settings = Settings()
+    icon.refresh_displays = lambda: None
     icon.job_lock = Lock()
     icon.active_profile = active_profile
     icon.repeating_timer = timer
@@ -43,15 +52,17 @@ def test_start_profile_activates_and_persists(headless_tray_module, monkeypatch)
     replacement_timer = object()
     worker = object()
     writes = []
-    monkeypatch.setattr(tray, "run_profile_job", lambda selected: (replacement_timer, worker))
-    monkeypatch.setattr(tray, "write_active_profile", writes.append)
+    monkeypatch.setattr(tray, "run_profile_job", lambda selected, change, startup: (replacement_timer, worker))
+    monkeypatch.setattr(
+        tray, "write_active_profile", lambda cache_dir, profile_id: writes.append((cache_dir, profile_id))
+    )
     icon = controller(tray)
 
     assert icon.start_profile(None, active) is worker
     assert icon.active_profile is active
     assert icon.repeating_timer is replacement_timer
     assert tray.wpproc.G_ACTIVE_PROFILE == "active"
-    assert writes == [ProfileId("active")]
+    assert writes == [(PATHS.cache, ProfileId("active"))]
 
 
 def test_switch_profile_stops_old_timer_first(headless_tray_module, monkeypatch):
@@ -61,12 +72,12 @@ def test_switch_profile_stops_old_timer_first(headless_tray_module, monkeypatch)
     old_profile = profile("old")
     new_profile = profile("new")
 
-    def run(selected):
+    def run(selected, change, startup):
         events.append(("run", selected.name))
         return (object(), "worker")
 
     monkeypatch.setattr(tray, "run_profile_job", run)
-    monkeypatch.setattr(tray, "write_active_profile", lambda name: events.append(("write", name)))
+    monkeypatch.setattr(tray, "write_active_profile", lambda cache_dir, name: events.append(("write", name)))
     icon = controller(tray, old_profile, old_timer)
 
     assert icon.start_profile(None, new_profile) == "worker"
@@ -89,11 +100,11 @@ def test_start_previous_profile_restore_and_explicit_apply(headless_tray_module,
     active = profile("active")
     calls = []
     timer = object()
-    monkeypatch.setattr(tray, "quick_profile_job", lambda selected: calls.append(("quick", selected)))
+    monkeypatch.setattr(tray, "quick_profile_job", lambda selected, **kwargs: calls.append(("quick", selected)))
     monkeypatch.setattr(
         tray,
         "run_profile_job",
-        lambda selected, startup: calls.append(("run", selected, startup)) or (timer, object()),
+        lambda selected, change, startup: calls.append(("run", selected, startup)) or (timer, object()),
     )
     icon = controller(tray)
 
@@ -112,7 +123,9 @@ def test_manual_next_stops_and_restarts_running_timer(headless_tray_module, monk
     timer = RecordingTimer(events)
     active = profile("active")
     monkeypatch.setattr(
-        tray, "change_wallpaper_job", lambda selected, advance: events.append(("change", selected, advance))
+        tray,
+        "change_wallpaper_job",
+        lambda selected, paths, **options: events.append(("change", selected, options["advance"])),
     )
     icon = controller(tray, active, timer)
 
@@ -151,7 +164,7 @@ def test_rearm_replaces_running_timer_without_rendering(headless_tray_module, mo
     assert events == ["stop"]
     assert icon.repeating_timer is new_timer
     assert tray.wpproc.G_ACTIVE_PROFILE == "renamed"
-    assert run.call_args == call(active, startup=True)
+    assert run.call_args == call(active, icon.change_wallpaper, startup=True)
 
 
 @pytest.mark.parametrize(
@@ -182,7 +195,7 @@ def test_reload_clears_active_profile_missing_from_inventory(headless_tray_modul
     timer = RecordingTimer(events, running=timer_running)
     icon = controller(tray, profile("removed"), timer)
     tray.wpproc.G_ACTIVE_PROFILE = "removed"
-    monkeypatch.setattr(tray, "list_profiles", lambda: [profile("other")])
+    monkeypatch.setattr(tray, "list_profiles", lambda paths: [profile("other")])
 
     icon.reload_profiles(None)
 
@@ -196,7 +209,7 @@ def test_rearm_preserves_paused_state(headless_tray_module, monkeypatch):
     tray = headless_tray_module
     active = profile("active")
     replacement = RecordingTimer([])
-    monkeypatch.setattr(tray, "run_profile_job", lambda selected, startup: (replacement, None))
+    monkeypatch.setattr(tray, "run_profile_job", lambda selected, change, startup: (replacement, None))
     icon = controller(tray, active, RecordingTimer([], running=False))
     icon.is_paused = True
 
@@ -262,3 +275,33 @@ def test_removing_a_profile_hotkey_unbinds_it(headless_tray_module):
     icon.hk2.unregister.assert_called_once_with(("control", "x"))
     icon.hk2.register.assert_not_called()
     assert icon.seen_binding == set()
+
+
+def test_profiles_start_on_freshly_detected_displays(headless_tray_module, monkeypatch):
+    tray = headless_tray_module
+    events = []
+    monkeypatch.setattr(tray, "run_profile_job", lambda selected, change, startup: events.append("run") or (None, None))
+    monkeypatch.setattr(tray, "write_active_profile", lambda cache_dir, profile_id: None)
+    icon = controller(tray)
+    icon.refresh_displays = lambda: events.append("refresh")
+
+    icon.start_profile(None, profile("active"))
+
+    assert events == ["refresh", "run"]
+
+
+def test_wallpaper_changes_use_the_settings_current_at_the_time(headless_tray_module, monkeypatch):
+    tray = headless_tray_module
+    changes = []
+    monkeypatch.setattr(
+        tray, "change_wallpaper_job", lambda selected, paths, **options: changes.append((paths, options["set_command"]))
+    )
+    icon = controller(tray)
+    icon.g_settings = Settings(set_command="first {image}")
+    icon.change_wallpaper(profile("active"), advance=True, skip_if_busy=True)
+
+    # A slideshow tick after the custom command was changed in Settings uses the new one.
+    icon.g_settings = Settings(set_command="second {image}")
+    icon.change_wallpaper(profile("active"), advance=True, skip_if_busy=True)
+
+    assert changes == [(PATHS, "first {image}"), (PATHS, "second {image}")]

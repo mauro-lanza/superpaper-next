@@ -10,21 +10,20 @@ import wx  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-impor
 import wx.adv  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-import]
 
 import superpaper.sp_logging as sp_logging
-import superpaper.sp_paths as sp_paths
 import superpaper.wallpaper_processing as wpproc
 from superpaper.__version__ import __version__
 from superpaper.configuration_dialogs import HelpFrame, SettingsFrame
 from superpaper.data import (
-    GeneralSettingsData,
     list_profiles,
     read_active_profile,
     write_active_profile,
 )
 from superpaper.gui import ConfigFrame
 from superpaper.message_dialog import show_message_dialog
+from superpaper.paths import AppPaths, resource
 from superpaper.profile_id import ProfileId, ProfileIdError
+from superpaper.settings import SETTINGS_FILE, Settings, read_settings
 from superpaper.sni_tray import build_tray, sni_supported
-from superpaper.sp_paths import TRAY_ICON
 from superpaper.sp_platform import IS_MACOS, IS_WINDOWS, host_spawn_env
 from superpaper.wallpaper_processing import (
     change_wallpaper_job,
@@ -34,7 +33,6 @@ from superpaper.wallpaper_processing import (
 
 # Constants
 TRAY_TOOLTIP = "Superpaper"
-STARTUP_PROFILE: ProfileId | None = None
 
 
 def _startup_profile_id(profile: ProfileId | str | os.PathLike[str]) -> ProfileId:
@@ -48,22 +46,20 @@ def _startup_profile_id(profile: ProfileId | str | os.PathLike[str]) -> ProfileI
     return ProfileId.parse(leaf)
 
 
-def tray_loop(profile: ProfileId | str | os.PathLike[str] | None = None):
+def tray_loop(paths: AppPaths, settings: Settings, profile: ProfileId | str | os.PathLike[str] | None = None):
     """Runs the tray applet."""
-    global STARTUP_PROFILE
-    if not os.path.isdir(sp_paths.PROFILES_PATH):
-        os.mkdir(sp_paths.PROFILES_PATH)
     # On Linux (wxGTK) the tray icon (StatusNotifierItem) title is derived
     # from the program name, i.e. the basename of sys.argv[0]. When launched
     # via "python -m superpaper" this becomes "__main__.py", so normalize it
     # to a clean application name before the wx.App is created.
     sys.argv[0] = "Superpaper"
+    startup_profile = None
     if profile:
         try:
-            STARTUP_PROFILE = _startup_profile_id(profile)
+            startup_profile = _startup_profile_id(profile)
         except ProfileIdError:
-            STARTUP_PROFILE = None
-        sp_logging.G_LOGGER.info(f"Startup profile: {profile}")
+            startup_profile = None
+        sp_logging.G_LOGGER.info("Startup profile: %s", startup_profile.value if startup_profile else profile)
     if sys.platform == "linux":
         # Route incoming D-Bus calls (native SNI tray) through wxGTK's own
         # GLib main loop. Must be set as the default main loop before the
@@ -74,7 +70,7 @@ def tray_loop(profile: ProfileId | str | os.PathLike[str] | None = None):
             DBusGMainLoop(set_as_default=True)
         except ImportError:
             pass
-    app = App(False)
+    app = App(paths, settings, startup_profile)
     app.MainLoop()
 
 
@@ -90,8 +86,10 @@ def create_menu_item(menu, label, func, *args, **kwargs):
 class TaskBarIcon(wx.adv.TaskBarIcon):
     """Taskbar icon and menu class."""
 
-    def __init__(self, frame):
-        self.g_settings = GeneralSettingsData()
+    def __init__(self, frame, paths: AppPaths, settings: Settings, startup_profile: ProfileId | None = None):
+        self.paths = paths
+        self.settings_path = paths.config / SETTINGS_FILE
+        self.g_settings = settings
 
         self.frame = frame
         super().__init__()
@@ -100,48 +98,39 @@ class TaskBarIcon(wx.adv.TaskBarIcon):
         self._sni_tray = None
         self._use_sni = sys.platform == "linux" and sni_supported()
         if not self._use_sni:
-            self.set_icon(TRAY_ICON)
+            self.set_icon(str(resource("superpaper.png")))
         self.Bind(wx.adv.EVT_TASKBAR_LEFT_DOWN, self.on_left_down)
         self.Bind(wx.adv.EVT_TASKBAR_LEFT_DCLICK, self.configure_wallpapers)
         self.Bind(wx.adv.EVT_TASKBAR_RIGHT_DOWN, self.on_right_down)
         # Initialize display data
-        # get_display_data()
-        wpproc.refresh_display_data()
+        self.refresh_displays()
         # profile initialization
         self.job_lock = Lock()
         self.repeating_timer = None
         self.pause_item = None
         self.is_paused = False
-        # if sp_logging.DEBUG:
-        # sp_logging.G_LOGGER.info("START Listing profiles for menu.")
-        self.list_of_profiles = list_profiles()
-        # if sp_logging.DEBUG:
-        # sp_logging.G_LOGGER.info("END Listing profiles for menu.")
+        self.list_of_profiles = list_profiles(self.paths)
         # Should now return an object if a previous profile was written or
         # None if no previous data was found
-        if STARTUP_PROFILE:
-            try:
-                startup_id = _startup_profile_id(STARTUP_PROFILE)
-            except ProfileIdError:
-                startup_id = None
-            self.active_profile = self.get_profile_by_id(startup_id) if startup_id is not None else None
+        if startup_profile:
+            self.active_profile = self.get_profile_by_id(startup_profile)
             if self.active_profile is None:
                 sp_logging.G_LOGGER.error(
                     "Startup profile '%s' could not be matched to a saved profile.",
-                    STARTUP_PROFILE,
+                    startup_profile.value,
                 )
         else:
-            prev_active_prof = read_active_profile()
+            prev_active_prof = read_active_profile(self.paths)
             if prev_active_prof:
                 self.active_profile = self.get_profile_by_id(prev_active_prof.profile_id)
             else:
                 self.active_profile = None
         if self.active_profile:
             wpproc.G_ACTIVE_PROFILE = self.active_profile.name
-        # An explicit CLI `--profile` launch (STARTUP_PROFILE set) should apply
-        # the wallpaper right away; a normal daemon restart only restores the
-        # last shown wallpaper without re-cycling (issue #140).
-        self.start_prev_profile(self.active_profile, apply_now=bool(STARTUP_PROFILE))
+        # An explicit CLI `--profile` launch should apply the wallpaper right
+        # away; a normal daemon restart only restores the last shown wallpaper
+        # without re-cycling (issue #140).
+        self.start_prev_profile(self.active_profile, apply_now=bool(startup_profile))
         # if self.active_profile is None:
         #     sp_logging.G_LOGGER.info("Starting up the first profile found.")
         #     self.start_profile(wx.EVT_MENU, self.list_of_profiles[0])
@@ -171,14 +160,14 @@ hotkeys will not work. Exception: %s",
                 )
         if self.g_settings.show_help is True:
             ConfigFrame(self)
-            HelpFrame()
+            HelpFrame(self.settings_path)
         elif self._use_sni:
             # Register the native SNI tray now that the profile list and pause
             # state are initialized (the menu reads them on demand).
             self._sni_tray = build_tray(
                 self,
                 f"org.kde.StatusNotifierItem-{os.getpid()}-1",
-                TRAY_ICON,
+                str(resource("superpaper.png")),
                 TRAY_TOOLTIP,
                 TRAY_TOOLTIP,
             )
@@ -186,7 +175,7 @@ hotkeys will not work. Exception: %s",
                 # Registration failed: fall back to the wx tray icon plus the
                 # KDE auto-open-config workaround (wx clicks don't work).
                 self._use_sni = False
-                self.set_icon(TRAY_ICON)
+                self.set_icon(str(resource("superpaper.png")))
                 if wpproc.running_kde():
                     sp_logging.G_LOGGER.info("Native SNI tray unavailable: auto-opening configuration GUI")
                     wx.CallAfter(self.configure_wallpapers, None)
@@ -293,7 +282,7 @@ Check that it is formatted properly and valid keys."
                     # pass
 
                     # register profile specific bindings
-                    self.list_of_profiles = list_profiles()
+                    self.list_of_profiles = list_profiles(self.paths)
                     for profile in self.list_of_profiles:
                         if sp_logging.DEBUG:
                             sp_logging.G_LOGGER.info(
@@ -382,7 +371,7 @@ Check that it is formatted properly and valid keys."
 
     def read_general_settings(self):
         """Refreshes general settings from file and applies hotkey bindings."""
-        self.g_settings = GeneralSettingsData()
+        self.g_settings = read_settings(self.settings_path, sys.platform)
         self.register_hotkeys()
         if self.g_settings.logging:
             msg = "Logging is enabled after an application restart."
@@ -423,25 +412,26 @@ Check that it is formatted properly and valid keys."
         sp_logging.G_LOGGER.info("Tray icon was right-clicked.")
 
     def open_config(self, event):
-        """Opens Superpaper config folder, CONFIG_PATH."""
+        """Opens Superpaper's config folder."""
+        config = os.fspath(self.paths.config)
         if IS_WINDOWS:
             try:
                 # os.startfile is Windows-only; the branch is IS_WINDOWS-guarded.
-                os.startfile(sp_paths.CONFIG_PATH)  # pyright: ignore[reportAttributeAccessIssue]
+                os.startfile(config)  # pyright: ignore[reportAttributeAccessIssue]
             except BaseException as e:
-                sp_logging.G_LOGGER.error("open_config failed for %s: %s", sp_paths.CONFIG_PATH, e, exc_info=True)
+                sp_logging.G_LOGGER.error("open_config failed for %s: %s", config, e, exc_info=True)
                 show_message_dialog("There was an error trying to open the config folder.")
         elif IS_MACOS:
             try:
-                subprocess.check_call(["open", sp_paths.CONFIG_PATH], env=host_spawn_env())
+                subprocess.check_call(["open", config], env=host_spawn_env())
             except (subprocess.CalledProcessError, OSError) as e:
-                sp_logging.G_LOGGER.error("open_config failed for %s: %s", sp_paths.CONFIG_PATH, e, exc_info=True)
+                sp_logging.G_LOGGER.error("open_config failed for %s: %s", config, e, exc_info=True)
                 show_message_dialog("There was an error trying to open the config folder.")
         else:
             try:
-                subprocess.check_call(["xdg-open", sp_paths.CONFIG_PATH], env=host_spawn_env())
+                subprocess.check_call(["xdg-open", config], env=host_spawn_env())
             except (subprocess.CalledProcessError, OSError) as e:
-                sp_logging.G_LOGGER.error("open_config failed for %s: %s", sp_paths.CONFIG_PATH, e, exc_info=True)
+                sp_logging.G_LOGGER.error("open_config failed for %s: %s", config, e, exc_info=True)
                 show_message_dialog("There was an error trying to open the config folder.")
 
     def configure_wallpapers(self, event):
@@ -457,7 +447,7 @@ Check that it is formatted properly and valid keys."
 
     def reload_profiles(self, event):
         """Reloads profiles from disk."""
-        self.list_of_profiles = list_profiles()
+        self.list_of_profiles = list_profiles(self.paths)
         # Re-point active_profile at the freshly loaded instance (matched by
         # identity) so consumers that read tray.active_profile -- e.g. the settings
         # dialog when it reopens -- see the saved state instead of a stale
@@ -473,6 +463,31 @@ Check that it is formatted properly and valid keys."
                     self.repeating_timer = None
                     self.active_profile = None
                     wpproc.G_ACTIVE_PROFILE = None
+
+    def refresh_displays(self):
+        """Detect the displays again and make them what wallpaper changes use."""
+        wpproc.refresh_display_data(self.paths.config)
+
+    def change_wallpaper(self, profile, *, force=False, advance=False, skip_if_busy=False, display_system=None):
+        """Start one wallpaper change for ``profile``, with the settings as they are now.
+
+        The slideshow timer calls this on every tick, so a changed custom command
+        applies from the next tick on.
+        """
+        return change_wallpaper_job(
+            profile,
+            self.paths,
+            set_command=self.g_settings.set_command,
+            force=force,
+            advance=advance,
+            skip_if_busy=skip_if_busy,
+            display_system=display_system,
+        )
+
+    def _run_profile(self, profile, *, startup=False):
+        """Run ``profile`` on freshly detected displays: see run_profile_job."""
+        self.refresh_displays()
+        return run_profile_job(profile, self.change_wallpaper, startup=startup)
 
     def rearm_active_timer(self):
         """Re-arm the slideshow timer for the active profile.
@@ -492,7 +507,7 @@ Check that it is formatted properly and valid keys."
                 # profile.name matches it, so a stale name silently blocks every
                 # slideshow tick and manual change after a rename/save.
                 wpproc.G_ACTIVE_PROFILE = self.active_profile.name
-                self.repeating_timer, _thrd = run_profile_job(self.active_profile, startup=True)
+                self.repeating_timer, _thrd = self._run_profile(self.active_profile, startup=True)
                 if self.is_paused and self.repeating_timer is not None:
                     # Editing a paused slideshow must not resume it.
                     self.repeating_timer.stop()
@@ -511,13 +526,13 @@ Check that it is formatted properly and valid keys."
             elif apply_now:
                 # Render and apply the requested profile now, then arm the
                 # slideshow timer (if the profile is a slideshow).
-                self.repeating_timer, thrd = run_profile_job(profile, startup=False)
+                self.repeating_timer, thrd = self._run_profile(profile, startup=False)
             else:
                 # Restore the last rendered wallpaper without cycling, then arm
                 # the slideshow timer (if any). The wallpaper is not changed on
                 # launch; cycling only happens later on the timer's schedule.
-                quick_profile_job(profile)
-                self.repeating_timer, thrd = run_profile_job(profile, startup=True)
+                quick_profile_job(profile, paths=self.paths, set_command=self.g_settings.set_command)
+                self.repeating_timer, thrd = self._run_profile(profile, startup=True)
 
     def start_profile(self, event, profile, force_reload=False):
         """
@@ -533,13 +548,6 @@ Check that it is formatted properly and valid keys."
                 Do you have any profiles in /profiles?"
             )
         elif self.active_profile is not None:
-            # if sp_logging.DEBUG:
-            # sp_logging.G_LOGGER.info(
-            #     "Check if the starting profile is already running: %s",
-            #     profile.name)
-            # sp_logging.G_LOGGER.info(
-            #     "name check: %s, %s",
-            #     profile.name, self.active_profile.name)
             if profile.name == self.active_profile.name and not force_reload:
                 self.next_wallpaper(event)
                 return 0
@@ -551,11 +559,8 @@ Check that it is formatted properly and valid keys."
                     wpproc.G_ACTIVE_PROFILE = self.active_profile.name
                     if sp_logging.DEBUG:
                         sp_logging.G_LOGGER.info("Starting timed profile job with profile: %s", profile.name)
-                    self.repeating_timer, thrd = run_profile_job(profile)
-                    write_active_profile(profile.profile_id)
-                    # if sp_logging.DEBUG:
-                    #     sp_logging.G_LOGGER.info("Wrote active profile: %s",
-                    #                              profile.name)
+                    self.repeating_timer, thrd = self._run_profile(profile)
+                    write_active_profile(self.paths.cache, profile.profile_id)
                     return thrd
         else:
             with self.job_lock:
@@ -565,11 +570,8 @@ Check that it is formatted properly and valid keys."
                 wpproc.G_ACTIVE_PROFILE = self.active_profile.name
                 if sp_logging.DEBUG:
                     sp_logging.G_LOGGER.info("Starting timed profile job with profile: %s", profile.name)
-                self.repeating_timer, thrd = run_profile_job(profile)
-                write_active_profile(profile.profile_id)
-                # if sp_logging.DEBUG:
-                #     sp_logging.G_LOGGER.info("Wrote active profile: %s",
-                #                              profile.name)
+                self.repeating_timer, thrd = self._run_profile(profile)
+                write_active_profile(self.paths.cache, profile.profile_id)
                 return thrd
 
     def next_wallpaper(self, event):
@@ -577,10 +579,10 @@ Check that it is formatted properly and valid keys."
         with self.job_lock:
             if self.repeating_timer is not None and self.repeating_timer.is_running:
                 self.repeating_timer.stop()
-                change_wallpaper_job(self.active_profile, advance=True)
+                self.change_wallpaper(self.active_profile, advance=True)
                 self.repeating_timer.start()
             else:
-                change_wallpaper_job(self.active_profile, advance=True)
+                self.change_wallpaper(self.active_profile, advance=True)
 
     def rt_stop(self):
         """Stops running slideshow timer if one is active."""
@@ -628,7 +630,7 @@ Check that it is formatted properly and valid keys."
         artists = "Icons kindly provided by Icons8 https://icons8.com"
 
         info = wx.adv.AboutDialogInfo()
-        info.SetIcon(wx.Icon(TRAY_ICON, wx.BITMAP_TYPE_PNG))
+        info.SetIcon(wx.Icon(str(resource("superpaper.png")), wx.BITMAP_TYPE_PNG))
         info.SetName("Superpaper")
         info.SetVersion(__version__)
         info.SetDescription(description)
@@ -656,6 +658,13 @@ Check that it is formatted properly and valid keys."
 class App(wx.App):
     """wx base class for tray icon."""
 
+    def __init__(self, paths: AppPaths, settings: Settings, startup_profile: ProfileId | None):
+        # wx.App.__init__ runs OnInit, which builds the tray icon from these.
+        self._paths = paths
+        self._settings = settings
+        self._startup_profile = startup_profile
+        super().__init__(False)
+
     def OnInit(self):
         """Starts tray icon loop."""
         self.SetAppName("Superpaper")
@@ -663,7 +672,7 @@ class App(wx.App):
         frame = wx.Frame(None)
         # self.locale = wx.Locale(wx.LANGUAGE_DEFAULT) # this has been causing errors?
         self.SetTopWindow(frame)
-        TaskBarIcon(frame)
+        TaskBarIcon(frame, self._paths, self._settings, self._startup_profile)
         return True
 
     def InitLocale(self):
