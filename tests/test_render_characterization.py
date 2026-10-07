@@ -6,6 +6,8 @@ import PIL
 import pytest
 from PIL import Image
 
+from tests.conftest import monitor
+
 
 def create_image(path, size, color):
     with Image.new("RGB", size, color) as image:
@@ -25,17 +27,18 @@ def pixels(image):
     return [image.getpixel((x, y)) for y in range(image.height) for x in range(image.width)]
 
 
-def configure_render(wpproc, monkeypatch, app_paths):
+# Two 2x2 displays with a one-pixel gap between them, the second one pixel lower.
+TINY_DISPLAYS = [monitor(0, 0, 2, 2, 10, 10), monitor(3, 1, 2, 2, 10, 10)]
+
+
+def configure_render(wpproc, monkeypatch, display_layout):
     monkeypatch.setattr(wpproc, "IS_WINDOWS", False)
-    monkeypatch.setattr(wpproc, "NUM_DISPLAYS", 2)
-    monkeypatch.setattr(wpproc, "RESOLUTION_ARRAY", [(2, 2), (2, 2)])
-    monkeypatch.setattr(wpproc, "DISPLAY_OFFSET_ARRAY", [(0, 0), (3, 1)])
-    return app_paths.cache
+    return display_layout(TINY_DISPLAYS)
 
 
-def test_simple_render_fills_virtual_canvas(profile_modules, monkeypatch, tmp_path, app_paths):
+def test_simple_render_fills_virtual_canvas(profile_modules, monkeypatch, tmp_path, app_paths, display_layout):
     _, wpproc = profile_modules
-    cache = configure_render(wpproc, monkeypatch, app_paths)
+    layout = configure_render(wpproc, monkeypatch, display_layout)
     source = tmp_path / "source.png"
     with Image.new("RGB", (10, 3)) as image:
         for x in range(10):
@@ -46,9 +49,10 @@ def test_simple_render_fills_virtual_canvas(profile_modules, monkeypatch, tmp_pa
     monkeypatch.setattr(wpproc, "G_ACTIVE_PROFILE", "simple")
     monkeypatch.setattr(wpproc, "set_wallpaper", lambda *args, **kwargs: setter_calls.append((args, kwargs)))
 
-    assert wpproc.span_single_image_simple(render_profile("simple", [str(source)]), False, paths=app_paths) == 0
+    profile = render_profile("simple", [str(source)])
+    assert wpproc.span_single_image_simple(profile, False, display_system=layout, paths=app_paths) == 0
 
-    output = cache / "simple-a.png"
+    output = app_paths.cache / "simple-a.png"
     with Image.open(output) as image:
         assert image.size == (5, 3)
         assert pixels(image) == [
@@ -68,12 +72,13 @@ def test_simple_render_fills_virtual_canvas(profile_modules, monkeypatch, tmp_pa
             (100, 120, 52),
             (120, 120, 62),
         ]
-    assert setter_calls == [((str(output), False, [str(source)]), {"paths": app_paths, "set_command": ""})]
+    setter_options = {"display_system": layout, "paths": app_paths, "set_command": ""}
+    assert setter_calls == [((str(output), False, [str(source)]), setter_options)]
 
 
-def test_multi_render_preserves_monitor_gaps(profile_modules, monkeypatch, tmp_path, app_paths):
+def test_multi_render_preserves_monitor_gaps(profile_modules, monkeypatch, tmp_path, app_paths, display_layout):
     _, wpproc = profile_modules
-    cache = configure_render(wpproc, monkeypatch, app_paths)
+    layout = configure_render(wpproc, monkeypatch, display_layout)
     red = tmp_path / "red.png"
     blue = tmp_path / "blue.png"
     create_image(red, (2, 2), (255, 0, 0))
@@ -82,9 +87,10 @@ def test_multi_render_preserves_monitor_gaps(profile_modules, monkeypatch, tmp_p
     monkeypatch.setattr(wpproc, "G_ACTIVE_PROFILE", "multi")
     monkeypatch.setattr(wpproc, "set_wallpaper", lambda *args, **kwargs: setter_calls.append((args, kwargs)))
 
-    assert wpproc.set_multi_image_wallpaper(render_profile("multi", [str(red), str(blue)]), False, paths=app_paths) == 0
+    profile = render_profile("multi", [str(red), str(blue)])
+    assert wpproc.set_multi_image_wallpaper(profile, False, display_system=layout, paths=app_paths) == 0
 
-    output = cache / "multi-a.png"
+    output = app_paths.cache / "multi-a.png"
     with Image.open(output) as image:
         assert image.size == (5, 3)
         assert pixels(image) == [
@@ -104,12 +110,32 @@ def test_multi_render_preserves_monitor_gaps(profile_modules, monkeypatch, tmp_p
             (0, 0, 255),
             (0, 0, 255),
         ]
-    assert setter_calls == [((str(output), False, [str(red), str(blue)]), {"paths": app_paths, "set_command": ""})]
+    setter_options = {"display_system": layout, "paths": app_paths, "set_command": ""}
+    assert setter_calls == [((str(output), False, [str(red), str(blue)]), setter_options)]
 
 
-def test_render_cache_alternates_between_two_files(profile_modules, monkeypatch, tmp_path, app_paths):
+def test_multi_render_skips_a_profile_set_up_for_other_displays(
+    profile_modules, monkeypatch, tmp_path, app_paths, display_layout
+):
     _, wpproc = profile_modules
-    cache = configure_render(wpproc, monkeypatch, app_paths)
+    one_display = display_layout([monitor(0, 0, 2, 2, 10, 10)])
+    red = tmp_path / "red.png"
+    blue = tmp_path / "blue.png"
+    create_image(red, (2, 2), (255, 0, 0))
+    create_image(blue, (2, 2), (0, 0, 255))
+    setter_calls = []
+    monkeypatch.setattr(wpproc, "set_wallpaper", lambda *args, **kwargs: setter_calls.append(args))
+
+    profile = render_profile("multi", [str(red), str(blue)])
+    assert wpproc.set_multi_image_wallpaper(profile, True, display_system=one_display, paths=app_paths) is None
+
+    assert setter_calls == []
+    assert list(app_paths.cache.iterdir()) == []
+
+
+def test_render_cache_alternates_between_two_files(profile_modules, monkeypatch, tmp_path, app_paths, display_layout):
+    _, wpproc = profile_modules
+    layout = configure_render(wpproc, monkeypatch, display_layout)
     source = tmp_path / "source.png"
     create_image(source, (5, 3), (10, 20, 30))
     monkeypatch.setattr(wpproc, "G_ACTIVE_PROFILE", "other")
@@ -118,14 +144,14 @@ def test_render_cache_alternates_between_two_files(profile_modules, monkeypatch,
 
     expected = [("alternating-a.png",), ("alternating-b.png",), ("alternating-a.png",)]
     for files in expected:
-        assert wpproc.span_single_image_simple(profile, False, paths=app_paths) == 0
-        assert tuple(sorted(path.name for path in cache.iterdir())) == files
+        assert wpproc.span_single_image_simple(profile, False, display_system=layout, paths=app_paths) == 0
+        assert tuple(sorted(path.name for path in app_paths.cache.iterdir())) == files
 
 
-def test_windows_cache_uses_jpeg_extension(profile_modules, monkeypatch, tmp_path, app_paths):
+def test_windows_cache_uses_jpeg_extension(profile_modules, monkeypatch, app_paths):
     _, wpproc = profile_modules
-    cache = configure_render(wpproc, monkeypatch, app_paths)
     monkeypatch.setattr(wpproc, "IS_WINDOWS", True)
+    cache = app_paths.cache
 
     output, old_output = wpproc.alternating_outputfile(cache, "windows")
 
@@ -150,7 +176,7 @@ ADVANCED_GOLDENS = {
 
 def small_layout(wpproc, monkeypatch, config_dir):
     monkeypatch.setattr(wpproc, "get_monitors", lambda: SMALL_MONITORS)
-    system = wpproc.DisplaySystem(config_dir, update_globals=False)
+    system = wpproc.DisplaySystem(config_dir)
     system.update_bezels([(6.0, 0.0), (0.0, 0.0)])
     # The second screen swivels 25 degrees towards the viewer, who sits 200 px from the first.
     swivels = [(0, 0.0, 0.0, 0.0), (1, -25.0, 0.0, 0.0)]
@@ -210,13 +236,20 @@ def test_advanced_render_golden(
         ("multi", False, "set_multi_image_wallpaper"),
     ],
 )
-def test_span_mode_picks_the_renderer(profile_modules, monkeypatch, app_paths, spanmode, ppimode, renderer):
+def test_span_mode_picks_the_renderer(
+    profile_modules, monkeypatch, app_paths, display_layout, spanmode, ppimode, renderer
+):
     _, wpproc = profile_modules
     called = []
     for name in ("span_single_image_simple", "span_single_image_advanced", "set_multi_image_wallpaper"):
         monkeypatch.setattr(wpproc, name, lambda profile, force, *, name=name, **kwargs: called.append(name))
-    profile = SimpleNamespace(name="p", spanmode=spanmode, ppimode=ppimode, has_valid_selection=lambda: True)
+    profile = SimpleNamespace(
+        name="p",
+        spanmode=spanmode,
+        display_corrections=lambda resolutions: SimpleNamespace(ppimode=ppimode),
+        has_valid_selection=lambda: True,
+    )
 
-    wpproc.change_wallpaper_job(profile, app_paths).join(timeout=10)
+    wpproc.change_wallpaper_job(profile, app_paths, display_system=display_layout()).join(timeout=10)
 
     assert called == [renderer]

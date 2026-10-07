@@ -106,7 +106,7 @@ class WallpaperSettingsPanel(wx.Panel):
         self._system_clean = None
         # This is staged dialog state. Do not publish it until Apply/Save; live
         # field edits must not alter the display system used by background jobs.
-        self.display_sys = wpproc.DisplaySystem(self.paths.config, update_globals=False)
+        self.display_sys = wpproc.DisplaySystem(self.paths.config)
         # self.wpprev_pnl = WallpaperPreviewPanel(self.frame, self.display_sys)
         self.wpprev_pnl = WallpaperPreviewPanel(self, self.display_sys)
         self.sizer_top_half.Add(self.wpprev_pnl, 1, wx.CENTER | wx.EXPAND, 5)
@@ -413,7 +413,7 @@ class WallpaperSettingsPanel(wx.Panel):
         self.sizer_setting_offsets.Add(self.cb_offsets, 0, wx.ALIGN_LEFT | wx.BOTTOM, 5)
         self.sizer_setting_offsets.Add(st_offsets, 0, wx.ALIGN_LEFT | wx.LEFT, 10)
         tc_list_sizer_offs = wx.WrapSizer(wx.HORIZONTAL)
-        self.tc_list_offsets = self.list_of_textctrl(statbox_parent_offsets, wpproc.NUM_DISPLAYS)
+        self.tc_list_offsets = self.list_of_textctrl(statbox_parent_offsets, len(self.display_sys.disp_list))
         for tc in self.tc_list_offsets:
             st = wx.StaticText(statbox_parent_offsets, -1, str(self.tc_list_offsets.index(tc)) + ":")
             tc_st_sizer = wx.BoxSizer(wx.HORIZONTAL)
@@ -436,7 +436,7 @@ class WallpaperSettingsPanel(wx.Panel):
         sizer_spangroups_cb.AddStretchSpacer()
         sizer_spangroups_cb.Add(self.button_help_spang, 0, wx.RIGHT, 5)
         sizer_spangroups_data = wx.WrapSizer(wx.HORIZONTAL)
-        self.ch_list_spangroups = self.list_of_wxchoice(self, wpproc.NUM_DISPLAYS, 0.4)
+        self.ch_list_spangroups = self.list_of_wxchoice(self, len(self.display_sys.disp_list), 0.4)
         for ch in self.ch_list_spangroups:
             st = wx.StaticText(self, -1, str(self.ch_list_spangroups.index(ch)) + ":")
             ch_st_sizer = wx.BoxSizer(wx.HORIZONTAL)
@@ -529,7 +529,7 @@ class WallpaperSettingsPanel(wx.Panel):
         self.sizer_setting_diaginch.Add(st_diaginch, 0, wx.ALIGN_LEFT | wx.LEFT, 10)
         diags = [str(dsp.diagonal_size()[1]) for dsp in self.display_sys.disp_list]
         tc_list_sizer_diag = wx.WrapSizer(wx.HORIZONTAL)
-        self.tc_list_diaginch = self.list_of_textctrl(parent, wpproc.NUM_DISPLAYS, fraction=2 / 5)
+        self.tc_list_diaginch = self.list_of_textctrl(parent, len(self.display_sys.disp_list), fraction=2 / 5)
         use_user_diags = self.display_sys.use_user_diags
         for tc, diag in zip(self.tc_list_diaginch, diags):
             tc_list_sizer_diag.Add(tc, 0, wx.ALIGN_LEFT | wx.ALL, 5)
@@ -603,8 +603,10 @@ class WallpaperSettingsPanel(wx.Panel):
 
         self.show_advanced_settings = False
         self.use_multi_image = False
+        corrections = profile.display_corrections(self.display_sys.resolutions())
         legacy_advanced = bool(
-            profile.spanmode == "single" and bool(profile.ppimode or profile.bezels or profile.manual_offsets_useronly)
+            profile.spanmode == "single"
+            and bool(corrections.ppimode or profile.bezels or profile.manual_offsets_useronly)
         )
 
         # Basic settings
@@ -654,7 +656,9 @@ class WallpaperSettingsPanel(wx.Panel):
         # profile.bezels: not stored in profile anymore
         if profile.manual_offsets_useronly:
             self.cb_offsets.SetValue(True)
-            for tc, off in zip(self.tc_list_offsets, profile.manual_offsets_useronly):
+            # A profile may give fewer offsets than there are displays; the rest are 0,0.
+            offsets = profile.manual_offsets_useronly + len(self.tc_list_offsets) * [(0, 0)]
+            for tc, off in zip(self.tc_list_offsets, offsets):
                 offstr = f"{off[0]},{off[1]}"
                 tc.SetValue(offstr)
         else:
@@ -859,6 +863,7 @@ class WallpaperSettingsPanel(wx.Panel):
     def onSaveSystem(self, event):
         """Persist the staged system-wide display settings to disk."""
         self.display_sys.save_system()
+        self.parent_tray_obj.refresh_displays()  # the slideshow uses them from now on
         self._set_system_baseline()
 
     def onRevertSystem(self, event):
@@ -1362,8 +1367,8 @@ class WallpaperSettingsPanel(wx.Panel):
             sp_logging.G_LOGGER.info("onApply preview (unsaved): %s", preview_profile.name)
             # Render with the dialog's live DisplaySystem so staged (unsaved)
             # display settings — bezels, sizes, positions — are reflected. This
-            # deliberately does NOT reload from disk (refresh_display_data), which
-            # lets the user test system tweaks via Apply before committing them.
+            # deliberately does NOT reload the saved layout, which lets the user
+            # test system tweaks via Apply before committing them.
             thrd = self.parent_tray_obj.change_wallpaper(
                 preview_profile, force=True, display_system=copy.deepcopy(self.display_sys)
             )
@@ -1726,8 +1731,8 @@ class WallpaperSettingsPanel(wx.Panel):
 
         busy = wx.BusyCursor()
 
-        # Use the simplified CLI profile class
-        wpproc.refresh_display_data(self.paths.config)
+        # Use the simplified CLI profile class, with the saved display settings.
+        self.parent_tray_obj.refresh_displays()
         profile = CLIProfileData(
             testimage, advanced=True, perspective=perspective, spangroups=None, offsets=flat_offsets
         )

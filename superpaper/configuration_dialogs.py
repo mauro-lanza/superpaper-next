@@ -67,7 +67,7 @@ class BrowsePaths(wx.Dialog):
             self.num_wallpaper_area = num_span_groups
             self.wp_area_name = "Group"
         else:
-            self.num_wallpaper_area = wpproc.NUM_DISPLAYS
+            self.num_wallpaper_area = len(parent.display_sys.disp_list)
             self.wp_area_name = "Display"
         self.use_multi_image = use_multi_image
         self.path_list_data = []
@@ -283,7 +283,7 @@ class DisplayPositionEntry(wx.Frame):
         sizer_main = wx.BoxSizer(wx.VERTICAL)
 
         # Display position config
-        self.create_position_config(wpproc.NUM_DISPLAYS)
+        self.create_position_config(len(self.display_sys.disp_list))
 
         # Bottom row buttons
         self.create_bottom_butts()
@@ -532,7 +532,7 @@ class DisplayPositionEntry(wx.Frame):
             unit_mult = 1
         else:
             unit_mult = 1 / (max_ppi / 25.4)  # convert ppi to px/mm
-        crops = self.display_sys.get_ppi_norm_crops(wpproc.NUM_DISPLAYS * [(0, 0)])
+        crops = self.display_sys.get_ppi_norm_crops(len(self.display_sys.disp_list) * [(0, 0)])
         bezels = self.display_sys.bezels_in_px()
         for row, ltrb, bez in zip(self.grid_rows, crops, bezels):
             row[0].SetLabel(str(self.grid_rows.index(row)))
@@ -604,7 +604,7 @@ class PerspectiveConfig(wx.Dialog):
         self.create_profile_opts()
 
         # Display perspective config
-        self.create_display_opts(wpproc.NUM_DISPLAYS)
+        self.create_display_opts(len(self.display_sys.disp_list))
 
         # Bottom row buttons
         self.create_bottom_butts()
@@ -666,7 +666,7 @@ class PerspectiveConfig(wx.Dialog):
         self.cb_dispsys_def = wx.CheckBox(statbox_profs, -1, "Default for this display setup")
         sizer_centr_disp = wx.BoxSizer(wx.HORIZONTAL)
         st_centr_disp = wx.StaticText(statbox_profs, -1, "Central display:")
-        disp_ids = [str(idx) for idx in range(wpproc.NUM_DISPLAYS)]
+        disp_ids = [str(idx) for idx in range(len(self.display_sys.disp_list))]
         self.choice_centr_disp = wx.ComboBox(
             statbox_profs, -1, name="CentDispChoice", choices=disp_ids, style=wx.CB_READONLY
         )
@@ -887,7 +887,7 @@ class PerspectiveConfig(wx.Dialog):
                 except ValueError, IndexError:
                     offsets.append((0, 0))
         else:
-            offsets = wpproc.NUM_DISPLAYS * [(0, 0)]
+            offsets = len(self.display_sys.disp_list) * [(0, 0)]
         crops = self.display_sys.get_ppi_norm_crops(offsets)
         persp_data = self.display_sys.get_persp_data(persp_name)
         if persp_data:
@@ -911,6 +911,7 @@ class PerspectiveConfig(wx.Dialog):
         if master != self.display_sys.use_perspective:
             self.display_sys.use_perspective = master
             self.display_sys.save_system()
+            self.frame.parent_tray_obj.refresh_displays()
 
     def onSelect(self, event):
         """Acts once a profile is picked in the dropdown menu."""
@@ -1000,10 +1001,11 @@ class PerspectiveConfig(wx.Dialog):
                 self.display_sys.update_perspectives(persp_name, toggle, is_ds_def, viewer_data, swivels, tilts)
         else:
             self.display_sys.update_perspectives(persp_name, toggle, is_ds_def, viewer_data, swivels, tilts)
-        # Persist the perspective file first; save_system refreshes the active
-        # DisplaySystem, which must load both updated files as one generation.
+        # Persist the perspective file first, then the display system that names the
+        # default; the tray then reloads both as one layout.
         self.display_sys.save_perspectives()
         self.display_sys.save_system()
+        self.frame.parent_tray_obj.refresh_displays()
 
         # update dialog profile list
         self.update_choiceprofile()
@@ -1021,6 +1023,7 @@ class PerspectiveConfig(wx.Dialog):
         self.persp_dict.pop(persp_name, None)
         self.display_sys.save_perspectives()
         self.display_sys.save_system()
+        self.frame.parent_tray_obj.refresh_displays()
         # update dialog profile list
         self.update_choiceprofile()
         self.onCreateNewProfile(None)
@@ -1034,8 +1037,8 @@ class PerspectiveConfig(wx.Dialog):
         self.choice_centr_disp.SetSelection(0)
         for tc in self.tclist_vieweroffs:
             tc.SetValue(str(0))
-        swivels = wpproc.NUM_DISPLAYS * [(0, 0.0, 0.0, 0.0)]
-        tilts = wpproc.NUM_DISPLAYS * [(0.0, 0.0, 0.0)]
+        swivels = len(self.display_sys.disp_list) * [(0, 0.0, 0.0, 0.0)]
+        tilts = len(self.display_sys.disp_list) * [(0.0, 0.0, 0.0)]
         self.populate_grid(swivels, tilts, 1)
 
     def onOk(self, event):
@@ -1103,8 +1106,7 @@ class PerspectiveConfig(wx.Dialog):
         perspective = self.choice_profiles.GetString(self.choice_profiles.GetSelection())
 
         wx.Yield()
-        # Use the simplified CLI profile class
-        wpproc.refresh_display_data(self.frame.paths.config)
+        # Use the simplified CLI profile class. onSave has reloaded the tray's layout.
         profile = CLIProfileData(
             testimage, advanced=True, perspective=perspective, spangroups=None, offsets=flat_offsets
         )
@@ -1511,7 +1513,10 @@ class HelpPopup(wx.PopupTransientWindow):
             "For the best image quality with current settings your\n"
             r" wallpapers should be {} or larger."
         )
-        if self.advanced_on and self.display_sys is not None:
+        display_sys = self.display_sys  # every popup that shows the image quality has one
+        if display_sys is None:
+            return ""
+        if self.advanced_on:
             if self.mainframe.cb_offsets.GetValue():
                 offsets = []
                 for tc in self.mainframe.tc_list_offsets:
@@ -1521,11 +1526,11 @@ class HelpPopup(wx.PopupTransientWindow):
                     except ValueError, IndexError:
                         offsets.append((0, 0))
             else:
-                offsets = wpproc.NUM_DISPLAYS * [(0, 0)]
-            crops = self.display_sys.get_ppi_norm_crops(offsets)
+                offsets = len(display_sys.disp_list) * [(0, 0)]
+            crops = display_sys.get_ppi_norm_crops(offsets)
             persp_data = None
             if self.use_perspective:
-                persp_data = self.display_sys.get_persp_data(self.persp_name)
+                persp_data = display_sys.get_persp_data(self.persp_name)
             if persp_data:
                 proj_plane_crops, persp_coeffs = persp.get_backprojected_display_system(crops, persp_data)
                 # Canvas containing back-projected displays
@@ -1533,7 +1538,7 @@ class HelpPopup(wx.PopupTransientWindow):
             else:
                 canv = wpproc.compute_working_canvas(crops)
         else:
-            canv = wpproc.compute_canvas(wpproc.RESOLUTION_ARRAY, wpproc.DISPLAY_OFFSET_ARRAY)
+            canv = wpproc.compute_canvas(display_sys.resolutions(), display_sys.digital_offsets())
         res_str = f"{canv[0]}x{canv[1]}"
         fin = senten.format(res_str)
         return fin

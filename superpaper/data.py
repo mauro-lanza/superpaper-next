@@ -12,7 +12,7 @@ import json
 import math
 import os
 import random
-import sys
+from collections.abc import Sequence
 from contextlib import ExitStack
 from dataclasses import dataclass
 from enum import Enum, auto
@@ -59,6 +59,17 @@ class ProfileInventory:
 
     def find(self, profile_id: ProfileId) -> ProfileDiscoveryEntry | None:
         return next((entry for entry in self.entries if entry.profile_id == profile_id), None)
+
+
+@dataclass(frozen=True, slots=True)
+class DisplayCorrections:
+    """A profile's position corrections, worked out for the displays present."""
+
+    ppimode: bool
+    """Whether a single image is spanned with the advanced, PPI-corrected renderer."""
+    ppi_array: Sequence[float]
+    manual_offsets: list[tuple[int, int]]
+    """Each display's offset in pixels, bezels included."""
 
 
 class ProfileTransactionError(OSError):
@@ -466,6 +477,39 @@ class ProfileDataException(Exception):
         sp_logging.G_LOGGER.info(errors)
 
 
+def _parse_diagonals(value: str) -> list[float]:
+    """The display diagonals of a diagonal_inches= line, in inches.
+
+    Densities are pixels per inch of diagonal, so a diagonal of 0 makes the profile
+    unusable; earlier versions failed to load such a profile as well.
+    """
+    inches = [float(inchstr) for inchstr in value.strip().split(";")]
+    if 0 in inches:
+        message = "A display diagonal of 0 inches."
+        raise ValueError(message)
+    return inches
+
+
+def _shift_by_bezels(offsets, ppi_array, bezels, count):
+    """Move each display right by the bezels (in mm) between it and the leftmost one."""
+    if not ppi_array:
+        sp_logging.G_LOGGER.error("Couldn't compute bezel offsets without pixel densities.")
+        return offsets
+    max_ppi = max(ppi_array)
+    inch_per_mm = 1.0 / 25.4
+    bezel_px = [0]  # never offset 1st disp, anchor to it.
+    for bezel_mm in bezels:
+        bezel_px.append(round(float(max_ppi) * inch_per_mm * bezel_mm))
+    # Too few bezels: the rest are 0. Too many: the tail is ignored.
+    bezel_px += (count - len(bezel_px)) * [0]
+    shifted = list(offsets)
+    for i in range(1, min(len(bezel_px), count)):
+        # Each display moves by its own bezel plus those of the displays to its left.
+        bezel_px[i] += bezel_px[i - 1]
+        shifted[i] = (shifted[i][0] + bezel_px[i], shifted[i][1])
+    return shifted
+
+
 class ProfileData:
     """
     Central data type of Superpaper, in which wallpaper settings are recorded.
@@ -486,12 +530,6 @@ class ProfileData:
         persist_selection: bool = True,
         selection_file: Path | None = None,
     ):
-        if not wpproc.RESOLUTION_ARRAY:
-            msg = "Cannot parse profile, monitor resolution data is missing."
-            show_message_dialog(msg)
-            sp_logging.G_LOGGER.error(msg)
-            sys.exit()
-
         self.file = profile_file
         self.name = "default_profile"
         self.spanmode = "single"  # single / advanced / multi
@@ -499,12 +537,12 @@ class ProfileData:
         self.slideshow = True
         self.delay_list: list[float] = [600]
         self.sortmode = "shuffle"  # shuffle / alphabetical / date_seeded_shuffle
-        self.ppimode = False
-        self.ppi_array = wpproc.NUM_DISPLAYS * [100]
         self.inches = []
-        self.manual_offsets = wpproc.NUM_DISPLAYS * [(0, 0)]
         self.manual_offsets_useronly = []
         self.bezels = []
+        # The offsets=, ppi= and diagonal_inches= lines, in file order. What they mean
+        # depends on the displays present, so display_corrections works it out per layout.
+        self._corrections: list[tuple[str, list]] = []
         self.hk_binding = None
         self.perspective = "default"
         self.zoom = 1.0
@@ -528,8 +566,6 @@ class ProfileData:
         self.profile_id: ProfileId | None = profile_id
         self.source_digest = source_digest
         self.persist_selection = persist_selection
-        if self.ppimode is True and self.bezels:
-            self.compute_bezel_px_offsets()
         self.file_handler = self.Filehandler(self.paths_array, self.sortmode)
 
     def parse_profile(self, parse_file):
@@ -591,47 +627,26 @@ class ProfileData:
                                 self.name,
                             )
                     elif words[0] == "offsets":
-                        # Use PPI mode algorithm to do cuts.
-                        # Defaults assume uniform pixel density
-                        # if no custom values are given.
-                        offs = []
-                        offs_user_only = []
-                        # w1,h1;w2,h2;...
-                        offset_strings = words[1].strip().split(";")
-                        for offstr in offset_strings:
+                        # w1,h1;w2,h2;... in pixels, from the leftmost display.
+                        offsets = []
+                        for offstr in words[1].strip().split(";"):
                             res_str = offstr.split(",")
                             try:
-                                offs.append((int(res_str[0]), int(res_str[1])))
-                                offs_user_only.append((int(res_str[0]), int(res_str[1])))
+                                offsets.append((int(res_str[0]), int(res_str[1])))
                             except ValueError, IndexError:
-                                offs.append((0, 0))
-                                offs_user_only.append((0, 0))
-                        while len(offs) < wpproc.NUM_DISPLAYS:
-                            offs.append((0, 0))
-                            offs_user_only.append((0, 0))
-                        self.ppimode = True
-                        self.manual_offsets = offs
-                        self.manual_offsets_useronly = offs_user_only
+                                offsets.append((0, 0))
+                        self.manual_offsets_useronly = offsets
+                        self._corrections.append(("offsets", offsets))
                     elif words[0] == "bezels":
                         bez_mm_strings = words[1].strip().split(";")
                         for bezstr in bez_mm_strings:
                             self.bezels.append(float(bezstr))
                     elif words[0] == "ppi":
-                        self.ppimode = True
-                        # overwrite initialized arrays.
-                        self.ppi_array = []
-                        ppi_strings = words[1].strip().split(";")
-                        for ppistr in ppi_strings:
-                            self.ppi_array.append(int(ppistr))
+                        ppis = [int(ppistr) for ppistr in words[1].strip().split(";")]
+                        self._corrections.append(("ppi", ppis))
                     elif words[0] == "diagonal_inches":
-                        self.ppimode = True
-                        # overwrite initialized arrays.
-                        self.ppi_array = []
-                        inch_strings = words[1].strip().split(";")
-                        self.inches = []
-                        for inchstr in inch_strings:
-                            self.inches.append(float(inchstr))
-                        self.ppi_array = self.compute_ppis(self.inches)
+                        self.inches = _parse_diagonals(words[1])
+                        self._corrections.append(("diagonal_inches", self.inches))
                     elif words[0] == "hotkey":
                         binding_strings = words[1].strip().split("+")
                         self.hk_binding = tuple(binding_strings)
@@ -666,70 +681,39 @@ class ProfileData:
             msg = "There was an error parsing the profile:"
             raise ProfileDataException(msg, self.name, self.file, excep) from excep
 
-    def compute_ppis(self, inches):
-        """Compute monitor PPIs from user input diagonal inches."""
-        if len(inches) < wpproc.NUM_DISPLAYS:
-            sp_logging.G_LOGGER.info(
-                "Exception: Number of read display diagonals was: \
-                                     %s , but the number of displays was found to be: %s",
-                str(len(inches)),
-                str(wpproc.NUM_DISPLAYS),
-            )
-            sp_logging.G_LOGGER.info("Falling back to no PPI correction.")
-            self.ppimode = False
-            return wpproc.NUM_DISPLAYS * [100]
-        else:
-            ppi_array = []
-            for inch, res in zip(inches, wpproc.RESOLUTION_ARRAY):
-                diagonal_px = math.sqrt(res[0] ** 2 + res[1] ** 2)
-                px_per_inch = diagonal_px / inch
-                ppi_array.append(px_per_inch)
-            if sp_logging.DEBUG:
-                sp_logging.G_LOGGER.info("Computed PPIs: %s", ppi_array)
-            return ppi_array
+    def display_corrections(self, resolutions) -> DisplayCorrections:
+        """Work out this profile's position corrections for displays of ``resolutions``.
 
-    def compute_bezel_px_offsets(self):
-        """Computes bezel sizes in pixels based on display PPIs."""
-        if self.ppi_array:
-            max_ppi = max(self.ppi_array)
-        else:
-            sp_logging.G_LOGGER.error("Couldn't compute bezel offsets: %s, %s", self.name, self.file)
-            return 1
-
-        bez_px_offs = [0]  # never offset 1st disp, anchor to it.
-        inch_per_mm = 1.0 / 25.4
-        for bez_mm in self.bezels:
-            bez_px_offs.append(round(float(max_ppi) * inch_per_mm * bez_mm))
+        Profiles from before display layouts existed correct positions with offsets=,
+        ppi=, diagonal_inches= and bezels=. They apply in file order, as when earlier
+        versions parsed the profile for the displays present then; the parsed profile
+        no longer depends on which displays those are.
+        """
+        count = len(resolutions)
+        ppimode = False
+        ppi_array = count * [100]
+        offsets = count * [(0, 0)]
+        for key, values in self._corrections:
+            if key == "offsets":
+                ppimode = True
+                offsets = values + (count - len(values)) * [(0, 0)]
+            elif key == "ppi":
+                ppimode = True
+                ppi_array = list(values)
+            elif len(values) < count:
+                sp_logging.G_LOGGER.info(
+                    "%s display diagonals for %s displays: falling back to no PPI correction.", len(values), count
+                )
+                ppimode = False
+                ppi_array = count * [100]
+            else:
+                ppimode = True
+                ppi_array = [math.sqrt(res[0] ** 2 + res[1] ** 2) / inch for inch, res in zip(values, resolutions)]
+        if ppimode and self.bezels:
+            offsets = _shift_by_bezels(offsets, ppi_array, self.bezels, count)
         if sp_logging.DEBUG:
-            sp_logging.G_LOGGER.info(
-                "Bezel px calculation: initial manual offset: %s, \
-                and bezel pixels: %s",
-                self.manual_offsets,
-                bez_px_offs,
-            )
-        if len(bez_px_offs) < wpproc.NUM_DISPLAYS:
-            if sp_logging.DEBUG:
-                sp_logging.G_LOGGER.info("Bezel px calculation: Too few bezel mm values given! Appending zeros.")
-            while len(bez_px_offs) < wpproc.NUM_DISPLAYS:
-                bez_px_offs.append(0)
-        elif len(bez_px_offs) > wpproc.NUM_DISPLAYS:
-            if sp_logging.DEBUG:
-                sp_logging.G_LOGGER.info("Bezel px calculation: Got more bezel mm values than expected!")
-            # Currently ignore list tail if there are too many bezel values
-        # Add these horizontal offsets to manual_offsets:
-        # Avoid offsetting the leftmost anchored display i==0
-        for i in range(1, min(len(bez_px_offs), wpproc.NUM_DISPLAYS)):
-            # Add previous offsets to ones further away to the right.
-            # Each display needs to be offset by the given bezel relative to
-            # the display to its left, which can be shifted relative to
-            # the anchor.
-            bez_px_offs[i] += bez_px_offs[i - 1]
-            self.manual_offsets[i] = (
-                self.manual_offsets[i][0] + bez_px_offs[i],
-                self.manual_offsets[i][1],
-            )
-        if sp_logging.DEBUG:
-            sp_logging.G_LOGGER.info("Bezel px calculation: resulting combined manual offset: %s", self.manual_offsets)
+            sp_logging.G_LOGGER.info("Corrections of '%s': PPIs %s, offsets %s", self.name, ppi_array, offsets)
+        return DisplayCorrections(ppimode, ppi_array, offsets)
 
     def next_wallpaper_files(self, peek=False):
         """Return the current wallpaper file(s).
@@ -748,9 +732,10 @@ class ProfileData:
         return self.file_handler.next_wallpaper_files(peek=peek)
 
     def selection_target_count(self):
-        """Return how many positional image choices this profile requires."""
+        """Return how many positional image choices this profile requires: one per
+        configured display for a multi-image profile, one per span group, or one."""
         if self.spanmode == "multi":
-            return wpproc.NUM_DISPLAYS
+            return len(self.paths_array)
         if self.spanmode == "advanced" and self.spangroups:
             return len(self.spangroups)
         return 1
@@ -766,7 +751,7 @@ class ProfileData:
     def advance_wallpaper(self):
         """Cycle to the next image(s) and make the result the current selection."""
         files = self.file_handler.next_wallpaper_files()
-        if len(files) == self.selection_target_count():
+        if files and len(files) == self.selection_target_count():
             self.selected = files
             self._write_selected()
             return list(files)
@@ -1007,11 +992,12 @@ class CLIProfileData(ProfileData):
         self.files = []
         self.spanmode = ""  # single / multi
         self.spangroups = spangroups
-        self.ppimode = False  # keep this for legacy profile support
         self.perspective = perspective
         self.zoom = 1.0
         self.offsets = (0.0, 0.0)
-        self.manual_offsets = wpproc.NUM_DISPLAYS * [(0, 0)]
+        # --offsets x1 y1 x2 y2 ...: pixel offsets of the displays, from the leftmost.
+        pairs = zip(*[iter(offsets or [])] * 2)
+        self.offset_pairs = [(int(x), int(y)) for x, y in pairs]
 
         if len(files) == 1 and not advanced:
             self.spanmode = "single"
@@ -1020,19 +1006,22 @@ class CLIProfileData(ProfileData):
         else:
             self.spanmode = "multi"
 
-        if offsets:
-            off_pairs_zip = zip(*[iter(offsets)] * 2)
-            off_pairs = [tuple(p) for p in off_pairs_zip]
-            for off, i in zip(off_pairs, range(len(self.manual_offsets))):
-                self.manual_offsets[i] = off
-            for pair in self.manual_offsets:
-                self.manual_offsets[self.manual_offsets.index(pair)] = (int(pair[0]), int(pair[1]))
-
         for item in files:
             self.files.append(os.path.realpath(item))
         # CLI/preview profiles use a fixed image set; treat it as the selection
         # so the renderer never tries to cycle.
         self.selected = self.files
+
+    def display_corrections(self, resolutions) -> DisplayCorrections:
+        """Offsets given on the command line apply to the displays present; nothing else is corrected."""
+        count = len(resolutions)
+        return DisplayCorrections(False, count * [100], (self.offset_pairs + count * [(0, 0)])[:count])
+
+    def selection_target_count(self):
+        """One image per display for multiple images; one per group, or one, otherwise."""
+        if self.spanmode == "multi":
+            return len(self.files)
+        return super().selection_target_count()
 
     def next_wallpaper_files(self, peek=False):
         """Returns a list of the real paths of the images given at construction time."""
@@ -1243,10 +1232,6 @@ Valid modifiers are 'control', 'super', 'alt', 'shift'."
     def is_list_offsets(self, input_string):
         """Checks that input string is a valid list of offsets."""
         list_input = input_string.split(";")
-        # if len(list_input) < wpproc.NUM_DISPLAYS:
-        #     msg = "Enter an offset for every display, even if it is (0,0)."
-        #     show_message_dialog(msg, "Error")
-        #     return False
         try:
             for off_pair in list_input:
                 offset = off_pair.split(",")

@@ -12,7 +12,7 @@ from superpaper.paths import AppPaths, ensure_dirs
 from superpaper.profile_id import ProfileId, ProfileIdError
 from superpaper.settings import SETTINGS_FILE, read_settings, write_settings
 from superpaper.spanmode import set_spanmode
-from superpaper.wallpaper_processing import change_wallpaper_job, refresh_display_data
+from superpaper.wallpaper_processing import DisplaySystem, change_wallpaper_job
 
 
 def start_tray(paths: AppPaths, profile: ProfileId | None = None, *, debug: bool = False) -> None:
@@ -44,9 +44,9 @@ def _exit_with_error(message: str) -> NoReturn:
     sys.exit(1)
 
 
-def _refresh_displays(paths: AppPaths) -> wpproc.DisplaySystem:
+def _detect_displays(paths: AppPaths) -> DisplaySystem:
     try:
-        return refresh_display_data(paths.config)
+        return DisplaySystem(paths.config)
     except wpproc.DisplayDetectionError as error:
         _exit_with_error(f"No displays could be detected: {error}")
 
@@ -127,7 +127,7 @@ def cli_logic(paths: AppPaths):
         except ProfileIdError as error:
             _exit_with_error(f"Invalid profile name: {error}")
         ensure_dirs(paths)
-        _refresh_displays(paths)
+        _detect_displays(paths)  # fail here, with a message, rather than in the tray
         inventory = discover_profile_inventory(paths)
         if inventory.find(profile_id) is None:
             names = [entry.profile_id.value for entry in inventory.entries]
@@ -152,7 +152,7 @@ def cli_logic(paths: AppPaths):
     ensure_dirs(paths)
     display_system = None
     if args.perspective:
-        display_system = _refresh_displays(paths)
+        display_system = _detect_displays(paths)
         perspectives = display_system.perspective_dict
         if args.perspective not in perspectives:
             _exit_with_error(f"Valid perspective profile names are: {list(perspectives)}")
@@ -177,11 +177,13 @@ def cli_logic(paths: AppPaths):
             _exit_with_error("Remember to put the custom command in quotes.")
         set_command = args.command[0]
 
-    if display_system is None:  # the perspective check above already refreshed them
-        _refresh_displays(paths)
+    if display_system is None:  # the perspective check above already detected them
+        display_system = _detect_displays(paths)
     set_spanmode()
     profile = CLIProfileData(args.setimages, args.advanced, args.perspective, spangrp, args.offsets)
-    job_thread = change_wallpaper_job(profile, paths, set_command=set_command, force=True)
+    job_thread = change_wallpaper_job(
+        profile, paths, display_system=display_system, set_command=set_command, force=True
+    )
     if job_thread is not None:
         job_thread.join()
     return 0

@@ -40,11 +40,32 @@ def profile_modules(monkeypatch):
     from superpaper import data
     from superpaper import wallpaper_processing as wpproc
 
-    monkeypatch.setattr(wpproc, "NUM_DISPLAYS", 2)
-    monkeypatch.setattr(wpproc, "RESOLUTION_ARRAY", [(1920, 1080), (1280, 1024)])
-    monkeypatch.setattr(wpproc, "DISPLAY_OFFSET_ARRAY", [(0, 0), (1920, 0)])
     monkeypatch.setattr(data, "show_message_dialog", lambda *args, **kwargs: None)
     return data, wpproc
+
+
+def monitor(x, y, width, height, width_mm=500, height_mm=300, name="display"):
+    """A monitor as screeninfo reports it."""
+    return SimpleNamespace(x=x, y=y, width=width, height=height, width_mm=width_mm, height_mm=height_mm, name=name)
+
+
+# Two displays side by side: 1920x1080 and 1280x1024.
+TWO_DISPLAYS = [monitor(0, 0, 1920, 1080, 531, 299), monitor(1920, 0, 1280, 1024, 376, 301)]
+
+
+@pytest.fixture
+def display_layout(monkeypatch, tmp_path):
+    """Build the display layout Superpaper detects for the given monitors.
+
+    The layouts are loaded from ``config_dir``, by default a directory with none saved.
+    """
+    from superpaper import wallpaper_processing as wpproc
+
+    def build(monitors=TWO_DISPLAYS, config_dir=None):
+        monkeypatch.setattr(wpproc, "get_monitors", lambda: monitors)
+        return wpproc.DisplaySystem(config_dir or tmp_path / "no-saved-layouts")
+
+    return build
 
 
 def write_profile(path: Path, *, spanmode="single", sources=(), selected=()):
