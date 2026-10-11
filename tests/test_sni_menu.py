@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 from superpaper.profile_id import ProfileId
 from superpaper.profiles import Profile
-from superpaper.sni_tray import _MenuModel
+from superpaper.ui.sni_tray import _MenuModel
 
 
 def stored(name):

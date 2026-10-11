@@ -1,4 +1,5 @@
-"""Error etc. info dialog."""
+"""Telling the user something: a message dialog, printed instead when there is no GUI;
+and the end of a draft the editor asked for."""
 
 from typing import Any
 
@@ -26,3 +27,12 @@ def show_message_dialog(message, msg_type="Info", parent=None, style="OK"):
         dial = wx.MessageDialog(parent, message, msg_type, wx.YES_NO | wx.STAY_ON_TOP | wx.CENTRE)
         res = dial.ShowModal()
         return res == wx.ID_YES
+
+
+def draft_shown(problem):
+    """Finish a draft (Apply, an align test) on the main thread once it is done: end the
+    busy cursor it started, and say why it wasn't shown, if it wasn't. The dialog that
+    asked for it may be closed by then."""
+    wx.EndBusyCursor()
+    if problem is not None:
+        show_message_dialog(problem, "Error")

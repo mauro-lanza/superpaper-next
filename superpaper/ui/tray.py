@@ -1,5 +1,4 @@
 """Tray applet for Superpaper."""
-# from configuration_dialogs import * # Katso ensin että tuleeko tästä liian pitkä dialogien kanssa.
 
 import configparser
 import os
@@ -14,16 +13,17 @@ import superpaper.profile_store as profile_store
 import superpaper.render_cache as render_cache
 import superpaper.sp_logging as sp_logging
 from superpaper.__version__ import __version__
-from superpaper.configuration_dialogs import HelpFrame, SettingsFrame
 from superpaper.desktop.linux import running_kde
-from superpaper.gui import ConfigFrame
-from superpaper.message_dialog import show_message_dialog
 from superpaper.paths import AppPaths, resource
 from superpaper.profile_id import ProfileId, ProfileIdError
 from superpaper.profile_store import ProfileDiagnosticKind, ProfileStore
 from superpaper.session import Session
 from superpaper.settings import SETTINGS_FILE, Settings, read_settings
-from superpaper.sni_tray import build_tray, sni_supported
+from superpaper.ui.editor import ConfigFrame
+from superpaper.ui.help import HelpFrame
+from superpaper.ui.message import show_message_dialog
+from superpaper.ui.settings_dialog import SettingsFrame
+from superpaper.ui.sni_tray import build_tray, sni_supported
 
 # Constants
 TRAY_TOOLTIP = "Superpaper"

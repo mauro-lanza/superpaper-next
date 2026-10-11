@@ -22,7 +22,7 @@ def start_tray(paths: AppPaths, profile: ProfileId | None = None, *, debug: bool
     A first start writes the default settings, so that the file is there to edit.
     """
     try:
-        from superpaper.tray import tray_loop
+        from superpaper.ui.tray import tray_loop
     except ModuleNotFoundError as error:
         if error.name != "wx":
             raise
