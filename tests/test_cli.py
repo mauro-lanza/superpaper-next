@@ -183,7 +183,7 @@ def test_setimages_dispatches_one_shot_render(monkeypatch, tmp_path, app_paths):
     image = tmp_path / "wallpaper.png"
     image.touch()
     captured = {}
-    profile = object()
+    profile = SimpleNamespace(files=[str(image)])
 
     class Job:
         joined = False
@@ -203,18 +203,18 @@ def test_setimages_dispatches_one_shot_render(monkeypatch, tmp_path, app_paths):
         captured["profile_args"] = (files, advanced, perspective, groups, offsets)
         return profile
 
-    def render(profile, paths, *, display_system, set_command, force):
-        captured["render"] = (profile, paths, display_system, set_command, force)
+    def render(profile, images, paths, *, display_system, set_command):
+        captured["render"] = (profile, images, paths, display_system, set_command)
         return job
 
     monkeypatch.setattr(sys, "argv", ["superpaper", "--setimages", str(image)])
     monkeypatch.setattr(cli, "CLIProfileData", profile_factory)
     monkeypatch.setattr(cli, "DisplaySystem", detect)
-    monkeypatch.setattr(cli, "change_wallpaper_job", render)
+    monkeypatch.setattr(cli, "apply_draft_job", render)
 
     assert cli.cli_logic(app_paths) == 0
     assert captured["profile_args"] == ([str(image)], False, None, None, None)
-    assert captured["render"] == (profile, app_paths, layout, "", True)
+    assert captured["render"] == (profile, [str(image)], app_paths, layout, "")
     assert captured["detections"] == 1
     assert job.joined is True
 
@@ -225,7 +225,7 @@ def test_advanced_cli_arguments_are_preserved(monkeypatch, tmp_path, app_paths):
     image = tmp_path / "wallpaper.png"
     image.touch()
     captured = {}
-    profile = object()
+    profile = SimpleNamespace(files=[str(image)])
     display_system = SimpleNamespace(perspective_dict={"desk": object()}, size_hint=lambda: None)
     monkeypatch.setattr(
         sys,
@@ -256,16 +256,16 @@ def test_advanced_cli_arguments_are_preserved(monkeypatch, tmp_path, app_paths):
     monkeypatch.setattr(cli, "CLIProfileData", profile_factory)
     monkeypatch.setattr(
         cli,
-        "change_wallpaper_job",
-        lambda rendered_profile, paths, *, display_system, set_command, force: captured.update(
-            render=(rendered_profile, paths, display_system, set_command, force)
+        "apply_draft_job",
+        lambda rendered_profile, images, paths, *, display_system, set_command: captured.update(
+            render=(rendered_profile, paths, display_system, set_command)
         ),
     )
 
     assert cli.cli_logic(app_paths) == 0
     assert captured["profile_args"] == ([str(image)], True, "desk", [[0], [1, 2]], ["1", "2"])
     # The layout that knows the perspective is the one the wallpaper is rendered for.
-    assert captured["render"] == (profile, app_paths, display_system, "setter {image}", True)
+    assert captured["render"] == (profile, app_paths, display_system, "setter {image}")
 
 
 @pytest.mark.parametrize(("advanced", "hinted"), [(True, True), (False, False)])
@@ -279,7 +279,7 @@ def test_an_undetected_display_size_is_mentioned_when_spanning_by_size(
     arguments = ["superpaper", "--setimages", str(image), "--command", "setter {image}"]
     monkeypatch.setattr(sys, "argv", [*arguments, "--advanced"] if advanced else arguments)
     monkeypatch.setattr(cli, "DisplaySystem", lambda config_dir: SimpleNamespace(size_hint=lambda: "Enter its size."))
-    monkeypatch.setattr(cli, "change_wallpaper_job", lambda *args, **kwargs: None)
+    monkeypatch.setattr(cli, "apply_draft_job", lambda *args, **kwargs: None)
 
     assert cli.cli_logic(app_paths) == 0
     assert ("Enter its size." in caplog.text) is hinted

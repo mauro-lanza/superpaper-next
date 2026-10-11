@@ -1088,7 +1088,7 @@ class PerspectiveConfig(wx.Dialog):
         profile = CLIProfileData(
             testimage, advanced=True, perspective=perspective, spangroups=None, offsets=flat_offsets
         )
-        thrd = self.frame.parent_tray_obj.change_wallpaper(profile, force=True)
+        thrd = self.frame.parent_tray_obj.apply_draft(profile, profile.files)
         while thrd is not None and thrd.is_alive():
             time.sleep(0.5)
         del busy

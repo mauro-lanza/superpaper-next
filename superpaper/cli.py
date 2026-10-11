@@ -13,7 +13,7 @@ from superpaper.displays import DisplayDetectionError, DisplaySystem
 from superpaper.paths import AppPaths, ensure_dirs
 from superpaper.profile_id import ProfileId, ProfileIdError
 from superpaper.settings import SETTINGS_FILE, read_settings, write_settings
-from superpaper.wallpaper_processing import change_wallpaper_job
+from superpaper.wallpaper_processing import apply_draft_job
 
 
 def start_tray(paths: AppPaths, profile: ProfileId | None = None, *, debug: bool = False) -> None:
@@ -187,9 +187,7 @@ def cli_logic(paths: AppPaths):
         sp_logging.G_LOGGER.warning("%s", hint)
     set_spanmode()
     profile = CLIProfileData(args.setimages, args.advanced, args.perspective, spangrp, args.offsets)
-    job_thread = change_wallpaper_job(
-        profile, paths, display_system=display_system, set_command=set_command, force=True
-    )
+    job_thread = apply_draft_job(profile, profile.files, paths, display_system=display_system, set_command=set_command)
     if job_thread is not None:
         job_thread.join()
     return 0

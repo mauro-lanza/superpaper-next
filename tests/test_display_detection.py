@@ -93,14 +93,7 @@ class SingleImageProfile:
     spanmode = "single"
     zoom = 1.0
     offsets = (0.0, 0.0)
-
-    @staticmethod
-    def has_valid_selection():
-        return True
-
-    @staticmethod
-    def next_wallpaper_files():
-        return ["image.png"]
+    selection = SimpleNamespace(is_complete=lambda: True, current=lambda: ["image.png"])
 
     @staticmethod
     def display_corrections(_resolutions):

@@ -6,25 +6,24 @@ Written by Henri Hänninen.
 
 from __future__ import annotations
 
-import datetime
 import hashlib
 import json
 import math
 import os
-import random
 from collections.abc import Sequence
 from contextlib import ExitStack
 from dataclasses import dataclass
 from enum import Enum, auto
+from functools import partial
 from io import StringIO
 from pathlib import Path
 
 import superpaper.sp_logging as sp_logging
-import superpaper.wallpaper_processing as wpproc
 from superpaper.files import write_atomically
 from superpaper.message_dialog import show_message_dialog
 from superpaper.paths import AppPaths
 from superpaper.profile_id import ManagedPathError, ProfileId, ProfileIdError, collision_key, profile_path
+from superpaper.selection import Selection, is_supported_image
 
 
 class ProfileDiagnosticKind(Enum):
@@ -565,7 +564,7 @@ class ProfileData:
         self.zoom = 1.0
         self.offsets = (0.0, 0.0)
         self.paths_array = []
-        self.selected = None
+        self._legacy_selection = None
 
         self.parse_profile(StringIO(profile_text) if profile_text is not None else self.file)
         # The filename is the identity; a name= line that disagrees (a file renamed
@@ -576,14 +575,19 @@ class ProfileData:
         # A saved profile remembers its selection in selection_file; a stored one
         # supersedes a selected= line written by an older version.
         self.selection_file = selection_file
+        selected = self._legacy_selection
         if selection_file is not None:
             stored_selection = _read_stored_selection(selection_file)
             if stored_selection is not None:
-                self.selected = stored_selection or None
+                selected = stored_selection or None
         self.profile_id: ProfileId | None = profile_id
         self.source_digest = source_digest
-        self.persist_selection = persist_selection
-        self.file_handler = self.Filehandler(self.paths_array, self.sortmode)
+        remember = None
+        if persist_selection and selection_file is not None:
+            remember = partial(_store_selection, selection_file)
+        self.selection = Selection(
+            self.paths_array, self.sortmode, self.selection_target_count(), images=selected, remember=remember
+        )
 
     def parse_profile(self, parse_file):
         """Read wallpaper profile settings from file."""
@@ -687,7 +691,7 @@ class ProfileData:
                         except ValueError, IndexError:
                             self.offsets = (0.0, 0.0)
                     elif words[0] == "selected":
-                        self.selected = _parse_selected(words[1])
+                        self._legacy_selection = _parse_selected(words[1])
                     elif words[0].startswith("display"):
                         paths = words[1].strip().split(";")
                         paths = list(filter(None, paths))  # drop empty strings
@@ -732,22 +736,6 @@ class ProfileData:
             sp_logging.G_LOGGER.info("Corrections of '%s': PPIs %s, offsets %s", self.name, ppi_array, offsets)
         return DisplayCorrections(ppimode, ppi_array, offsets)
 
-    def next_wallpaper_files(self, peek=False):
-        """Return the current wallpaper file(s).
-
-        A persistent selection is the source of truth for what is shown. Only
-        an explicit cycle (advance_wallpaper) moves to the next image, so the
-        wallpaper never changes merely because the profile is rendered again.
-        A peek changes nothing: a selection whose files are missing right now (an
-        unmounted drive, say) is kept for when they return.
-        """
-        if self.has_valid_selection():
-            return list(self.selected or [])
-        if self.selected and not peek:
-            self.selected = None
-            self._write_selected()
-        return self.file_handler.next_wallpaper_files(peek=peek)
-
     def selection_target_count(self):
         """Return how many positional image choices this profile requires: one per
         configured display for a multi-image profile, one per span group, or one."""
@@ -757,251 +745,11 @@ class ProfileData:
             return len(self.spangroups)
         return 1
 
-    def has_valid_selection(self):
-        """Check that the complete positional selection can still be rendered."""
-        return bool(
-            self.selected
-            and len(self.selected) == self.selection_target_count()
-            and all(os.path.isfile(path) and wpproc.is_supported_image(path) for path in self.selected)
-        )
-
-    def advance_wallpaper(self):
-        """Cycle to the next image(s) and make the result the current selection."""
-        files = self.file_handler.next_wallpaper_files()
-        if files and len(files) == self.selection_target_count():
-            self.selected = files
-            self._write_selected()
-            return list(files)
-        return []
-
-    def set_selected_wallpaper(self, files, persist=True):
-        """Pin the given file(s) as the current selection.
-
-        The selection is the source of truth for what is rendered; pinning it
-        keeps the preview and the applied wallpaper in sync across reloads.
-        When ``persist`` is True the choice is remembered across restarts.
-        """
-        self.selected = list(files) if files else None
-        if persist:
-            self._write_selected()
-
-    def _write_selected(self):
-        """Remember the current selection across restarts.
-
-        A saved profile's selection goes to its selection_file, so the profile file
-        itself is left alone; a file opened by path keeps it in its own selected= line.
-        """
-        if not self.persist_selection:
-            return
-        if self.selection_file is None:
-            self._write_selected_unmanaged()
-            return
-        _store_selection(self.selection_file, list(self.selected or []))
-
-    def _write_selected_unmanaged(self):
-        """Retain explicit arbitrary-file parser behavior outside managed storage."""
-        if not self.file:
-            return
-        try:
-            with open(self.file, encoding="utf-8") as profile_file:
-                lines = [line for line in profile_file if not line.startswith("selected=")]
-            if lines and not lines[-1].endswith("\n"):
-                lines[-1] += "\n"
-            if self.selected:
-                lines.append("selected=" + ";".join(self.selected) + "\n")
-            with open(self.file, "w", encoding="utf-8") as profile_file:
-                profile_file.writelines(lines)
-        except OSError as error:
-            sp_logging.G_LOGGER.info("Failed to persist wallpaper selection: %s", error)
-
-    class Filehandler:
-        """
-        Handles picking wallpapers from the assigned paths.
-
-        Since multiple paths are supported per monitor, this class
-        lists all valid images on a monitor by monitor basis and then
-        orders the list according to sortmode. Allows for shuffling of the
-        wallpapers, i.e. non-repeating randomized list, which is re-randomized
-        once it has been exhausted.
-        """
-
-        def __init__(self, paths_array, sortmode):
-            # A list of lists if there is more than one monitor with distinct
-            # input paths.
-            self.all_files_in_paths = []
-            self.paths_array = paths_array
-            self.sortmode = sortmode
-            self._pending_batch = None
-            for paths_list in paths_array:
-                list_of_images = []
-                for path in paths_list:
-                    # Add list items to the end of the list instead of
-                    # appending the list to the list.
-                    if not os.path.exists(path):
-                        message = f"A path was not found: '{path}'.\n\
-Use absolute paths for best reliabilty."
-                        sp_logging.G_LOGGER.info(message)
-                        show_message_dialog(message, "Error")
-                        continue
-                    else:
-                        # List only images that are of supported type.
-                        if os.path.isfile(path):
-                            if wpproc.is_supported_image(path):
-                                list_of_images += [path]
-                        else:
-                            list_of_images += [
-                                os.path.join(path, f) for f in os.listdir(path) if wpproc.is_supported_image(f)
-                            ]
-                # The same file can be included through overlapping directories,
-                # explicit paths, or symlinks. Keep its first occurrence only.
-                unique_images = []
-                seen_images = set()
-                for image in list_of_images:
-                    identity = self._file_identity(image)
-                    if identity not in seen_images:
-                        seen_images.add(identity)
-                        unique_images.append(image)
-                self.all_files_in_paths.append(unique_images)
-            self.iterators = []
-            for diplay_image_list in self.all_files_in_paths:
-                self.iterators.append(self.ImageList(diplay_image_list, self.sortmode))
-
-        def next_wallpaper_files(self, peek=False, _attempt=0):
-            """Return a complete batch, avoiding cross-monitor duplicates when possible."""
-            # Guard against unbounded recursion: a persistently invalid entry
-            # (e.g. a dangling symlink that keeps being re-listed on reinit)
-            # would otherwise loop forever. After this many reinit attempts,
-            # give up without returning a partial positional batch (issue #135).
-            max_attempts = 20
-            # Reject an incomplete positional batch before consuming any of
-            # the other iterators.
-            if any(not iterable.files for iterable in self.iterators):
-                return []
-            if self._pending_batch is None:
-                self._pending_batch = self._plan_batch()
-            files, counters = self._pending_batch
-            if not all(os.path.isfile(path) for path in files):
-                if sp_logging.DEBUG:
-                    sp_logging.G_LOGGER.info("Ran into an invalid file, reinitializing..")
-                if _attempt >= max_attempts:
-                    sp_logging.G_LOGGER.info(
-                        "next_wallpaper_files: giving up after %d attempts due to persistently invalid files",
-                        max_attempts,
-                    )
-                    self._pending_batch = None
-                    return []
-                self.__init__(self.paths_array, self.sortmode)
-                return self.next_wallpaper_files(peek=peek, _attempt=_attempt + 1)
-            if peek:
-                return list(files)
-            for iterable, counter in zip(self.iterators, counters):
-                iterable.counter = counter
-            self._pending_batch = None
-            return list(files)
-
-        @staticmethod
-        def _file_identity(path):
-            return os.path.normcase(os.path.realpath(path))
-
-        def _plan_batch(self):
-            """Choose a maximum-distinct ordered assignment for all positions."""
-            candidates = []
-            for iterable in self.iterators:
-                iterable.prepare_cycle()
-                ordered_indices = list(range(iterable.counter, len(iterable.files))) + list(range(iterable.counter))
-                candidates.append(
-                    [
-                        (iterable.files[index], index + 1, self._file_identity(iterable.files[index]))
-                        for index in ordered_indices
-                    ]
-                )
-
-            image_to_position = {}
-            selected = [None] * len(candidates)
-
-            def assign(position, visited):
-                for path, counter, identity in candidates[position]:
-                    if identity in visited:
-                        continue
-                    visited.add(identity)
-                    previous = image_to_position.get(identity)
-                    if previous is None or assign(previous, visited):
-                        image_to_position[identity] = position
-                        selected[position] = (path, counter)
-                        return True
-                return False
-
-            # Reverse order preserves the earliest position's first choice when
-            # several maximum matchings are otherwise equivalent.
-            for position in reversed(range(len(candidates))):
-                assign(position, set())
-
-            # If uniqueness is impossible, duplicates are preferable to an
-            # incomplete positional batch that could shift monitor assignments.
-            for position, choices in enumerate(candidates):
-                if selected[position] is None:
-                    path, counter, _identity = choices[0]
-                    selected[position] = (path, counter)
-
-            completed = [choice for choice in selected if choice is not None]
-            return ([choice[0] for choice in completed], [choice[1] for choice in completed])
-
-        class ImageList:
-            """Image list iterable that can reinitialize itself once it has been gone through."""
-
-            def __init__(self, filelist, sortmode):
-                self.counter = 0
-                self.files = filelist
-                self.sortmode = sortmode
-                self.arrange_list()
-
-            def __iter__(self):
-                return self
-
-            def _current_image(self):
-                """Return the file at the current position, reshuffling when exhausted."""
-                if not self.files:
-                    return None
-                if self.counter >= len(self.files):
-                    self.counter = 0
-                    self.arrange_list()
-                return self.files[self.counter]
-
-            def prepare_cycle(self):
-                """Arrange the next cycle once before coordinated batch planning."""
-                if self.counter >= len(self.files):
-                    self.counter = 0
-                    self.arrange_list()
-
-            def __next__(self):
-                image = self._current_image()
-                if image is not None:
-                    self.counter += 1
-                return image
-
-            def __peek__(self):
-                return self._current_image()
-
-            def arrange_list(self):
-                """Reorders the image list as requested. Mostly for reoccuring shuffling."""
-                if self.sortmode == "shuffle":
-                    random.shuffle(self.files)
-                elif self.sortmode == "date_seeded_shuffle":
-                    today = datetime.datetime.now()  # noqa: DTZ005  # intentional local-time seed
-                    random.Random(today.strftime("%Y%m%d%H")).shuffle(self.files)
-                elif self.sortmode == "alphabetical":
-                    self.files.sort()
-                else:
-                    sp_logging.G_LOGGER.info("ImageList.arrange_list: unknown sortmode: %s", self.sortmode)
-
 
 class CLIProfileData(ProfileData):
     """
-    Stripped down version of the ProfileData object for CLI usage.
-
-    Notable differences are that this can be initialized with input data
-    and this redefines the next_wallpaper_files function to just return
-    the images given as input.
+    The settings of images shown from the command line or by the align test: a draft,
+    with the images given (``files``) rather than a slideshow of its own.
     """
 
     def __init__(self, files, advanced=False, perspective=None, spangroups=None, offsets=None):
@@ -1027,28 +775,11 @@ class CLIProfileData(ProfileData):
 
         for item in files:
             self.files.append(os.path.realpath(item))
-        # CLI/preview profiles use a fixed image set; treat it as the selection
-        # so the renderer never tries to cycle.
-        self.selected = self.files
 
     def display_corrections(self, resolutions) -> DisplayCorrections:
         """Offsets given on the command line apply to the displays present; nothing else is corrected."""
         count = len(resolutions)
         return DisplayCorrections(False, count * [100], (self.offset_pairs + count * [(0, 0)])[:count])
-
-    def selection_target_count(self):
-        """One image per display for multiple images; one per group, or one, otherwise."""
-        if self.spanmode == "multi":
-            return len(self.files)
-        return super().selection_target_count()
-
-    def next_wallpaper_files(self, peek=False):
-        """Returns a list of the real paths of the images given at construction time."""
-        return self.files
-
-    def advance_wallpaper(self):
-        """CLI/preview profiles have a fixed image set; cycling is a no-op."""
-        return self.files
 
 
 class TempProfileData:
@@ -1294,14 +1025,14 @@ Valid modifiers are 'control', 'super', 'alt', 'shift'."
             path_list = path_list_str.split(";")
             for path in path_list:
                 if os.path.isdir(path) is True:
-                    if any(wpproc.is_supported_image(f) for f in os.listdir(path)):
+                    if any(is_supported_image(f) for f in os.listdir(path)):
                         continue
                     else:
                         msg = f"Path '{path}' does not contain supported image files."
                         show_message_dialog(msg, "Error")
                         return False
                 elif os.path.isfile(path) is True:
-                    if wpproc.is_supported_image(path):
+                    if is_supported_image(path):
                         continue
                     else:
                         msg = f"Image '{path}' is not a supported image file."

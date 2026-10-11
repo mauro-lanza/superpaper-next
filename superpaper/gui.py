@@ -16,7 +16,6 @@ from PIL import ImageEnhance
 
 import superpaper.displays as displays
 import superpaper.sp_logging as sp_logging
-import superpaper.wallpaper_processing as wpproc
 from superpaper.configuration_dialogs import (
     BrowsePaths,
     DisplayPositionEntry,
@@ -38,6 +37,7 @@ from superpaper.message_dialog import show_message_dialog
 from superpaper.paths import resource
 from superpaper.profile_id import ProfileId, ProfileIdError
 from superpaper.render import SourceImageError, open_source_image, resize_to_fill
+from superpaper.selection import is_supported_image
 from superpaper.settings import read_settings
 
 
@@ -712,7 +712,7 @@ class WallpaperSettingsPanel(wx.Panel):
         # Preview the tray's instance when it has one: its selection follows the slideshow.
         live_profile = self.parent_tray_obj.get_profile_by_name(profile.name) or profile
         self.wpprev_pnl.preview_wallpaper(
-            live_profile.next_wallpaper_files(peek=True),
+            live_profile.selection.current(),
             self.show_advanced_settings,
             self.use_multi_image,
             display_data,
@@ -1242,7 +1242,7 @@ class WallpaperSettingsPanel(wx.Panel):
         preview_file = None
         if os.path.isdir(path):
             for f in sorted(os.listdir(path)):
-                if wpproc.is_supported_image(f):
+                if is_supported_image(f):
                     preview_file = os.path.join(path, f)
                     break
         elif os.path.isfile(path):
@@ -1370,8 +1370,8 @@ class WallpaperSettingsPanel(wx.Panel):
             # display settings — bezels, sizes, positions — are reflected. This
             # deliberately does NOT reload the saved layout, which lets the user
             # test system tweaks via Apply before committing them.
-            thrd = self.parent_tray_obj.change_wallpaper(
-                preview_profile, force=True, display_system=copy.deepcopy(self.display_sys)
+            thrd = self.parent_tray_obj.apply_draft(
+                preview_profile, preview_profile.selection.current(), display_system=copy.deepcopy(self.display_sys)
             )
             # Pump the event loop while rendering so the GUI stays responsive.
             while thrd is not None and thrd.is_alive():
@@ -1384,7 +1384,7 @@ class WallpaperSettingsPanel(wx.Panel):
             if tmp_profile.selected:
                 live = self._loaded_profile_with_selection()
                 if live is not None:
-                    live.set_selected_wallpaper(tmp_profile.selected, persist=True)
+                    live.selection.pin(tmp_profile.selected)
         finally:
             try:
                 os.remove(temp_file)
@@ -1498,8 +1498,8 @@ class WallpaperSettingsPanel(wx.Panel):
                 # edited (rename) and not exist on disk yet -- otherwise the
                 # selection is lost and the preview/applied image cycles (#158).
                 existing = self._loaded_profile_with_selection()
-                if existing and existing.selected:
-                    tmp_profile.selected = existing.selected
+                if existing and existing.selection.images:
+                    tmp_profile.selected = existing.selection.images
 
         # span groups
         groups = None
@@ -1604,7 +1604,7 @@ class WallpaperSettingsPanel(wx.Panel):
                 display_data = self.display_sys.get_disp_list(True)
             else:
                 display_data = self.display_sys.get_disp_list(False)
-            preview_files = saved_profile.next_wallpaper_files(peek=True)
+            preview_files = saved_profile.selection.current()
             self.wpprev_pnl.preview_wallpaper(
                 preview_files,
                 self.show_advanced_settings,
@@ -1737,7 +1737,7 @@ class WallpaperSettingsPanel(wx.Panel):
         profile = CLIProfileData(
             testimage, advanced=True, perspective=perspective, spangroups=None, offsets=flat_offsets
         )
-        thrd = self.parent_tray_obj.change_wallpaper(profile, force=True)
+        thrd = self.parent_tray_obj.apply_draft(profile, profile.files)
         # Pump the event loop while rendering so the GUI stays responsive
         # instead of freezing.
         while thrd is not None and thrd.is_alive():

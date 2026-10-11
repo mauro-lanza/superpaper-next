@@ -223,7 +223,7 @@ def test_save_after_apply_succeeds(profile_modules, app_paths, monkeypatch, tmp_
     first.touch()
     second.touch()
     loaded = stored_profile(data, app_paths, "Work", f"display0paths={tmp_path}\nselected={first}\n")
-    loaded.set_selected_wallpaper([str(second)], persist=True)  # what Apply does
+    loaded.selection.pin([str(second)])  # what Apply does
     edited = temp_profile(data, "Work")
     edited.hk_binding = "control+x"
     edited.selected = [str(second)]
@@ -232,7 +232,7 @@ def test_save_after_apply_succeeds(profile_modules, app_paths, monkeypatch, tmp_
 
     reloaded = data.open_profile(app_paths, ProfileId("Work"))
     assert reloaded.hk_binding == ("control", "x")
-    assert reloaded.selected == [str(second)]
+    assert reloaded.selection.images == [str(second)]
 
 
 def test_save_after_a_slideshow_tick_succeeds(profile_modules, app_paths, monkeypatch, tmp_path):
@@ -242,11 +242,11 @@ def test_save_after_a_slideshow_tick_succeeds(profile_modules, app_paths, monkey
     (images / "a.png").touch()
     (images / "b.png").touch()
     loaded = stored_profile(data, app_paths, "Work", f"sortmode=alphabetical\ndisplay0paths={images}\n")
-    loaded.advance_wallpaper()  # what a slideshow tick does while the editor is open
+    loaded.selection.advance()  # what a slideshow tick does while the editor is open
 
     save_over(data, app_paths, loaded, temp_profile(data, "Work"))
 
-    assert data.open_profile(app_paths, ProfileId("Work")).selected == [str(images / "a.png")]
+    assert data.open_profile(app_paths, ProfileId("Work")).selection.images == [str(images / "a.png")]
 
 
 def test_save_carries_over_a_selection_from_an_older_version(profile_modules, app_paths, monkeypatch, tmp_path):
@@ -259,7 +259,7 @@ def test_save_carries_over_a_selection_from_an_older_version(profile_modules, ap
     save_over(data, app_paths, loaded, temp_profile(data, "Work"))
 
     assert "selected=" not in (profiles / "Work.profile").read_text(encoding="utf-8")
-    assert data.open_profile(app_paths, ProfileId("Work")).selected == [str(image)]
+    assert data.open_profile(app_paths, ProfileId("Work")).selection.images == [str(image)]
 
 
 def test_remembering_a_selection_leaves_the_profile_file_alone(profile_modules, app_paths, monkeypatch, tmp_path):
@@ -270,10 +270,10 @@ def test_remembering_a_selection_leaves_the_profile_file_alone(profile_modules, 
     loaded = stored_profile(data, app_paths, "Work", "display0paths=source\ncustom=value\n")
     original = (profiles / "Work.profile").read_bytes()
 
-    loaded.set_selected_wallpaper([str(image)], persist=True)
+    loaded.selection.pin([str(image)])
 
     assert (profiles / "Work.profile").read_bytes() == original
-    assert data.open_profile(app_paths, ProfileId("Work")).selected == [str(image)]
+    assert data.open_profile(app_paths, ProfileId("Work")).selection.images == [str(image)]
 
 
 def test_rename_moves_the_selection_and_delete_forgets_it(profile_modules, app_paths, monkeypatch, tmp_path):
@@ -281,15 +281,15 @@ def test_rename_moves_the_selection_and_delete_forgets_it(profile_modules, app_p
     image = tmp_path / "wallpaper.png"
     image.touch()
     loaded = stored_profile(data, app_paths, "Work")
-    loaded.set_selected_wallpaper([str(image)], persist=True)
+    loaded.selection.pin([str(image)])
 
     save_over(data, app_paths, loaded, temp_profile(data, "Renamed"))
     renamed = data.open_profile(app_paths, ProfileId("Renamed"))
     data.delete_managed_profile(app_paths, renamed)
     recreated = stored_profile(data, app_paths, "Renamed")
 
-    assert renamed.selected == [str(image)]
-    assert recreated.selected is None
+    assert renamed.selection.images == [str(image)]
+    assert recreated.selection.images is None
 
 
 def test_unmanaged_preview_selection_is_never_persisted(profile_modules, tmp_path):
@@ -299,7 +299,7 @@ def test_unmanaged_preview_selection_is_never_persisted(profile_modules, tmp_pat
     path.write_bytes(original)
     preview = data.parse_profile_file(path)
 
-    preview.set_selected_wallpaper(["wallpaper.png"], persist=True)
+    preview.selection.pin(["wallpaper.png"])
 
     assert path.read_bytes() == original
 

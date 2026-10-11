@@ -29,6 +29,7 @@ from superpaper.profile_id import ProfileId, ProfileIdError
 from superpaper.settings import SETTINGS_FILE, Settings, read_settings
 from superpaper.sni_tray import build_tray, sni_supported
 from superpaper.wallpaper_processing import (
+    apply_draft_job,
     change_wallpaper_job,
     quick_profile_job,
     run_profile_job,
@@ -472,21 +473,32 @@ Check that it is formatted properly and valid keys."
         """
         self.display_system = displays.DisplaySystem(self.paths.config)
 
-    def change_wallpaper(self, profile, *, force=False, advance=False, skip_if_busy=False, display_system=None):
-        """Start one wallpaper change for ``profile``, with the settings and displays as they are now.
+    def change_wallpaper(self, profile, *, advance=False, skip_if_busy=False):
+        """Start one wallpaper change for the running ``profile``, with the settings and
+        displays as they are now.
 
         The slideshow timer calls this on every tick, so a changed custom command or
-        display layout applies from the next tick on. ``display_system`` renders for
-        another layout instead, such as the editor's unsaved one.
+        display layout applies from the next tick on.
         """
         return change_wallpaper_job(
             profile,
             self.paths,
-            display_system=display_system if display_system is not None else self.display_system,
+            display_system=self.display_system,
             set_command=self.g_settings.set_command,
-            force=force,
             advance=advance,
             skip_if_busy=skip_if_busy,
+        )
+
+    def apply_draft(self, profile, images, *, display_system=None):
+        """Show ``images`` with ``profile``'s settings, which aren't a running profile's,
+        such as the editor's unsaved ones; ``display_system`` renders for another layout,
+        such as the editor's unsaved one."""
+        return apply_draft_job(
+            profile,
+            images,
+            self.paths,
+            display_system=display_system if display_system is not None else self.display_system,
+            set_command=self.g_settings.set_command,
         )
 
     def _run_profile(self, profile, *, startup=False):

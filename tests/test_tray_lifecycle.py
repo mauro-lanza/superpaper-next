@@ -332,10 +332,27 @@ def test_wallpaper_changes_use_the_displays_current_at_the_time(headless_tray_mo
     refreshed = SimpleNamespace(name="refreshed")
     icon.display_system = refreshed
     icon.change_wallpaper(profile("active"), advance=True, skip_if_busy=True)
-    unsaved = SimpleNamespace(name="unsaved")
-    icon.change_wallpaper(profile("active"), force=True, display_system=unsaved)
 
-    assert layouts == [LAYOUT, refreshed, unsaved]
+    assert layouts == [LAYOUT, refreshed]
+
+
+def test_a_draft_renders_for_the_layout_it_is_given(headless_tray_module, monkeypatch):
+    tray = headless_tray_module
+    drafts = []
+    monkeypatch.setattr(
+        tray,
+        "apply_draft_job",
+        lambda draft, images, paths, **options: drafts.append((draft, images, options["display_system"])),
+    )
+    icon = controller(tray)
+    draft = profile("unsaved edits")
+    unsaved = SimpleNamespace(name="unsaved")
+
+    # The editor's Apply renders for its own, unsaved layout; the align test for the saved one.
+    icon.apply_draft(draft, ["/image.png"], display_system=unsaved)
+    icon.apply_draft(draft, ["/test.png"])
+
+    assert drafts == [(draft, ["/image.png"], unsaved), (draft, ["/test.png"], LAYOUT)]
 
 
 def test_a_failed_display_refresh_keeps_the_previous_layout(headless_tray_module, monkeypatch, tmp_path):

@@ -69,32 +69,6 @@ def test_temp_profile_save_bytes_are_canonical(profile_modules, tmp_path):
     assert output.read_bytes() == platform_bytes(expected)
 
 
-def test_selection_rewrite_preserves_other_profile_lines(profile_modules, tmp_path):
-    data, _ = profile_modules
-    first = tmp_path / "first.png"
-    second = tmp_path / "second.png"
-    first.touch()
-    second.touch()
-    profile_path = write_profile(tmp_path / "test.profile", sources=[first], selected=[first])
-    original = profile_path.read_text(encoding="utf-8").replace(
-        "sortmode=alphabetical\n", "unknown legacy=value\nsortmode=alphabetical\n"
-    )
-    profile_path.write_text(original, encoding="utf-8")
-    profile = data.ProfileData(profile_path)
-
-    profile.set_selected_wallpaper([str(second)])
-
-    assert profile_path.read_text(encoding="utf-8") == (
-        "name=test\n"
-        "spanmode=single\n"
-        "slideshow=false\n"
-        "unknown legacy=value\n"
-        "sortmode=alphabetical\n"
-        f"display0paths={first}\n"
-        f"selected={second}\n"
-    )
-
-
 def test_general_settings_round_trip_is_canonical(tmp_path):
     settings_path = tmp_path / "general_settings"
     settings_path.write_text(
@@ -150,7 +124,7 @@ def test_source_paths_may_contain_equals_signs(profile_modules, tmp_path):
     profile = data.ProfileData(write_profile(tmp_path / "test.profile", sources=[folder]))
 
     assert profile.paths_array == [[str(folder)]]
-    assert profile.next_wallpaper_files(peek=True) == [str(image)]
+    assert profile.selection.current() == [str(image)]
 
 
 def test_identical_sources_are_written_with_their_own_display_numbers(profile_modules):
