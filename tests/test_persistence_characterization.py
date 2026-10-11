@@ -5,7 +5,7 @@ import pytest
 from superpaper import profiles
 from superpaper.profiles import Profile
 from superpaper.settings import read_settings, write_settings
-from tests.conftest import write_profile
+from tests.conftest import load_profile, write_profile
 
 
 def test_minimal_profile_uses_legacy_defaults(tmp_path):
@@ -107,30 +107,28 @@ def test_general_settings_round_trip_is_canonical(tmp_path):
     assert settings_path.read_bytes() == expected.encode()
 
 
-def test_loading_a_profile_leaves_its_file_alone(profile_modules, app_paths, tmp_path):
-    data, _ = profile_modules
+def test_loading_a_profile_leaves_its_file_alone(app_paths, tmp_path):
     image = tmp_path / "wallpaper.png"
     image.touch()
     profile_path = app_paths.profiles / "noise.profile"
     raw = f"name=noise\r\nspanmode=single\r\ndisplay0paths={image}"
     profile_path.write_bytes(raw.encode())
 
-    stored = data.open_profile(app_paths, "noise")
+    stored = load_profile(app_paths, "noise")
     stored.selection.advance()
 
     assert stored.profile.sources == ((str(image),),)
     assert profile_path.read_bytes() == raw.encode()
 
 
-def test_source_paths_may_contain_equals_signs(profile_modules, app_paths, tmp_path):
-    data, _ = profile_modules
+def test_source_paths_may_contain_equals_signs(app_paths, tmp_path):
     folder = tmp_path / "a=b"
     folder.mkdir()
     image = folder / "wallpaper.png"
     image.touch()
 
     write_profile(app_paths.profiles / "test.profile", sources=[folder])
-    stored = data.open_profile(app_paths, "test")
+    stored = load_profile(app_paths, "test")
 
     assert stored.profile.sources == ((str(folder),),)
     assert stored.selection.current() == [str(image)]

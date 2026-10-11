@@ -7,8 +7,7 @@ from typing import NoReturn
 
 import superpaper.desktop as desktop
 import superpaper.sp_logging as sp_logging
-from superpaper import profiles
-from superpaper.data import discover_profile_inventory
+from superpaper import profile_store, profiles
 from superpaper.desktop.spanmode import set_spanmode
 from superpaper.displays import DisplayDetectionError, DisplaySystem
 from superpaper.paths import AppPaths, ensure_dirs
@@ -130,7 +129,7 @@ def cli_logic(paths: AppPaths):
             _exit_with_error(f"Invalid profile name: {error}")
         ensure_dirs(paths)
         _detect_displays(paths)  # fail here, with a message, rather than in the tray
-        inventory = discover_profile_inventory(paths)
+        inventory = profile_store.discover(paths)
         if inventory.find(profile_id) is None:
             names = [entry.profile_id.value for entry in inventory.entries]
             _exit_with_error(

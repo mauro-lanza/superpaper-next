@@ -35,13 +35,15 @@ def app_paths(tmp_path):
     return paths
 
 
-@pytest.fixture
-def profile_modules(monkeypatch):
-    from superpaper import data
-    from superpaper import wallpaper_processing as wpproc
+def load_profile(paths, name):
+    """The record of the saved profile ``name`` (or ProfileId), loaded as the tray loads
+    it; None if it doesn't load."""
+    from superpaper.profile_id import ProfileId
+    from superpaper.profile_store import ProfileStore
 
-    monkeypatch.setattr(data, "show_message_dialog", lambda *args, **kwargs: None)
-    return data, wpproc
+    store = ProfileStore(paths)
+    store.reload()
+    return store.get(name if isinstance(name, ProfileId) else ProfileId(name))
 
 
 def monitor(x, y, width, height, width_mm=500, height_mm=300, name="display"):

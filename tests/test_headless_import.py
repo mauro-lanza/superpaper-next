@@ -13,7 +13,6 @@ import sys
 HEADLESS_MODULES = (
     "superpaper.__main__",
     "superpaper.cli",
-    "superpaper.data",
     "superpaper.desktop",
     "superpaper.desktop.kde",
     "superpaper.desktop.linux",
@@ -26,6 +25,7 @@ HEADLESS_MODULES = (
     "superpaper.paths",
     "superpaper.perspective",
     "superpaper.profile_id",
+    "superpaper.profile_store",
     "superpaper.profiles",
     "superpaper.render",
     "superpaper.render_cache",

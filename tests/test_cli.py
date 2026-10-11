@@ -347,7 +347,7 @@ def test_invalid_profile_id_fails_before_inventory_or_display_data(monkeypatch, 
     profiles = app_paths.profiles
     (profiles / "existing.profile").write_text("name=existing\n", encoding="utf-8")
     monkeypatch.setattr(cli, "DisplaySystem", lambda config_dir: pytest.fail("display data was requested"))
-    monkeypatch.setattr(cli, "discover_profile_inventory", lambda paths: pytest.fail("inventory was constructed"))
+    monkeypatch.setattr(cli.profile_store, "discover", lambda paths: pytest.fail("inventory was constructed"))
     monkeypatch.setattr(sys, "argv", ["superpaper", "--profile", "../invalid"])
 
     with pytest.raises(SystemExit):

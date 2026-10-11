@@ -10,22 +10,18 @@ import wx.adv  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-i
 
 import superpaper.desktop as desktop
 import superpaper.displays as displays
+import superpaper.profile_store as profile_store
 import superpaper.render_cache as render_cache
 import superpaper.sp_logging as sp_logging
 import superpaper.wallpaper_processing as wpproc
 from superpaper.__version__ import __version__
 from superpaper.configuration_dialogs import HelpFrame, SettingsFrame
-from superpaper.data import (
-    list_profiles,
-    read_active_profile,
-    stored_profile_ids,
-    write_active_profile,
-)
 from superpaper.desktop.linux import running_kde
 from superpaper.gui import ConfigFrame
 from superpaper.message_dialog import show_message_dialog
 from superpaper.paths import AppPaths, resource
 from superpaper.profile_id import ProfileId, ProfileIdError
+from superpaper.profile_store import ProfileDiagnosticKind, ProfileStore, write_active_profile
 from superpaper.settings import SETTINGS_FILE, Settings, read_settings
 from superpaper.sni_tray import build_tray, sni_supported
 from superpaper.wallpaper_processing import (
@@ -113,13 +109,14 @@ class TaskBarIcon(wx.adv.TaskBarIcon):
         self.repeating_timer = None
         self.pause_item = None
         self.is_paused = False
-        self.list_of_profiles = list_profiles(self.paths)
-        # Renders of profiles deleted or renamed since the last start aren't needed.
-        stored = stored_profile_ids(self.paths)
+        self.store = ProfileStore(self.paths)
+        self._load_profiles()
+        # Renders and selections of profiles deleted or renamed since the last start
+        # aren't needed.
+        stored = profile_store.stored_profile_ids(self.paths)
         if stored is not None:
             render_cache.sweep(self.paths.cache, stored)
-        # Should now return an object if a previous profile was written or
-        # None if no previous data was found
+            profile_store.sweep_selections(self.paths.cache, stored)
         if startup_profile:
             self.active_profile = self.get_profile_by_id(startup_profile)
             if self.active_profile is None:
@@ -128,11 +125,7 @@ class TaskBarIcon(wx.adv.TaskBarIcon):
                     startup_profile.value,
                 )
         else:
-            prev_active_prof = read_active_profile(self.paths)
-            if prev_active_prof:
-                self.active_profile = self.get_profile_by_id(prev_active_prof.profile_id)
-            else:
-                self.active_profile = None
+            self.active_profile = self.store.active()
         if self.active_profile:
             wpproc.G_ACTIVE_PROFILE = self.active_profile.profile.name
         # An explicit CLI `--profile` launch should apply the wallpaper right
@@ -299,7 +292,6 @@ Check that it is formatted properly and valid keys."
                     # pass
 
                     # register profile specific bindings
-                    self.list_of_profiles = list_profiles(self.paths)
                     for stored in self.list_of_profiles:
                         hotkey = stored.profile.hotkey
                         if sp_logging.DEBUG:
@@ -362,6 +354,11 @@ Check that it is formatted properly and valid keys."
             if not running_kde():
                 show_message_dialog(msg, "Error")
 
+    @property
+    def list_of_profiles(self):
+        """The saved profiles, in the order the menus show them."""
+        return self.store.profiles
+
     def get_profile_by_name(self, name):
         try:
             return self.get_profile_by_id(ProfileId.parse(name))
@@ -369,10 +366,7 @@ Check that it is formatted properly and valid keys."
             return None
 
     def get_profile_by_id(self, profile_id):
-        for prof in self.list_of_profiles:
-            if prof.profile_id == profile_id:
-                return prof
-        return None
+        return self.store.get(profile_id)
 
     def profile_consumer(self, event, hotkey, bound_args):
         """Start the profile bound to a hotkey; called on the hotkey listener thread."""
@@ -449,11 +443,11 @@ Check that it is formatted properly and valid keys."
 
     def reload_profiles(self, event):
         """Reloads profiles from disk."""
-        self.list_of_profiles = list_profiles(self.paths)
-        # Re-point active_profile at the freshly loaded instance (matched by
-        # identity) so consumers that read tray.active_profile -- e.g. the settings
-        # dialog when it reopens -- see the saved state instead of a stale
-        # detached object (was causing edits like span mode to appear reverted).
+        self._load_profiles()
+        # Re-point active_profile at the profile's current record (matched by identity) so
+        # consumers that read tray.active_profile -- e.g. the settings dialog when it
+        # reopens -- see the saved state instead of a stale detached object (was causing
+        # edits like span mode to appear reverted).
         if self.active_profile is not None:
             refreshed = self.get_profile_by_id(self.active_profile.profile_id)
             if refreshed is not None:
@@ -465,6 +459,20 @@ Check that it is formatted properly and valid keys."
                     self.repeating_timer = None
                     self.active_profile = None
                     wpproc.G_ACTIVE_PROFILE = None
+
+    def _load_profiles(self):
+        """Read the profiles directory again, offering to delete profiles that can't be loaded."""
+        for diagnostic in self.store.reload():
+            if diagnostic.kind is not ProfileDiagnosticKind.MALFORMED_CONTENT:
+                sp_logging.G_LOGGER.warning("Ignoring %s: %s", diagnostic.path, diagnostic.detail)
+                continue
+            message = (
+                f"There was an error when loading profile '{diagnostic.path.name}'.\n"
+                "Would you like to delete it? Choosing 'No' will just ignore the profile."
+            )
+            sp_logging.G_LOGGER.info("%s %s", message, diagnostic.detail)
+            if show_message_dialog(message, "Error", style="YES_NO"):
+                profile_store.delete_malformed(diagnostic)
 
     def refresh_displays(self):
         """Detect the displays and load their saved layout; later wallpaper changes use it.

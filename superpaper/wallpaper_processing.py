@@ -23,11 +23,11 @@ from superpaper.profiles import Profile
 from superpaper.sp_platform import IS_WINDOWS
 
 if TYPE_CHECKING:
-    from superpaper.data import StoredProfile
+    from superpaper.profile_store import StoredProfile
 
 # Global constants
 
-G_ACTIVE_PROFILE = None
+G_ACTIVE_PROFILE: str | None = None
 G_WALLPAPER_CHANGE_LOCK = Lock()
 G_WALLPAPER_CHANGE_PENDING = Lock()
 

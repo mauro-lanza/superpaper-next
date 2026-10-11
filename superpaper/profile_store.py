@@ -1,27 +1,28 @@
-"""
-Saved profiles: finding and loading the profiles in the profiles directory, saving,
-renaming and deleting them, and remembering which one runs and what it shows.
+"""The profiles directory: the saved profiles in it, and saving, renaming and deleting
+them; which profile runs, and what each one shows.
 
-Written by Henri Hänninen.
+A profile's identity is its filename stem, a ProfileId. A ProfileStore holds one record
+per profile, which the tray, the editor and the slideshow share.
 """
-
-from __future__ import annotations
 
 import hashlib
 import json
+import logging
+import os
+from collections.abc import Iterable
 from dataclasses import dataclass, replace
 from enum import Enum, auto
 from functools import partial
 from pathlib import Path
 
-import superpaper.sp_logging as sp_logging
 from superpaper import profiles
 from superpaper.files import write_atomically
-from superpaper.message_dialog import show_message_dialog
 from superpaper.paths import AppPaths
 from superpaper.profile_id import ManagedPathError, ProfileId, ProfileIdError, collision_key, profile_path
 from superpaper.profiles import Profile
 from superpaper.selection import Selection
+
+logger = logging.getLogger(__name__)
 
 
 class ProfileDiagnosticKind(Enum):
@@ -33,6 +34,8 @@ class ProfileDiagnosticKind(Enum):
 
 @dataclass(frozen=True, slots=True)
 class ProfileDiscoveryDiagnostic:
+    """A file in the profiles directory that isn't a usable profile, and why."""
+
     path: Path
     kind: ProfileDiagnosticKind
     detail: str
@@ -76,6 +79,10 @@ class ProfileTransactionError(OSError):
         self.original_error = error
         self.rollback_errors = rollback_errors
 
+    def __str__(self) -> str:
+        # The editor shows this; OSError's own would start with "[Errno None]".
+        return self.strerror or ""
+
 
 _DESTINATION_WRITE = "destination write"
 _SOURCE_VERIFICATION = "source verification"
@@ -83,16 +90,89 @@ _SOURCE_REMOVAL = "source removal"
 _ACTIVE_POINTER_UPDATE = "active pointer update"
 
 
+class ProfileStore:
+    """The saved profiles, one record per profile.
+
+    Everything that uses a profile gets its record here, so all of them see what it
+    shows now. Reloading keeps the record of a profile whose file hasn't changed, and so
+    where its slideshow is.
+    """
+
+    def __init__(self, paths: AppPaths):
+        self.paths = paths
+        self._records: dict[ProfileId, StoredProfile] = {}
+
+    @property
+    def profiles(self) -> list[StoredProfile]:
+        """The profiles that loaded, in filename order."""
+        return list(self._records.values())
+
+    def get(self, profile_id: ProfileId) -> StoredProfile | None:
+        return self._records.get(profile_id)
+
+    def active(self) -> StoredProfile | None:
+        """The profile that was running when Superpaper last exited, if it still loads."""
+        profile_id = read_active_profile_id(self.paths.cache)
+        if profile_id is None:
+            return None
+        stored = self.get(profile_id)
+        if stored is None:
+            logger.info("The previously running profile '%s' no longer exists.", profile_id.value)
+        return stored
+
+    def reload(self) -> tuple[ProfileDiscoveryDiagnostic, ...]:
+        """Read the profiles directory again; returns the files that couldn't be loaded."""
+        inventory = discover(self.paths)
+        previous = self._records
+        self._records = {}
+        for loaded in inventory.entries:
+            kept = previous.get(loaded.profile_id)
+            unchanged = kept is not None and kept.path == loaded.path and kept.digest == loaded.digest
+            self._records[loaded.profile_id] = kept if kept is not None and unchanged else loaded
+        return inventory.diagnostics
+
+    def save(
+        self,
+        profile: Profile,
+        *,
+        selected: list[str] | None = None,
+        current: StoredProfile | None = None,
+        update_active: bool = False,
+    ) -> StoredProfile:
+        """Save ``profile`` as a new profile, or over ``current``, renaming it if its name
+        changed; returns its record. See save_managed_profile."""
+        path = save_managed_profile(
+            self.paths,
+            profile,
+            selected=selected,
+            current_profile_id=current.profile_id if current is not None else None,
+            expected_source_digest=current.digest if current is not None else None,
+            update_active=update_active,
+        )
+        self.reload()
+        stored = self.get(ProfileId.parse(path.stem))
+        if stored is None:
+            message = f"The saved profile {path} could not be loaded again."
+            raise ProfileTransactionError(_DESTINATION_WRITE, ValueError(message))
+        return stored
+
+    def delete(self, stored: StoredProfile) -> None:
+        """Delete a profile and forget what it showed, unless its file changed after it was
+        loaded (ManagedPathError)."""
+        delete_managed_profile(self.paths, stored)
+        self._records.pop(stored.profile_id, None)
+
+
 def _content_digest(content: bytes) -> bytes:
     """Fingerprint a profile file's bytes, to notice edits made outside the editor."""
     return hashlib.sha256(content).digest()
 
 
-def discover_profile_inventory(paths: AppPaths) -> ProfileInventory:
+def discover(paths: AppPaths) -> ProfileInventory:
     """Load every profile in the profiles directory and explain the ones that can't load.
 
-    A profile's identity is its filename stem. Symlinked profiles are followed, so
-    profiles kept in a dotfile repository work.
+    Symlinked profiles are followed, so profiles kept in a dotfile repository work.
+    Loading lists none of a profile's sources: that happens when its images are needed.
     """
     root = paths.profiles
     try:
@@ -110,7 +190,7 @@ def discover_profile_inventory(paths: AppPaths) -> ProfileInventory:
         except ProfileIdError as error:
             diagnostics.append(ProfileDiscoveryDiagnostic(path, ProfileDiagnosticKind.INVALID_FILENAME, str(error)))
             continue
-        loaded = _load_managed_profile(path, profile_id, paths.cache)
+        loaded = _load(path, profile_id, paths.cache)
         if isinstance(loaded, StoredProfile):
             entries.append(loaded)
         else:
@@ -118,9 +198,7 @@ def discover_profile_inventory(paths: AppPaths) -> ProfileInventory:
     return ProfileInventory(tuple(entries), tuple(diagnostics))
 
 
-def _load_managed_profile(
-    path: Path, profile_id: ProfileId, cache_dir: Path
-) -> StoredProfile | ProfileDiscoveryDiagnostic:
+def _load(path: Path, profile_id: ProfileId, cache_dir: Path) -> StoredProfile | ProfileDiscoveryDiagnostic:
     if not path.is_file():
         return ProfileDiscoveryDiagnostic(
             path, ProfileDiagnosticKind.NOT_REGULAR_FILE, "Not a regular file.", profile_id
@@ -137,7 +215,7 @@ def _load_managed_profile(
     # The filename is the identity; a name= line that disagrees (a file renamed by hand,
     # or a case-only rename on Windows) is corrected on the next save.
     if profile.name != profile_id.value:
-        sp_logging.G_LOGGER.info("%s calls itself '%s'; using its filename.", path, profile.name)
+        logger.info("%s calls itself '%s'; using its filename.", path, profile.name)
         profile = replace(profile, name=profile_id.value)
     # A remembered selection supersedes a selected= line written by an older version.
     selection_file = _selection_path(cache_dir, profile_id)
@@ -153,47 +231,20 @@ def _load_managed_profile(
     return StoredProfile(profile_id, path, profile, digest, selection)
 
 
-# Profile and data handling, back-end interface.
-def list_profiles(paths: AppPaths) -> list[StoredProfile]:
-    """Return every usable profile, offering to delete the ones that fail to parse."""
-    inventory = discover_profile_inventory(paths)
-    for diagnostic in inventory.diagnostics:
-        if diagnostic.kind is ProfileDiagnosticKind.MALFORMED_CONTENT:
-            _prompt_to_delete_malformed_profile(diagnostic)
-        else:
-            sp_logging.G_LOGGER.warning("Ignoring %s: %s", diagnostic.path, diagnostic.detail)
-    return list(inventory.entries)
-
-
-def _prompt_to_delete_malformed_profile(diagnostic: ProfileDiscoveryDiagnostic) -> None:
+def delete_malformed(diagnostic: ProfileDiscoveryDiagnostic) -> bool:
+    """Delete a profile file that couldn't be loaded, if it still holds what was
+    diagnosed (the user may have fixed it meanwhile). Returns whether it was deleted."""
     path = diagnostic.path
-    msg = (
-        f"There was an error when loading profile '{path.name}'.\n"
-        "Would you like to delete it? Choosing 'No' will just ignore the profile."
-    )
-    sp_logging.G_LOGGER.info(msg)
-    sp_logging.G_LOGGER.info(diagnostic.detail)
-    if not show_message_dialog(msg, "Error", style="YES_NO"):
-        return
     try:
         if _content_digest(path.read_bytes()) != diagnostic.digest:
-            sp_logging.G_LOGGER.info("Keeping %s: it changed while the question was open.", path)
-            return
+            logger.info("Keeping %s: it changed while the question was open.", path)
+            return False
         path.unlink()
     except OSError as error:
-        sp_logging.G_LOGGER.info("Keeping %s: %s", path, error)
-        return
-    sp_logging.G_LOGGER.info("Removed profile: %s", path)
-
-
-def open_profile(paths: AppPaths, profile: ProfileId | str) -> StoredProfile | None:
-    """Load one managed profile by name; None if it doesn't exist or can't be used."""
-    try:
-        profile_id = profile if isinstance(profile, ProfileId) else ProfileId.parse(profile)
-    except ProfileIdError:
-        return None
-    loaded = _load_managed_profile(paths.profiles / profile_id.profile_filename, profile_id, paths.cache)
-    return loaded if isinstance(loaded, StoredProfile) else None
+        logger.info("Keeping %s: %s", path, error)
+        return False
+    logger.info("Removed profile: %s", path)
+    return True
 
 
 def stored_profile_ids(paths: AppPaths) -> list[ProfileId] | None:
@@ -202,7 +253,7 @@ def stored_profile_ids(paths: AppPaths) -> list[ProfileId] | None:
     try:
         stems = [path.stem for path in paths.profiles.iterdir() if path.suffix == ".profile"]
     except OSError as error:
-        sp_logging.G_LOGGER.warning("Could not list the profiles in %s: %s", paths.profiles, error)
+        logger.warning("Could not list the profiles in %s: %s", paths.profiles, error)
         return None
     profile_ids = []
     for stem in stems:
@@ -246,29 +297,19 @@ def delete_managed_profile(paths: AppPaths, stored: StoredProfile) -> None:
     _forget_selection(_selection_path(paths.cache, stored.profile_id))
 
 
-def managed_profile_for_selection(stored: list[StoredProfile], profile_id: ProfileId) -> StoredProfile | None:
-    """Resolve a GUI selection by managed identity, independent of editable fields."""
-    return next((entry for entry in stored if entry.profile_id == profile_id), None)
-
-
 def _active_pointer_path(cache_dir: Path) -> Path:
     return cache_dir / "running_profile"
 
 
-def read_active_profile(paths: AppPaths) -> StoredProfile | None:
-    """Return the profile that was running when Superpaper last exited, if it still exists."""
-    path = _active_pointer_path(paths.cache)
+def read_active_profile_id(cache_dir: Path) -> ProfileId | None:
+    """The profile that was running when Superpaper last exited, as remembered."""
+    path = _active_pointer_path(cache_dir)
     if not path.is_file():
         return None
     try:
-        profname = path.read_text(encoding="utf-8").splitlines()[0]
-        profile_id = ProfileId.parse(profname)
+        return ProfileId.parse(path.read_text(encoding="utf-8").splitlines()[0])
     except OSError, UnicodeError, IndexError, ProfileIdError:
         return None
-    profile = open_profile(paths, profile_id)
-    if profile is None:
-        sp_logging.G_LOGGER.info("The previously running profile '%s' no longer exists.", profname)
-    return profile
 
 
 def write_active_profile(cache_dir: Path, profile: ProfileId | str) -> None:
@@ -285,6 +326,22 @@ def _selection_path(cache_dir: Path, profile_id: ProfileId) -> Path:
     return cache_dir / "selections" / f"{profile_id.value}.json"
 
 
+def sweep_selections(cache_dir: Path, keep: Iterable[ProfileId]) -> None:
+    """Forget what profiles that no longer exist showed: profiles deleted or renamed
+    outside Superpaper. Other files are left alone."""
+    names = {_selection_path(cache_dir, profile_id).name for profile_id in keep}
+    try:
+        entries = list(os.scandir(cache_dir / "selections"))
+    except FileNotFoundError:
+        return
+    except OSError as error:
+        logger.warning("Could not look for old selections in %s: %s", cache_dir, error)
+        return
+    for entry in entries:
+        if entry.name.endswith(".json") and entry.name not in names and entry.is_file(follow_symlinks=False):
+            _forget_selection(Path(entry.path))
+
+
 def _read_stored_selection(path: Path) -> list[str] | None:
     """Return the remembered selection: [] once cleared, None if none was ever stored."""
     try:
@@ -292,10 +349,10 @@ def _read_stored_selection(path: Path) -> list[str] | None:
     except FileNotFoundError:
         return None
     except (OSError, ValueError) as error:
-        sp_logging.G_LOGGER.info("Ignoring the unreadable selection in %s: %s", path, error)
+        logger.info("Ignoring the unreadable selection in %s: %s", path, error)
         return None
     if not isinstance(stored, list) or not all(isinstance(item, str) for item in stored):
-        sp_logging.G_LOGGER.info("Ignoring the malformed selection in %s.", path)
+        logger.info("Ignoring the malformed selection in %s.", path)
         return None
     return stored
 
@@ -305,14 +362,14 @@ def _store_selection(path: Path, files: list[str]) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         write_atomically(path, json.dumps(files).encode("utf-8"))
     except OSError as error:
-        sp_logging.G_LOGGER.info("Could not remember the selection in %s: %s", path, error)
+        logger.info("Could not remember the selection in %s: %s", path, error)
 
 
 def _forget_selection(path: Path) -> None:
     try:
         path.unlink(missing_ok=True)
     except OSError as error:
-        sp_logging.G_LOGGER.info("Could not forget the selection in %s: %s", path, error)
+        logger.info("Could not forget the selection in %s: %s", path, error)
 
 
 def _selection_to_carry_over(selection_file: Path, source_content: bytes) -> list[str] | None:
