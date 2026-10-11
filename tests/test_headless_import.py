@@ -30,11 +30,11 @@ HEADLESS_MODULES = (
     "superpaper.render",
     "superpaper.render_cache",
     "superpaper.selection",
+    "superpaper.session",
     "superpaper.settings",
     "superpaper.sni_tray",
     "superpaper.sp_logging",
     "superpaper.sp_platform",
-    "superpaper.wallpaper_processing",
 )
 
 

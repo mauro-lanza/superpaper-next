@@ -3,7 +3,6 @@
 
 import os
 import sys
-from threading import Lock
 
 import wx  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-import]
 import wx.adv  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-import]
@@ -13,7 +12,6 @@ import superpaper.displays as displays
 import superpaper.profile_store as profile_store
 import superpaper.render_cache as render_cache
 import superpaper.sp_logging as sp_logging
-import superpaper.wallpaper_processing as wpproc
 from superpaper.__version__ import __version__
 from superpaper.configuration_dialogs import HelpFrame, SettingsFrame
 from superpaper.desktop.linux import running_kde
@@ -21,15 +19,10 @@ from superpaper.gui import ConfigFrame
 from superpaper.message_dialog import show_message_dialog
 from superpaper.paths import AppPaths, resource
 from superpaper.profile_id import ProfileId, ProfileIdError
-from superpaper.profile_store import ProfileDiagnosticKind, ProfileStore, write_active_profile
+from superpaper.profile_store import ProfileDiagnosticKind, ProfileStore
+from superpaper.session import Session
 from superpaper.settings import SETTINGS_FILE, Settings, read_settings
 from superpaper.sni_tray import build_tray, sni_supported
-from superpaper.wallpaper_processing import (
-    apply_draft_job,
-    change_wallpaper_job,
-    quick_profile_job,
-    run_profile_job,
-)
 
 # Constants
 TRAY_TOOLTIP = "Superpaper"
@@ -102,13 +95,14 @@ class TaskBarIcon(wx.adv.TaskBarIcon):
         self.Bind(wx.adv.EVT_TASKBAR_LEFT_DOWN, self.on_left_down)
         self.Bind(wx.adv.EVT_TASKBAR_LEFT_DCLICK, self.configure_wallpapers)
         self.Bind(wx.adv.EVT_TASKBAR_RIGHT_DOWN, self.on_right_down)
-        # Initialize display data
-        self.refresh_displays()
-        # profile initialization
-        self.job_lock = Lock()
-        self.repeating_timer = None
+        # The running profile, its slideshow and every wallpaper change, starting with the
+        # displays as they are now.
+        self.session = Session(
+            self.paths,
+            displays.DisplaySystem(self.paths.config),
+            set_command=lambda: self.g_settings.set_command,
+        )
         self.pause_item = None
-        self.is_paused = False
         self.store = ProfileStore(self.paths)
         self._load_profiles()
         # Renders and selections of profiles deleted or renamed since the last start
@@ -117,21 +111,7 @@ class TaskBarIcon(wx.adv.TaskBarIcon):
         if stored is not None:
             render_cache.sweep(self.paths.cache, stored)
             profile_store.sweep_selections(self.paths.cache, stored)
-        if startup_profile:
-            self.active_profile = self.get_profile_by_id(startup_profile)
-            if self.active_profile is None:
-                sp_logging.G_LOGGER.error(
-                    "Startup profile '%s' could not be matched to a saved profile.",
-                    startup_profile.value,
-                )
-        else:
-            self.active_profile = self.store.active()
-        if self.active_profile:
-            wpproc.G_ACTIVE_PROFILE = self.active_profile.profile.name
-        # An explicit CLI `--profile` launch should apply the wallpaper right
-        # away; a normal daemon restart only restores the last shown wallpaper
-        # without re-cycling (issue #140).
-        self.start_prev_profile(self.active_profile, apply_now=bool(startup_profile))
+        self._run_at_startup(startup_profile)
         # if self.active_profile is None:
         #     sp_logging.G_LOGGER.info("Starting up the first profile found.")
         #     self.start_profile(wx.EVT_MENU, self.list_of_profiles[0])
@@ -194,6 +174,27 @@ hotkeys will not work. Exception: %s",
         if size_hint:
             sp_logging.G_LOGGER.warning("%s", size_hint)
             wx.CallAfter(show_message_dialog, size_hint)
+
+    def _run_at_startup(self, startup_profile):
+        """Run the profile asked for on the command line, or carry on with the one that ran
+        when Superpaper last exited."""
+        if startup_profile:
+            # An explicit `--profile` launch runs the profile now, as the tray menu does.
+            started = self.get_profile_by_id(startup_profile)
+            if started is None:
+                sp_logging.G_LOGGER.error(
+                    "Startup profile '%s' could not be matched to a saved profile.", startup_profile.value
+                )
+            else:
+                self.session.activate(started)
+            return
+        # A normal start shows the last wallpaper again, and the slideshow carries on from
+        # there on its own schedule (issue #140).
+        previous = self.store.active()
+        if previous is None:
+            sp_logging.G_LOGGER.info("No previous profile was found.")
+        else:
+            self.session.restore(previous)
 
     def register_hotkeys(self):
         """Registers system-wide hotkeys for profiles and application interaction."""
@@ -359,6 +360,20 @@ Check that it is formatted properly and valid keys."
         """The saved profiles, in the order the menus show them."""
         return self.store.profiles
 
+    @property
+    def active_profile(self):
+        """The running profile, if any."""
+        return self.session.running
+
+    @property
+    def is_paused(self):
+        return self.session.paused
+
+    @property
+    def display_system(self):
+        """The display layout wallpaper changes are rendered for."""
+        return self.session.display_system
+
     def get_profile_by_name(self, name):
         try:
             return self.get_profile_by_id(ProfileId.parse(name))
@@ -444,21 +459,11 @@ Check that it is formatted properly and valid keys."
     def reload_profiles(self, event):
         """Reloads profiles from disk."""
         self._load_profiles()
-        # Re-point active_profile at the profile's current record (matched by identity) so
-        # consumers that read tray.active_profile -- e.g. the settings dialog when it
-        # reopens -- see the saved state instead of a stale detached object (was causing
-        # edits like span mode to appear reverted).
-        if self.active_profile is not None:
-            refreshed = self.get_profile_by_id(self.active_profile.profile_id)
-            if refreshed is not None:
-                self.active_profile = refreshed
-            else:
-                with self.job_lock:
-                    if self.repeating_timer is not None and self.repeating_timer.is_running:
-                        self.repeating_timer.stop()
-                    self.repeating_timer = None
-                    self.active_profile = None
-                    wpproc.G_ACTIVE_PROFILE = None
+        # The running profile carries on with its current record, whose file may have
+        # changed, or stops if it is gone.
+        running = self.session.running
+        if running is not None:
+            self.session.update(running.profile_id, self.store.get(running.profile_id))
 
     def _load_profiles(self):
         """Read the profiles directory again, offering to delete profiles that can't be loaded."""
@@ -475,161 +480,29 @@ Check that it is formatted properly and valid keys."
                 profile_store.delete_malformed(diagnostic)
 
     def refresh_displays(self):
-        """Detect the displays and load their saved layout; later wallpaper changes use it.
+        """Detect the displays again and load their saved layout; later wallpaper changes
+        use it. If detection fails, the previous layout stays in use."""
+        self.session.refresh_displays()
 
-        A change already under way keeps the layout it started with, so this never
-        waits for one. If detection fails, the previous layout stays in use.
-        """
-        self.display_system = displays.DisplaySystem(self.paths.config)
-
-    def change_wallpaper(self, profile, *, advance=False, skip_if_busy=False):
-        """Start one wallpaper change for the running ``profile``, with the settings and
-        displays as they are now.
-
-        The slideshow timer calls this on every tick, so a changed custom command or
-        display layout applies from the next tick on.
-        """
-        return change_wallpaper_job(
-            profile,
-            self.paths,
-            display_system=self.display_system,
-            set_command=self.g_settings.set_command,
-            advance=advance,
-            skip_if_busy=skip_if_busy,
-        )
-
-    def apply_draft(self, profile, images, *, display_system=None):
+    def apply_draft(self, profile, images, *, display_system=None, on_done=None):
         """Show ``images`` with ``profile``'s settings, which aren't a running profile's,
-        such as the editor's unsaved ones; ``display_system`` renders for another layout,
-        such as the editor's unsaved one."""
-        return apply_draft_job(
-            profile,
-            images,
-            self.paths,
-            display_system=display_system if display_system is not None else self.display_system,
-            set_command=self.g_settings.set_command,
-        )
+        such as the editor's unsaved ones: see Session.apply_draft."""
+        self.session.apply_draft(profile, images, display_system=display_system, on_done=on_done)
 
-    def _run_profile(self, profile, *, startup=False):
-        """Run ``profile`` on freshly detected displays: see run_profile_job."""
-        self.refresh_displays()
-        return run_profile_job(profile, self.change_wallpaper, startup=startup)
-
-    def rearm_active_timer(self):
-        """Re-arm the slideshow timer for the active profile.
-
-        Used after the active profile's settings change in the settings dialog
-        (slideshow toggled, delay edited) so the change takes effect without
-        restarting the app. The current wallpaper is kept (startup=True), only
-        the repeating timer is rebuilt; if the profile is no longer a slideshow
-        the timer is simply stopped.
-        """
-        with self.job_lock:
-            if self.repeating_timer is not None and self.repeating_timer.is_running:
-                self.repeating_timer.stop()
-            if self.active_profile is not None:
-                # Keep the global active-profile name in sync with the (possibly
-                # renamed) active profile; the wallpaper setter only applies when
-                # profile.name matches it, so a stale name silently blocks every
-                # slideshow tick and manual change after a rename/save.
-                wpproc.G_ACTIVE_PROFILE = self.active_profile.profile.name
-                self.repeating_timer, _thrd = self._run_profile(self.active_profile, startup=True)
-                if self.is_paused and self.repeating_timer is not None:
-                    # Editing a paused slideshow must not resume it.
-                    self.repeating_timer.stop()
-
-    def start_prev_profile(self, profile, apply_now=False):
-        """Checks if a previously running profile has been recorded and starts it.
-
-        When ``apply_now`` is True (an explicit CLI ``--profile`` launch) the
-        wallpaper is rendered and applied immediately. Otherwise the last shown
-        wallpaper is restored without cycling and only the slideshow timer is
-        armed, so a normal daemon restart does not re-cycle on every launch.
-        """
-        with self.job_lock:
-            if profile is None:
-                sp_logging.G_LOGGER.info("No previous profile was found.")
-            elif apply_now:
-                # Render and apply the requested profile now, then arm the
-                # slideshow timer (if the profile is a slideshow).
-                self.repeating_timer, thrd = self._run_profile(profile, startup=False)
-            else:
-                # Show the last wallpaper again without cycling, then arm the slideshow
-                # timer (if any); cycling only happens later on the timer's schedule. With
-                # no earlier render to show, the current wallpaper is rendered now.
-                restored = quick_profile_job(
-                    profile,
-                    display_system=self.display_system,
-                    paths=self.paths,
-                    set_command=self.g_settings.set_command,
-                )
-                self.repeating_timer, thrd = self._run_profile(profile, startup=restored)
-
-    def start_profile(self, event, profile, force_reload=False):
-        """
-        Starts a profile job, i.e. runs a slideshow or a one time wallpaper change.
-
-        If the input profile is the currently active profile, initiate a wallpaper change.
-        """
+    def start_profile(self, event, profile):
+        """Run ``profile``, or show its next image if it runs already."""
         if profile is None:
-            sp_logging.G_LOGGER.info(
-                "start_profile: profile is None. \
-                Do you have any profiles in /profiles?"
-            )
-        elif self.active_profile is not None:
-            if profile.profile_id == self.active_profile.profile_id and not force_reload:
-                self.next_wallpaper(event)
-                return 0
-            else:
-                with self.job_lock:
-                    if self.repeating_timer is not None and self.repeating_timer.is_running:
-                        self.repeating_timer.stop()
-                    self.active_profile = profile
-                    wpproc.G_ACTIVE_PROFILE = profile.profile.name
-                    sp_logging.G_LOGGER.info("Starting profile: %s", profile.profile.name)
-                    self.repeating_timer, thrd = self._run_profile(profile)
-                    write_active_profile(self.paths.cache, profile.profile_id)
-                    return thrd
-        else:
-            with self.job_lock:
-                if self.repeating_timer is not None and self.repeating_timer.is_running:
-                    self.repeating_timer.stop()
-                self.active_profile = profile
-                wpproc.G_ACTIVE_PROFILE = profile.profile.name
-                sp_logging.G_LOGGER.info("Starting profile: %s", profile.profile.name)
-                self.repeating_timer, thrd = self._run_profile(profile)
-                write_active_profile(self.paths.cache, profile.profile_id)
-                return thrd
+            sp_logging.G_LOGGER.info("start_profile: profile is None. Do you have any profiles in /profiles?")
+            return
+        self.session.activate(profile)
 
     def next_wallpaper(self, event):
-        """Calls the next wallpaper changer method of the running profile."""
-        with self.job_lock:
-            if self.repeating_timer is not None and self.repeating_timer.is_running:
-                self.repeating_timer.stop()
-                self.change_wallpaper(self.active_profile, advance=True)
-                self.repeating_timer.start()
-            else:
-                self.change_wallpaper(self.active_profile, advance=True)
-
-    def rt_stop(self):
-        """Stops running slideshow timer if one is active."""
-        if self.repeating_timer is not None and self.repeating_timer.is_running:
-            self.repeating_timer.stop()
+        """Show the running profile's next image."""
+        self.session.next()
 
     def pause_timer(self, event):
-        """Check if a slideshow timer is running and if it is, then try to stop/start."""
-        if self.repeating_timer is not None and self.repeating_timer.is_running:
-            self.repeating_timer.stop()
-            self.is_paused = True
-            if sp_logging.DEBUG:
-                sp_logging.G_LOGGER.info("Paused timer")
-        elif self.repeating_timer is not None and not self.repeating_timer.is_running:
-            self.repeating_timer.start()
-            self.is_paused = False
-            if sp_logging.DEBUG:
-                sp_logging.G_LOGGER.info("Resumed timer")
-        else:
-            sp_logging.G_LOGGER.info("Current profile isn't using a timer.")
+        """Pause the running slideshow, or resume it."""
+        self.session.toggle_pause()
 
     def on_about(self, event):
         """Opens About dialog."""
@@ -672,7 +545,7 @@ Check that it is formatted properly and valid keys."
 
     def on_exit(self, event):
         """Exits Superpaper."""
-        self.rt_stop()
+        self.session.shutdown()
         if self._sni_tray is not None:
             try:
                 self._sni_tray.remove()

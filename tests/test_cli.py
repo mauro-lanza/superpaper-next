@@ -184,14 +184,6 @@ def test_setimages_dispatches_one_shot_render(monkeypatch, tmp_path, app_paths):
     image = tmp_path / "wallpaper.png"
     image.touch()
     captured = {}
-
-    class Job:
-        joined = False
-
-        def join(self):
-            self.joined = True
-
-    job = Job()
     layout = SimpleNamespace(name="detected")
 
     def detect(config_dir):
@@ -199,20 +191,34 @@ def test_setimages_dispatches_one_shot_render(monkeypatch, tmp_path, app_paths):
         captured["detections"] = captured.get("detections", 0) + 1
         return layout
 
-    def render(profile, images, paths, *, display_system, set_command):
+    def show(profile, images, paths, *, display_system, set_command):
         captured["render"] = (profile, images, paths, display_system, set_command)
-        return job
 
     monkeypatch.setattr(sys, "argv", ["superpaper", "--setimages", str(image)])
     monkeypatch.setattr(cli, "DisplaySystem", detect)
-    monkeypatch.setattr(cli, "apply_draft_job", render)
+    monkeypatch.setattr(cli, "show", show)
 
     assert cli.cli_logic(app_paths) == 0
     # One image spans the displays, without a perspective.
     draft = Profile(name="cli", slideshow=False, sources=((str(image),),), perspective="disabled")
     assert captured["render"] == (draft, [str(image)], app_paths, layout, "")
     assert captured["detections"] == 1
-    assert job.joined is True
+
+
+def test_a_wallpaper_that_cant_be_shown_exits_with_an_error(monkeypatch, tmp_path, app_paths):
+    from superpaper import cli
+
+    image = tmp_path / "wallpaper.png"
+    image.touch()
+    monkeypatch.setattr(sys, "argv", ["superpaper", "--setimages", str(image)])
+    monkeypatch.setattr(cli, "DisplaySystem", lambda config_dir: SimpleNamespace())
+    # The problem is logged where it happens.
+    monkeypatch.setattr(cli, "show", lambda *args, **kwargs: f"The image {image} can't be opened.")
+
+    with pytest.raises(SystemExit) as exit_info:
+        cli.cli_logic(app_paths)
+
+    assert exit_info.value.code == 1
 
 
 def test_advanced_cli_arguments_are_preserved(monkeypatch, tmp_path, app_paths):
@@ -246,7 +252,7 @@ def test_advanced_cli_arguments_are_preserved(monkeypatch, tmp_path, app_paths):
     monkeypatch.setattr(cli, "DisplaySystem", lambda config_dir: display_system)
     monkeypatch.setattr(
         cli,
-        "apply_draft_job",
+        "show",
         lambda rendered_profile, images, paths, *, display_system, set_command: captured.update(
             render=(rendered_profile, paths, display_system, set_command)
         ),
@@ -290,7 +296,7 @@ def test_an_undetected_display_size_is_mentioned_when_spanning_by_size(
     arguments = ["superpaper", "--setimages", str(image), "--command", "setter {image}"]
     monkeypatch.setattr(sys, "argv", [*arguments, "--advanced"] if advanced else arguments)
     monkeypatch.setattr(cli, "DisplaySystem", lambda config_dir: SimpleNamespace(size_hint=lambda: "Enter its size."))
-    monkeypatch.setattr(cli, "apply_draft_job", lambda *args, **kwargs: None)
+    monkeypatch.setattr(cli, "show", lambda *args, **kwargs: None)
 
     assert cli.cli_logic(app_paths) == 0
     assert ("Enter its size." in caplog.text) is hinted

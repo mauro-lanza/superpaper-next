@@ -12,8 +12,8 @@ from superpaper.desktop.spanmode import set_spanmode
 from superpaper.displays import DisplayDetectionError, DisplaySystem
 from superpaper.paths import AppPaths, ensure_dirs
 from superpaper.profile_id import ProfileId, ProfileIdError
+from superpaper.session import show
 from superpaper.settings import SETTINGS_FILE, read_settings, write_settings
-from superpaper.wallpaper_processing import apply_draft_job
 
 
 def start_tray(paths: AppPaths, profile: ProfileId | None = None, *, debug: bool = False) -> None:
@@ -204,7 +204,7 @@ def cli_logic(paths: AppPaths):
         spangroups=spangrp,
         offsets=list(zip(offsets[::2], offsets[1::2])),
     )
-    job_thread = apply_draft_job(profile, images, paths, display_system=display_system, set_command=set_command)
-    if job_thread is not None:
-        job_thread.join()
+    # What went wrong, if anything, is logged where it happened.
+    if show(profile, images, paths, display_system=display_system, set_command=set_command) is not None:
+        sys.exit(1)
     return 0
