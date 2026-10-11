@@ -96,29 +96,31 @@ def headless_tray_module(monkeypatch):
     wx.adv = wx_adv
     wx_adv.TaskBarIcon = FakeTaskBarIcon
 
-    dialogs = ModuleType("superpaper.configuration_dialogs")
-    dialogs.HelpFrame = object
-    dialogs.SettingsFrame = object
-    gui = ModuleType("superpaper.gui")
-    gui.ConfigFrame = object
-    messages = ModuleType("superpaper.message_dialog")
+    editor = ModuleType("superpaper.ui.editor")
+    editor.ConfigFrame = object
+    help_ = ModuleType("superpaper.ui.help")
+    help_.HelpFrame = object
+    settings_dialog = ModuleType("superpaper.ui.settings_dialog")
+    settings_dialog.SettingsFrame = object
+    messages = ModuleType("superpaper.ui.message")
     messages.show_message_dialog = lambda *args, **kwargs: None
 
-    import superpaper
+    import superpaper.ui
 
-    previous_package_tray = getattr(superpaper, "tray", None)
-    had_package_tray = hasattr(superpaper, "tray")
+    previous_package_tray = getattr(superpaper.ui, "tray", None)
+    had_package_tray = hasattr(superpaper.ui, "tray")
     monkeypatch.setitem(sys.modules, "wx", wx)
     monkeypatch.setitem(sys.modules, "wx.adv", wx_adv)
-    monkeypatch.setitem(sys.modules, "superpaper.configuration_dialogs", dialogs)
-    monkeypatch.setitem(sys.modules, "superpaper.gui", gui)
-    monkeypatch.setitem(sys.modules, "superpaper.message_dialog", messages)
-    monkeypatch.delitem(sys.modules, "superpaper.tray", raising=False)
+    monkeypatch.setitem(sys.modules, "superpaper.ui.editor", editor)
+    monkeypatch.setitem(sys.modules, "superpaper.ui.help", help_)
+    monkeypatch.setitem(sys.modules, "superpaper.ui.settings_dialog", settings_dialog)
+    monkeypatch.setitem(sys.modules, "superpaper.ui.message", messages)
+    monkeypatch.delitem(sys.modules, "superpaper.ui.tray", raising=False)
 
-    import superpaper.tray as tray
+    import superpaper.ui.tray as tray
 
     yield tray
     if had_package_tray:
-        superpaper.tray = previous_package_tray
-    elif hasattr(superpaper, "tray"):
-        delattr(superpaper, "tray")
+        superpaper.ui.tray = previous_package_tray
+    elif hasattr(superpaper.ui, "tray"):
+        delattr(superpaper.ui, "tray")

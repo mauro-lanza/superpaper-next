@@ -50,9 +50,8 @@ def test_import_cli_does_not_load_tray_or_gui(tmp_path):
             sys.executable,
             "-c",
             (
-                "import sys; import superpaper.cli; assert 'superpaper.tray' not in sys.modules; "
-                "assert 'superpaper.gui' not in sys.modules; "
-                "assert 'superpaper.configuration_dialogs' not in sys.modules"
+                "import sys; import superpaper.cli; "
+                "assert not [name for name in sys.modules if name.startswith('superpaper.ui')], sys.modules"
             ),
         ],
         check=False,
@@ -127,9 +126,9 @@ def test_main_dispatches_tray_after_spanmode(monkeypatch):
     from superpaper import __main__ as entrypoint
 
     calls = []
-    tray = ModuleType("superpaper.tray")
+    tray = ModuleType("superpaper.ui.tray")
     tray.tray_loop = lambda paths, settings, profile=None: calls.append("tray")
-    monkeypatch.setitem(sys.modules, "superpaper.tray", tray)
+    monkeypatch.setitem(sys.modules, "superpaper.ui.tray", tray)
     monkeypatch.setattr(entrypoint, "set_spanmode", lambda: calls.append("spanmode"))
     monkeypatch.setattr(sys, "argv", ["superpaper"])
 
@@ -140,10 +139,10 @@ def test_main_dispatches_tray_after_spanmode(monkeypatch):
 
 def fake_tray(monkeypatch):
     """Replace the wx tray with a recorder of what it was started with."""
-    tray = ModuleType("superpaper.tray")
+    tray = ModuleType("superpaper.ui.tray")
     started = []
     tray.tray_loop = lambda paths, settings, profile=None: started.append((paths, settings, profile))
-    monkeypatch.setitem(sys.modules, "superpaper.tray", tray)
+    monkeypatch.setitem(sys.modules, "superpaper.ui.tray", tray)
     return started
 
 
@@ -324,10 +323,10 @@ def test_profile_launch_returns_after_tray_loop(monkeypatch, app_paths):
     profile_path.write_text(
         profile_path.read_text(encoding="utf-8").replace("name=test", "name=saved"), encoding="utf-8"
     )
-    tray = ModuleType("superpaper.tray")
+    tray = ModuleType("superpaper.ui.tray")
     tray_calls = []
     tray.tray_loop = lambda paths, settings, profile=None: tray_calls.append(profile)
-    monkeypatch.setitem(sys.modules, "superpaper.tray", tray)
+    monkeypatch.setitem(sys.modules, "superpaper.ui.tray", tray)
     monkeypatch.setattr(cli, "DisplaySystem", lambda config_dir: None)
     monkeypatch.setattr(sys, "argv", ["superpaper", "--profile", "saved"])
 
@@ -366,7 +365,7 @@ def test_profile_lookup_accepts_valid_unicode(monkeypatch, app_paths):
     profiles = app_paths.profiles
     profile_path = write_profile(profiles / "Työ.profile")
     profile_path.write_text(profile_path.read_text(encoding="utf-8").replace("name=test", "name=Työ"), encoding="utf-8")
-    tray = ModuleType("superpaper.tray")
+    tray = ModuleType("superpaper.ui.tray")
     calls = []
 
     def tray_loop(paths, settings, profile=None):
@@ -374,7 +373,7 @@ def test_profile_lookup_accepts_valid_unicode(monkeypatch, app_paths):
         raise SystemExit
 
     tray.tray_loop = tray_loop
-    monkeypatch.setitem(sys.modules, "superpaper.tray", tray)
+    monkeypatch.setitem(sys.modules, "superpaper.ui.tray", tray)
     monkeypatch.setattr(cli, "DisplaySystem", lambda config_dir: None)
     monkeypatch.setattr(sys, "argv", ["superpaper", "--profile", "Työ"])
 
@@ -398,10 +397,10 @@ def test_profile_launch_accepts_profiles_saved_by_older_versions(monkeypatch, tm
     else:
         saved.write_text("name=saved\n", encoding="utf-8")
         (profiles / "Saved.profile").write_text("name=Saved\n", encoding="utf-8")
-    tray = ModuleType("superpaper.tray")
+    tray = ModuleType("superpaper.ui.tray")
     calls = []
     tray.tray_loop = lambda paths, settings, profile=None: calls.append(profile)
-    monkeypatch.setitem(sys.modules, "superpaper.tray", tray)
+    monkeypatch.setitem(sys.modules, "superpaper.ui.tray", tray)
     monkeypatch.setattr(cli, "DisplaySystem", lambda config_dir: None)
     monkeypatch.setattr(sys, "argv", ["superpaper", "--profile", "saved"])
 
@@ -418,10 +417,10 @@ def test_profile_lookup_rejects_malformed_content_before_tray(monkeypatch, app_p
 
     profiles = app_paths.profiles
     (profiles / "saved.profile").write_text(f"name=saved\n{setting}\n", encoding="utf-8")
-    tray = ModuleType("superpaper.tray")
+    tray = ModuleType("superpaper.ui.tray")
     calls = []
     tray.tray_loop = lambda paths, settings, profile=None: calls.append(profile)
-    monkeypatch.setitem(sys.modules, "superpaper.tray", tray)
+    monkeypatch.setitem(sys.modules, "superpaper.ui.tray", tray)
     monkeypatch.setattr(cli, "DisplaySystem", lambda config_dir: None)
     monkeypatch.setattr(sys, "argv", ["superpaper", "--profile", "saved"])
 

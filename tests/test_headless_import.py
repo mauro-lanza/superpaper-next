@@ -1,5 +1,5 @@
 """Everything outside the wx UI must import without optional or platform-native packages,
-and importing must not touch the filesystem.
+and importing must not touch the filesystem; only the UI package imports wx.
 
 This is the one structural test. It runs in a fresh interpreter so that nothing an
 earlier test imported can mask a failure, and it pretends to be a KDE session because
@@ -7,8 +7,10 @@ that is where an environment-dependent import once crashed every entry point.
 """
 
 import os
+import re
 import subprocess
 import sys
+from pathlib import Path
 
 HEADLESS_MODULES = (
     "superpaper.__main__",
@@ -21,7 +23,6 @@ HEADLESS_MODULES = (
     "superpaper.display_store",
     "superpaper.displays",
     "superpaper.files",
-    "superpaper.message_dialog",
     "superpaper.paths",
     "superpaper.perspective",
     "superpaper.profile_id",
@@ -32,7 +33,6 @@ HEADLESS_MODULES = (
     "superpaper.selection",
     "superpaper.session",
     "superpaper.settings",
-    "superpaper.sni_tray",
     "superpaper.sp_logging",
     "superpaper.sp_platform",
 )
@@ -63,3 +63,15 @@ def test_headless_modules_import_on_kde_without_optional_packages_and_create_not
 
     assert result.returncode == 0, result.stderr
     assert list(tmp_path.iterdir()) == []
+
+
+def test_only_the_ui_package_imports_wx():
+    package = Path(__file__).parents[1] / "superpaper"
+    importing_wx = [
+        path.relative_to(package).as_posix()
+        for path in package.rglob("*.py")
+        if path.relative_to(package).parts[0] != "ui"
+        and re.search(r"^\s*(import|from) wx\b", path.read_text(encoding="utf-8"), re.MULTILINE)
+    ]
+
+    assert importing_wx == []

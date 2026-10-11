@@ -1,4 +1,5 @@
 import configparser
+import threading
 
 import pytest
 
@@ -88,3 +89,21 @@ def test_negative_saved_bezels_are_ignored(display_layout, tmp_path, caplog):
 def test_display_detection_rejects_invalid_retry_options(kwargs):
     with pytest.raises(ValueError):
         displays.get_display_data(**kwargs)
+
+
+def test_displays_are_detected_only_on_the_main_thread(monkeypatch):
+    # libXrandr, behind screeninfo, corrupts memory when two threads use it at once.
+    monkeypatch.setattr(displays, "get_monitors", lambda: pytest.fail("detected off the main thread"))
+    errors = []
+
+    def detect():
+        try:
+            displays.get_display_data()
+        except RuntimeError as error:
+            errors.append(str(error))
+
+    worker = threading.Thread(target=detect)
+    worker.start()
+    worker.join(10)
+
+    assert errors == ["Displays can only be detected on the main thread."]
