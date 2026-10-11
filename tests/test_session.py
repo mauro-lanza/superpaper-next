@@ -11,8 +11,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from superpaper import displays
 from superpaper import session as session_module
-from superpaper.displays import DisplayDetectionError
 from superpaper.profile_id import ProfileId
 from superpaper.profiles import Profile
 from superpaper.session import Session
@@ -66,13 +66,10 @@ class Runtime:
         self.has_render = True
         self.problem = None
         self.set_command = "first {image}"
-        self.layouts = iter(f"layout {number}" for number in range(1, 100))
-        self.detection_fails = False
         self.hold = None
         self.holding = threading.Event()
         monkeypatch.setattr(session_module, "show", self.show)
         monkeypatch.setattr(session_module, "show_again", self.show_again)
-        monkeypatch.setattr(session_module, "DisplaySystem", self.detect)
         self.session = Session(paths, "layout 0", set_command=lambda: self.set_command, clock=self.clock)
 
     def show(self, profile, files, paths, *, display_system, set_command="", profile_id=None, running=None):
@@ -93,13 +90,6 @@ class Runtime:
     def show_again(self, stored, paths, *, display_system, set_command=""):
         self.restored.append(stored.profile.name)
         return self.has_render
-
-    def detect(self, config_dir):
-        assert config_dir == self.paths.config
-        if self.detection_fails:
-            message = "no displays"
-            raise DisplayDetectionError(message)
-        return next(self.layouts)
 
     @property
     def shown(self):
@@ -137,12 +127,12 @@ def runtime(monkeypatch, app_paths):
     runtime.session.shutdown(timeout=5)
 
 
-def test_a_started_profile_is_shown_on_fresh_displays_and_remembered(runtime):
+def test_a_started_profile_is_shown_and_remembered(runtime):
     runtime.session.activate(saved("A"))
     runtime.settle()
 
     assert runtime.shown == ["A-1.png"]
-    assert runtime.changes[0].layout == "layout 1"
+    assert runtime.changes[0].layout == "layout 0"
     assert runtime.changes[0].profile_id == ProfileId("A")
     assert runtime.session.running.profile_id == ProfileId("A")
     assert (runtime.paths.cache / "running_profile").read_text(encoding="utf-8") == "A"
@@ -176,7 +166,7 @@ def test_requests_never_wait_for_a_change_under_way(runtime):
     started = time.monotonic()
     runtime.session.next()
     runtime.session.toggle_pause()
-    runtime.session.refresh_displays()
+    runtime.session.use_displays("layout 1")
     runtime.session.apply_draft(Profile(name="draft"), ["draft.png"])
     assert time.monotonic() - started < 1
 
@@ -404,7 +394,7 @@ def test_drafts_are_shown_for_the_layout_given(runtime):
     draft, test = runtime.changes[1:]
     assert (draft.image, draft.layout, draft.profile_id) == ("draft.png", "the editor's layout", None)
     # Without a layout, the session's own; the running profile's KDE activity gets it.
-    assert (test.image, test.layout, test.running) == ("test.png", "layout 1", "A")
+    assert (test.image, test.layout, test.running) == ("test.png", "layout 0", "A")
     assert outcomes == [None]
     assert runtime.session.running.selection.number == 1
 
@@ -458,24 +448,30 @@ def test_changes_use_the_settings_and_displays_current_at_the_time(runtime):
     runtime.session.activate(saved("A"))
     runtime.settle()
     runtime.set_command = "second {image}"
-    runtime.session.refresh_displays()
+    runtime.session.use_displays("layout 1")
     runtime.session.next()
     runtime.settle()
 
     assert [(change.set_command, change.layout) for change in runtime.changes] == [
-        ("first {image}", "layout 1"),
-        ("second {image}", "layout 2"),
+        ("first {image}", "layout 0"),
+        ("second {image}", "layout 1"),
     ]
+    assert runtime.session.display_system == "layout 1"
 
 
-def test_a_failed_display_detection_keeps_the_previous_layout(runtime):
-    runtime.detection_fails = True
-    runtime.session.refresh_displays()
-    runtime.session.activate(saved("A"))
+def test_the_worker_never_detects_displays(runtime, monkeypatch):
+    # Detecting displays off the main thread would corrupt memory (see get_display_data).
+    detections = []
+    monkeypatch.setattr(displays, "get_display_data", lambda **options: detections.append(options) or [])
+    runtime.session.restore(saved("A"))
+    runtime.session.activate(saved("B"))
+    runtime.session.next()
+    runtime.session.use_displays("layout 1")
+    runtime.session.apply_draft(Profile(name="unsaved"), ["draft.png"])
     runtime.settle()
 
-    assert runtime.session.display_system == "layout 0"
-    assert runtime.changes[0].layout == "layout 0"
+    assert detections == []
+    assert runtime.shown == ["B-1.png", "B-2.png", "draft.png"]
 
 
 def test_quitting_is_bounded_and_refuses_later_requests(runtime):

@@ -6,6 +6,7 @@ A layout is saved with display_store, under a key derived from the displays.
 
 import logging
 import math
+import threading
 import time
 from pathlib import Path
 
@@ -541,8 +542,14 @@ def get_display_data(*, max_attempts=3, retry_delay=0.25):
     Detect the displays: a list of Display objects, one for each monitor, sorted by
     their position on the desktop. Offsets are sanitized so that they are always
     non-negative.
+
+    Only on the main thread: on Linux, screeninfo detects displays with libXrandr, which
+    corrupts memory when two threads use it at once, and GTK uses it on the main thread.
     """
     # https://github.com/rr-/screeninfo
+    if threading.current_thread() is not threading.main_thread():
+        message = "Displays can only be detected on the main thread."
+        raise RuntimeError(message)
     if max_attempts < 1:
         message = "max_attempts must be at least 1"
         raise ValueError(message)

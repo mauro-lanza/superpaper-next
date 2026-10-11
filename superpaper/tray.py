@@ -1,6 +1,7 @@
 """Tray applet for Superpaper."""
 # from configuration_dialogs import * # Katso ensin että tuleeko tästä liian pitkä dialogien kanssa.
 
+import configparser
 import os
 import sys
 
@@ -481,8 +482,17 @@ Check that it is formatted properly and valid keys."
 
     def refresh_displays(self):
         """Detect the displays again and load their saved layout; later wallpaper changes
-        use it. If detection fails, the previous layout stays in use."""
-        self.session.refresh_displays()
+        use it. If detection fails, the previous layout stays in use.
+
+        Displays are detected here, on the main thread, never by the session's worker:
+        see displays.get_display_data.
+        """
+        try:
+            display_system = displays.DisplaySystem(self.paths.config)
+        except (displays.DisplayDetectionError, OSError, ValueError, KeyError, configparser.Error) as error:
+            sp_logging.G_LOGGER.warning("Keeping the previous display layout: %s", error)
+            return
+        self.session.use_displays(display_system)
 
     def apply_draft(self, profile, images, *, display_system=None, on_done=None):
         """Show ``images`` with ``profile``'s settings, which aren't a running profile's,
@@ -490,10 +500,12 @@ Check that it is formatted properly and valid keys."
         self.session.apply_draft(profile, images, display_system=display_system, on_done=on_done)
 
     def start_profile(self, event, profile):
-        """Run ``profile``, or show its next image if it runs already."""
+        """Run ``profile`` on the displays as they are now, or show its next image if it
+        runs already."""
         if profile is None:
             sp_logging.G_LOGGER.info("start_profile: profile is None. Do you have any profiles in /profiles?")
             return
+        self.refresh_displays()
         self.session.activate(profile)
 
     def next_wallpaper(self, event):

@@ -1,12 +1,14 @@
 """The tray: its menus, hotkeys and startup ask the session to do things, and it keeps the
-session told about the saved profiles."""
+session told about the saved profiles and the displays."""
 
+import configparser
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
 
+from superpaper import displays
 from superpaper.paths import AppPaths
 from superpaper.profile_id import ProfileId
 from superpaper.profile_store import ProfileStore
@@ -15,6 +17,29 @@ from superpaper.settings import Settings
 
 PATHS = AppPaths(config=Path("/config"), profiles=Path("/config/profiles"), cache=Path("/cache"))
 LAYOUT = SimpleNamespace(name="the detected display layout")
+FRESH = SimpleNamespace(name="the displays as detected again")
+
+
+class Detection:
+    """Display detection, as the tray runs it: records where layouts were loaded from;
+    with ``error`` set, detection fails."""
+
+    def __init__(self):
+        self.config_dirs = []
+        self.error = None
+
+    def __call__(self, config_dir):
+        self.config_dirs.append(config_dir)
+        if self.error is not None:
+            raise self.error
+        return FRESH
+
+
+@pytest.fixture(autouse=True)
+def detection(monkeypatch):
+    detect = Detection()
+    monkeypatch.setattr(displays, "DisplaySystem", detect)
+    return detect
 
 
 class FakeStore:
@@ -65,7 +90,7 @@ def profile(name):
     return SimpleNamespace(profile=Profile(name=name, slideshow=True, delay=30.0), profile_id=ProfileId(name))
 
 
-def test_the_menus_ask_the_session(headless_tray_module):
+def test_the_menus_ask_the_session(headless_tray_module, detection):
     tray = headless_tray_module
     work = profile("Work")
     icon = controller(tray)
@@ -77,13 +102,31 @@ def test_the_menus_ask_the_session(headless_tray_module):
     icon.refresh_displays()
     icon.apply_draft(work.profile, ["/image.png"], display_system="unsaved", on_done=done)
 
+    # A profile starts on the displays as detected now, here on the main thread; the
+    # session only gets the layout.
     assert icon.session.requests == [
+        ("use_displays", FRESH),
         ("activate", work),
         ("next",),
         ("toggle_pause",),
-        ("refresh_displays",),
+        ("use_displays", FRESH),
         ("apply_draft", work.profile, ["/image.png"], "unsaved", done),
     ]
+    assert detection.config_dirs == [PATHS.config, PATHS.config]
+
+
+@pytest.mark.parametrize(
+    "error",
+    [displays.DisplayDetectionError(3), configparser.Error("an unreadable display_systems.dat")],
+)
+def test_a_failed_display_detection_keeps_the_previous_layout(headless_tray_module, detection, caplog, error):
+    icon = controller(headless_tray_module)
+    detection.error = error
+
+    icon.refresh_displays()
+
+    assert icon.session.requests == []
+    assert "Keeping the previous display layout" in caplog.text
 
 
 def test_starting_no_profile_asks_nothing(headless_tray_module):
@@ -259,7 +302,7 @@ def test_profile_hotkey_starts_the_currently_loaded_profile(headless_tray_module
     # system_hotkey hands the consumer the arguments the binding was registered with.
     icon.profile_consumer(None, ("control", "w"), [(stale.profile_id,)])
 
-    assert icon.session.requests == [("activate", current)]
+    assert icon.session.requests == [("use_displays", FRESH), ("activate", current)]
 
 
 def test_hotkey_for_a_deleted_profile_does_nothing(headless_tray_module):

@@ -6,12 +6,15 @@ Callers only post requests, so the tray, its menus, the hotkeys and the editor n
 for a render. The slideshow's next change is the deadline of the worker's wait for the
 next request, so a slideshow that stopped has no timer left that could fire.
 
+The worker never detects displays: the caller detects them, on the main thread, and hands
+the layout over. The X library that display detection uses on Linux (libXrandr) corrupts
+memory when two threads use it at once, and GTK uses it on the main thread.
+
 One wallpaper change is show(), which the command line runs directly: it renders images
 for the display layout (superpaper.render), keeps the render (superpaper.render_cache)
 and hands it to the desktop (superpaper.desktop).
 """
 
-import configparser
 import logging
 import queue
 import threading
@@ -25,7 +28,6 @@ import superpaper.render as render
 import superpaper.render_cache as render_cache
 from superpaper.desktop.kde import Activities
 from superpaper.desktop.process import Result
-from superpaper.displays import DisplayDetectionError, DisplaySystem
 from superpaper.paths import AppPaths
 from superpaper.profile_id import ProfileId, ProfileIdError
 from superpaper.profile_store import write_active_profile
@@ -35,6 +37,7 @@ from superpaper.sp_platform import IS_WINDOWS
 if TYPE_CHECKING:
     from PIL import Image
 
+    from superpaper.displays import DisplaySystem
     from superpaper.profile_store import StoredProfile
 
 logger = logging.getLogger(__name__)
@@ -46,7 +49,7 @@ SHUTDOWN_TIMEOUT = 5.0
 class Session:
     """The running profile and its slideshow, kept by one worker thread.
 
-    ``display_system`` is the layout to render for until the displays are detected again.
+    ``display_system`` is the layout to render for until use_displays() hands over another.
     ``set_command`` gives the user's own wallpaper setter command as currently set, so a
     changed setting applies from the next change on. ``clock`` times the slideshow.
 
@@ -92,9 +95,9 @@ class Session:
         self._post(lambda: self._restore(stored))
 
     def activate(self, stored: StoredProfile) -> None:
-        """Run the saved profile ``stored``: render it now, for freshly detected displays,
-        and start its slideshow, unpaused; it is remembered for the next start. If it runs
-        already, show its next image instead."""
+        """Run the saved profile ``stored``: render it now and start its slideshow,
+        unpaused; it is remembered for the next start. If it runs already, show its next
+        image instead."""
         self._post(lambda: self._activate(stored))
 
     def next(self) -> None:
@@ -115,9 +118,10 @@ class Session:
         """
         self._post(lambda: self._update(profile_id, stored))
 
-    def refresh_displays(self) -> None:
-        """Detect the displays again and load their saved layout; later changes use it."""
-        self._post(self._detect_displays)
+    def use_displays(self, display_system: DisplaySystem) -> None:
+        """Render the changes after this one for ``display_system``: the displays as just
+        detected, with their saved layout."""
+        self._post(lambda: self._use_displays(display_system))
 
     def apply_draft(
         self,
@@ -205,7 +209,6 @@ class Session:
             self._running = stored
             self._change(advance=True)
             return
-        self._detect_displays()
         self._running = stored
         self._paused = False
         logger.info("Starting profile: %s", stored.profile.name)
@@ -267,11 +270,8 @@ class Session:
             self._paused = False
         self._arm()
 
-    def _detect_displays(self) -> None:
-        try:
-            self._display_system = DisplaySystem(self._paths.config)
-        except (DisplayDetectionError, OSError, ValueError, KeyError, configparser.Error) as error:
-            logger.warning("Keeping the previous display layout: %s", error)
+    def _use_displays(self, display_system: DisplaySystem) -> None:
+        self._display_system = display_system
 
 
 def _handle(request: Callable[[], None]) -> None:
