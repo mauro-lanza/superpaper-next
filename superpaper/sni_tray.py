@@ -143,11 +143,11 @@ class _MenuModel:
         # Profiles live in their own submenu to keep the top level tidy.
         add(self.PROFILES_SUBMENU_ID, "Profiles", None, submenu=True)
         next_id = self.PROFILE_ID_BASE
-        for profile in getattr(ctrl, "list_of_profiles", []) or []:
+        for stored in getattr(ctrl, "list_of_profiles", []) or []:
             add(
                 next_id,
-                profile.name,
-                (lambda p: lambda: ctrl.start_profile(None, p))(profile),
+                stored.profile.name,
+                (lambda p: lambda: ctrl.start_profile(None, p))(stored),
                 parent=self.PROFILES_SUBMENU_ID,
             )
             next_id += 1

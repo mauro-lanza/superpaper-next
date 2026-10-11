@@ -10,25 +10,22 @@ import wx.adv  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-i
 
 import superpaper.desktop as desktop
 import superpaper.displays as displays
+import superpaper.profile_store as profile_store
 import superpaper.render_cache as render_cache
 import superpaper.sp_logging as sp_logging
 import superpaper.wallpaper_processing as wpproc
 from superpaper.__version__ import __version__
 from superpaper.configuration_dialogs import HelpFrame, SettingsFrame
-from superpaper.data import (
-    list_profiles,
-    read_active_profile,
-    stored_profile_ids,
-    write_active_profile,
-)
 from superpaper.desktop.linux import running_kde
 from superpaper.gui import ConfigFrame
 from superpaper.message_dialog import show_message_dialog
 from superpaper.paths import AppPaths, resource
 from superpaper.profile_id import ProfileId, ProfileIdError
+from superpaper.profile_store import ProfileDiagnosticKind, ProfileStore, write_active_profile
 from superpaper.settings import SETTINGS_FILE, Settings, read_settings
 from superpaper.sni_tray import build_tray, sni_supported
 from superpaper.wallpaper_processing import (
+    apply_draft_job,
     change_wallpaper_job,
     quick_profile_job,
     run_profile_job,
@@ -112,13 +109,14 @@ class TaskBarIcon(wx.adv.TaskBarIcon):
         self.repeating_timer = None
         self.pause_item = None
         self.is_paused = False
-        self.list_of_profiles = list_profiles(self.paths)
-        # Renders of profiles deleted or renamed since the last start aren't needed.
-        stored = stored_profile_ids(self.paths)
+        self.store = ProfileStore(self.paths)
+        self._load_profiles()
+        # Renders and selections of profiles deleted or renamed since the last start
+        # aren't needed.
+        stored = profile_store.stored_profile_ids(self.paths)
         if stored is not None:
             render_cache.sweep(self.paths.cache, stored)
-        # Should now return an object if a previous profile was written or
-        # None if no previous data was found
+            profile_store.sweep_selections(self.paths.cache, stored)
         if startup_profile:
             self.active_profile = self.get_profile_by_id(startup_profile)
             if self.active_profile is None:
@@ -127,13 +125,9 @@ class TaskBarIcon(wx.adv.TaskBarIcon):
                     startup_profile.value,
                 )
         else:
-            prev_active_prof = read_active_profile(self.paths)
-            if prev_active_prof:
-                self.active_profile = self.get_profile_by_id(prev_active_prof.profile_id)
-            else:
-                self.active_profile = None
+            self.active_profile = self.store.active()
         if self.active_profile:
-            wpproc.G_ACTIVE_PROFILE = self.active_profile.name
+            wpproc.G_ACTIVE_PROFILE = self.active_profile.profile.name
         # An explicit CLI `--profile` launch should apply the wallpaper right
         # away; a normal daemon restart only restores the last shown wallpaper
         # without re-cycling (issue #140).
@@ -298,31 +292,31 @@ Check that it is formatted properly and valid keys."
                     # pass
 
                     # register profile specific bindings
-                    self.list_of_profiles = list_profiles(self.paths)
-                    for profile in self.list_of_profiles:
+                    for stored in self.list_of_profiles:
+                        hotkey = stored.profile.hotkey
                         if sp_logging.DEBUG:
                             sp_logging.G_LOGGER.info(
                                 "Registering binding: \
                                 %s for profile: %s",
-                                profile.hk_binding,
-                                profile.name,
+                                hotkey,
+                                stored.profile.name,
                             )
-                        if profile.hk_binding is not None and profile.hk_binding not in self.seen_binding:
+                        if hotkey is not None and hotkey not in self.seen_binding:
                             try:
                                 # Bind the identity, not the object: a profile edited later
                                 # must start with its current settings.
-                                hk2.register(profile.hk_binding, profile.profile_id, overwrite=False)
-                                self.seen_binding.add(profile.hk_binding)
+                                hk2.register(hotkey, stored.profile_id, overwrite=False)
+                                self.seen_binding.add(hotkey)
                             # except (SystemHotkeyError, SystemRegisterError, InvalidKeyError):
                             except Exception:
-                                msg = f"Error: could not register hotkey {profile.hk_binding}. \
+                                msg = f"Error: could not register hotkey {hotkey}. \
 Check that it is formatted properly and valid keys."
                                 sp_logging.G_LOGGER.warning(msg)
                                 sp_logging.G_LOGGER.warning(sys.exc_info()[0])
                                 if not running_kde():
                                     show_message_dialog(msg, "Error")
-                        elif profile.hk_binding in self.seen_binding:
-                            msg = f"Could not register hotkey: '{profile.hk_binding}' for profile: '{profile.name}'.\n\
+                        elif hotkey in self.seen_binding:
+                            msg = f"Could not register hotkey: '{hotkey}' for profile: '{stored.profile.name}'.\n\
 It is already registered for another action."
                             sp_logging.G_LOGGER.warning(msg)
                             if not running_kde():
@@ -334,10 +328,10 @@ It is already registered for another action."
                         sp_logging.G_LOGGER.info(sys.exc_info()[0])
 
     def update_hotkey(self, profile_name, old_hotkey, new_hotkey):
-        """Rebind a profile's hotkey after the profile was saved with a different one."""
+        """Rebind a profile's hotkey (a tuple of keys, or None) after the profile was saved
+        with a different one."""
         if self.hk2 is None:
             return  # hotkeys are disabled or unavailable
-        new_hotkey = tuple(new_hotkey.split("+")) if new_hotkey else None
         if old_hotkey == new_hotkey:
             return
         if old_hotkey in self.seen_binding:
@@ -360,6 +354,11 @@ Check that it is formatted properly and valid keys."
             if not running_kde():
                 show_message_dialog(msg, "Error")
 
+    @property
+    def list_of_profiles(self):
+        """The saved profiles, in the order the menus show them."""
+        return self.store.profiles
+
     def get_profile_by_name(self, name):
         try:
             return self.get_profile_by_id(ProfileId.parse(name))
@@ -367,10 +366,7 @@ Check that it is formatted properly and valid keys."
             return None
 
     def get_profile_by_id(self, profile_id):
-        for prof in self.list_of_profiles:
-            if prof.profile_id == profile_id:
-                return prof
-        return None
+        return self.store.get(profile_id)
 
     def profile_consumer(self, event, hotkey, bound_args):
         """Start the profile bound to a hotkey; called on the hotkey listener thread."""
@@ -402,7 +398,7 @@ Check that it is formatted properly and valid keys."
         create_menu_item(menu, "Reload Profiles", self.reload_profiles)
         menu.AppendSeparator()
         for item in self.list_of_profiles:
-            create_menu_item(menu, item.name, self.start_profile, item)
+            create_menu_item(menu, item.profile.name, self.start_profile, item)
         menu.AppendSeparator()
         create_menu_item(menu, "Next Wallpaper", self.next_wallpaper)
         self.pause_item = create_menu_item(menu, "Pause Timer", self.pause_timer, kind=wx.ITEM_CHECK)
@@ -447,11 +443,11 @@ Check that it is formatted properly and valid keys."
 
     def reload_profiles(self, event):
         """Reloads profiles from disk."""
-        self.list_of_profiles = list_profiles(self.paths)
-        # Re-point active_profile at the freshly loaded instance (matched by
-        # identity) so consumers that read tray.active_profile -- e.g. the settings
-        # dialog when it reopens -- see the saved state instead of a stale
-        # detached object (was causing edits like span mode to appear reverted).
+        self._load_profiles()
+        # Re-point active_profile at the profile's current record (matched by identity) so
+        # consumers that read tray.active_profile -- e.g. the settings dialog when it
+        # reopens -- see the saved state instead of a stale detached object (was causing
+        # edits like span mode to appear reverted).
         if self.active_profile is not None:
             refreshed = self.get_profile_by_id(self.active_profile.profile_id)
             if refreshed is not None:
@@ -464,6 +460,20 @@ Check that it is formatted properly and valid keys."
                     self.active_profile = None
                     wpproc.G_ACTIVE_PROFILE = None
 
+    def _load_profiles(self):
+        """Read the profiles directory again, offering to delete profiles that can't be loaded."""
+        for diagnostic in self.store.reload():
+            if diagnostic.kind is not ProfileDiagnosticKind.MALFORMED_CONTENT:
+                sp_logging.G_LOGGER.warning("Ignoring %s: %s", diagnostic.path, diagnostic.detail)
+                continue
+            message = (
+                f"There was an error when loading profile '{diagnostic.path.name}'.\n"
+                "Would you like to delete it? Choosing 'No' will just ignore the profile."
+            )
+            sp_logging.G_LOGGER.info("%s %s", message, diagnostic.detail)
+            if show_message_dialog(message, "Error", style="YES_NO"):
+                profile_store.delete_malformed(diagnostic)
+
     def refresh_displays(self):
         """Detect the displays and load their saved layout; later wallpaper changes use it.
 
@@ -472,21 +482,32 @@ Check that it is formatted properly and valid keys."
         """
         self.display_system = displays.DisplaySystem(self.paths.config)
 
-    def change_wallpaper(self, profile, *, force=False, advance=False, skip_if_busy=False, display_system=None):
-        """Start one wallpaper change for ``profile``, with the settings and displays as they are now.
+    def change_wallpaper(self, profile, *, advance=False, skip_if_busy=False):
+        """Start one wallpaper change for the running ``profile``, with the settings and
+        displays as they are now.
 
         The slideshow timer calls this on every tick, so a changed custom command or
-        display layout applies from the next tick on. ``display_system`` renders for
-        another layout instead, such as the editor's unsaved one.
+        display layout applies from the next tick on.
         """
         return change_wallpaper_job(
             profile,
             self.paths,
-            display_system=display_system if display_system is not None else self.display_system,
+            display_system=self.display_system,
             set_command=self.g_settings.set_command,
-            force=force,
             advance=advance,
             skip_if_busy=skip_if_busy,
+        )
+
+    def apply_draft(self, profile, images, *, display_system=None):
+        """Show ``images`` with ``profile``'s settings, which aren't a running profile's,
+        such as the editor's unsaved ones; ``display_system`` renders for another layout,
+        such as the editor's unsaved one."""
+        return apply_draft_job(
+            profile,
+            images,
+            self.paths,
+            display_system=display_system if display_system is not None else self.display_system,
+            set_command=self.g_settings.set_command,
         )
 
     def _run_profile(self, profile, *, startup=False):
@@ -511,7 +532,7 @@ Check that it is formatted properly and valid keys."
                 # renamed) active profile; the wallpaper setter only applies when
                 # profile.name matches it, so a stale name silently blocks every
                 # slideshow tick and manual change after a rename/save.
-                wpproc.G_ACTIVE_PROFILE = self.active_profile.name
+                wpproc.G_ACTIVE_PROFILE = self.active_profile.profile.name
                 self.repeating_timer, _thrd = self._run_profile(self.active_profile, startup=True)
                 if self.is_paused and self.repeating_timer is not None:
                     # Editing a paused slideshow must not resume it.
@@ -550,15 +571,13 @@ Check that it is formatted properly and valid keys."
 
         If the input profile is the currently active profile, initiate a wallpaper change.
         """
-        if sp_logging.DEBUG:
-            sp_logging.G_LOGGER.info("Start profile: %s", profile.name)
         if profile is None:
             sp_logging.G_LOGGER.info(
                 "start_profile: profile is None. \
                 Do you have any profiles in /profiles?"
             )
         elif self.active_profile is not None:
-            if profile.name == self.active_profile.name and not force_reload:
+            if profile.profile_id == self.active_profile.profile_id and not force_reload:
                 self.next_wallpaper(event)
                 return 0
             else:
@@ -566,9 +585,8 @@ Check that it is formatted properly and valid keys."
                     if self.repeating_timer is not None and self.repeating_timer.is_running:
                         self.repeating_timer.stop()
                     self.active_profile = profile
-                    wpproc.G_ACTIVE_PROFILE = self.active_profile.name
-                    if sp_logging.DEBUG:
-                        sp_logging.G_LOGGER.info("Starting timed profile job with profile: %s", profile.name)
+                    wpproc.G_ACTIVE_PROFILE = profile.profile.name
+                    sp_logging.G_LOGGER.info("Starting profile: %s", profile.profile.name)
                     self.repeating_timer, thrd = self._run_profile(profile)
                     write_active_profile(self.paths.cache, profile.profile_id)
                     return thrd
@@ -577,9 +595,8 @@ Check that it is formatted properly and valid keys."
                 if self.repeating_timer is not None and self.repeating_timer.is_running:
                     self.repeating_timer.stop()
                 self.active_profile = profile
-                wpproc.G_ACTIVE_PROFILE = self.active_profile.name
-                if sp_logging.DEBUG:
-                    sp_logging.G_LOGGER.info("Starting timed profile job with profile: %s", profile.name)
+                wpproc.G_ACTIVE_PROFILE = profile.profile.name
+                sp_logging.G_LOGGER.info("Starting profile: %s", profile.profile.name)
                 self.repeating_timer, thrd = self._run_profile(profile)
                 write_active_profile(self.paths.cache, profile.profile_id)
                 return thrd

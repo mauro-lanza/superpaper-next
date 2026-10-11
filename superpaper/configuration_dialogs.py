@@ -12,7 +12,7 @@ import wx.adv  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-i
 
 import superpaper.perspective as persp
 import superpaper.render as render
-from superpaper.data import CLIProfileData
+from superpaper import profiles
 from superpaper.message_dialog import show_message_dialog
 from superpaper.paths import resource
 from superpaper.settings import read_settings, write_settings
@@ -1062,16 +1062,12 @@ class PerspectiveConfig(wx.Dialog):
         for off_tc in self.frame.tc_list_offsets:
             off = off_tc.GetLineText(0).split(",")
             try:
-                offsets.append([int(off[0]), int(off[1])])
+                offsets.append((int(off[0]), int(off[1])))
             except IndexError, ValueError:
                 show_message_dialog(
                     f"Offsets must be integer pairs separated with a comma!\nProblematic offset is {off}"
                 )
                 return 0
-        flat_offsets = []
-        for off in offsets:
-            for pix in off:
-                flat_offsets.append(pix)
 
         busy = wx.BusyCursor()
 
@@ -1084,11 +1080,9 @@ class PerspectiveConfig(wx.Dialog):
         perspective = self.choice_profiles.GetString(self.choice_profiles.GetSelection())
 
         wx.Yield()
-        # Use the simplified CLI profile class. onSave has reloaded the tray's layout.
-        profile = CLIProfileData(
-            testimage, advanced=True, perspective=perspective, spangroups=None, offsets=flat_offsets
-        )
-        thrd = self.frame.parent_tray_obj.change_wallpaper(profile, force=True)
+        # onSave has reloaded the tray's layout.
+        profile = profiles.draft(testimage, spanmode="advanced", perspective=perspective, offsets=offsets)
+        thrd = self.frame.parent_tray_obj.apply_draft(profile, testimage)
         while thrd is not None and thrd.is_alive():
             time.sleep(0.5)
         del busy

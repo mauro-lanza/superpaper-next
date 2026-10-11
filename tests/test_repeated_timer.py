@@ -1,8 +1,11 @@
+from dataclasses import replace
+
 import pytest
 
+from superpaper import wallpaper_processing as wpproc
 
-def test_repeated_timer_arms_and_rearms_before_callback(profile_modules, manual_clock):
-    _, wpproc = profile_modules
+
+def test_repeated_timer_arms_and_rearms_before_callback(manual_clock):
     events = []
     timer = wpproc.RepeatedTimer(12.5, lambda: events.append("callback"))
 
@@ -18,8 +21,7 @@ def test_repeated_timer_arms_and_rearms_before_callback(profile_modules, manual_
     assert events == ["callback"]
 
 
-def test_repeated_timer_stop_and_restart(profile_modules, manual_clock):
-    _, wpproc = profile_modules
+def test_repeated_timer_stop_and_restart(manual_clock):
     timer = wpproc.RepeatedTimer(10, lambda: None)
     first = manual_clock.timers[0]
 
@@ -36,8 +38,7 @@ def test_repeated_timer_stop_and_restart(profile_modules, manual_clock):
     reason="U17a: a dispatched tick can rearm a stopped timer; the Phase D session "
     "worker removes the separate timer thread",
 )
-def test_dispatched_tick_cannot_resurrect_stopped_timer(profile_modules, manual_clock):
-    _, wpproc = profile_modules
+def test_dispatched_tick_cannot_resurrect_stopped_timer(manual_clock):
     callbacks = []
     timer = wpproc.RepeatedTimer(10, lambda: callbacks.append("tick"))
     first = manual_clock.timers[0]
@@ -54,17 +55,8 @@ def test_dispatched_tick_cannot_resurrect_stopped_timer(profile_modules, manual_
     ("slideshow", "startup", "expect_change", "expect_timer"),
     [(False, False, True, False), (False, True, False, False), (True, False, True, True), (True, True, False, True)],
 )
-def test_run_profile_job_matrix(
-    profile_modules,
-    manual_clock,
-    slideshow_profile,
-    slideshow,
-    startup,
-    expect_change,
-    expect_timer,
-):
-    _, wpproc = profile_modules
-    slideshow_profile.slideshow = slideshow
+def test_run_profile_job_matrix(manual_clock, slideshow_profile, slideshow, startup, expect_change, expect_timer):
+    slideshow_profile.profile = replace(slideshow_profile.profile, slideshow=slideshow)
     changes = []
     thread = object()
 

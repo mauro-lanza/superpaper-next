@@ -8,6 +8,7 @@ Written by Henri Hänninen, copyright 2022 under MIT licence.
 
 from pathlib import Path
 from threading import Lock, Thread, Timer
+from typing import TYPE_CHECKING
 
 import superpaper.desktop as desktop
 import superpaper.render as render
@@ -18,19 +19,17 @@ from superpaper.desktop.process import Result
 from superpaper.displays import DisplaySystem
 from superpaper.paths import AppPaths
 from superpaper.profile_id import ProfileId, ProfileIdError
+from superpaper.profiles import Profile
 from superpaper.sp_platform import IS_WINDOWS
+
+if TYPE_CHECKING:
+    from superpaper.profile_store import StoredProfile
 
 # Global constants
 
-G_ACTIVE_PROFILE = None
+G_ACTIVE_PROFILE: str | None = None
 G_WALLPAPER_CHANGE_LOCK = Lock()
 G_WALLPAPER_CHANGE_PENDING = Lock()
-G_SUPPORTED_IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".bmp", ".gif", ".tiff", ".webp")
-
-
-def is_supported_image(filename: str) -> bool:
-    """Whether a file name has an extension Superpaper renders, in any letter case."""
-    return filename.lower().endswith(G_SUPPORTED_IMAGE_EXTENSIONS)
 
 
 class RepeatedTimer:
@@ -109,20 +108,28 @@ def _log_problem(result: Result) -> None:
         sp_logging.G_LOGGER.error("%s", result.problem)
 
 
-def _change_wallpaper(profile, force, advance, display_system: DisplaySystem, paths: AppPaths, set_command):
-    """Choose ``profile``'s images, render them for ``display_system``, keep the render in
-    the cache and show it.
+def _change_wallpaper(stored: StoredProfile, advance, display_system: DisplaySystem, paths: AppPaths, set_command):
+    """Choose the running profile ``stored``'s images, render them for ``display_system``,
+    keep the render in the cache and show it.
 
-    Unless ``force``, a profile that is no longer running is left alone: its slideshow can
-    tick once more after another profile has started.
+    A profile that is no longer running is left alone: its slideshow can tick once more
+    after another profile has started.
     """
-    if not force and profile.name != G_ACTIVE_PROFILE:
+    profile = stored.profile
+    if profile.name != G_ACTIVE_PROFILE:
         sp_logging.G_LOGGER.info("Wallpaper change skipped: profile '%s' is no longer running.", profile.name)
         return
-    if (advance or not profile.has_valid_selection()) and not profile.advance_wallpaper():
+    selection = stored.selection
+    files = selection.advance() if advance or not selection.is_complete() else selection.current()
+    if not files:
         sp_logging.G_LOGGER.error("Wallpaper change skipped: profile '%s' has no complete selection.", profile.name)
         return
-    files = profile.next_wallpaper_files()
+    _show(profile, files, stored.profile_id, display_system, paths, set_command)
+
+
+def _show(profile: Profile, files, profile_id, display_system: DisplaySystem, paths: AppPaths, set_command):
+    """Render ``files`` with ``profile``'s settings, keep the render in the cache (as the
+    saved profile ``profile_id``'s, or as a draft) and show it."""
     try:
         image = _render(profile, files, display_system)
     except render.SourceImageError as error:
@@ -131,7 +138,7 @@ def _change_wallpaper(profile, force, advance, display_system: DisplaySystem, pa
     if image is None:
         return
     try:
-        output = render_cache.save(render_cache.slot(paths.cache, profile.profile_id), image)
+        output = render_cache.save(render_cache.slot(paths.cache, profile_id), image)
     except OSError as error:
         sp_logging.G_LOGGER.error("Wallpaper change skipped: the wallpaper could not be saved: %s", error)
         return
@@ -140,7 +147,7 @@ def _change_wallpaper(profile, force, advance, display_system: DisplaySystem, pa
         render_cache.forget_previous(output)
 
 
-def _render(profile, files, display_system: DisplaySystem):
+def _render(profile: Profile, files, display_system: DisplaySystem):
     """Compose ``profile``'s desktop image from ``files``; None, with the reason logged, if
     they don't fit its span mode."""
     resolutions = display_system.resolutions()
@@ -148,13 +155,13 @@ def _render(profile, files, display_system: DisplaySystem):
         if len(files) != len(resolutions):
             _log_incomplete(profile)
             return None
-        return render.multi(files, display_system, zoom=profile.zoom, pan=profile.offsets)
+        return render.multi(files, display_system, zoom=profile.zoom, pan=profile.pan)
     corrections = profile.display_corrections(resolutions)
     if profile.spanmode.startswith("single") and not corrections.ppimode:
         if len(files) != 1:
             _log_incomplete(profile)
             return None
-        return render.simple(files[0], display_system, zoom=profile.zoom, pan=profile.offsets)
+        return render.simple(files[0], display_system, zoom=profile.zoom, pan=profile.pan)
     # Advanced spanning, or a single image with legacy corrections (offsets=, ppi=, ...).
     if len(files) != (len(profile.spangroups) if profile.spangroups else 1):
         _log_incomplete(profile)
@@ -167,38 +174,33 @@ def _render(profile, files, display_system: DisplaySystem):
         spangroups=profile.spangroups,
         perspective=perspective,
         zoom=profile.zoom,
-        pan=profile.offsets,
+        pan=profile.pan,
     )
 
 
-def _log_incomplete(profile) -> None:
+def _log_incomplete(profile: Profile) -> None:
     sp_logging.G_LOGGER.error("No complete wallpaper selection is available for profile '%s'.", profile.name)
 
 
 def change_wallpaper_job(
-    profile,
+    stored: StoredProfile,
     paths: AppPaths,
     *,
     display_system: DisplaySystem,
     set_command="",
-    force=False,
     advance=False,
     skip_if_busy=False,
 ):
-    """Centralized wallpaper method that calls setter algorithm based on input prof settings.
-    When force, skip the profile name check.
-    When advance, cycle to the next image before rendering (slideshow / manual next).
-    Otherwise the current persistent selection is rendered unchanged; if none has
-    been established yet, the first image is picked once and saved as the selection.
-    The wallpaper is rendered for ``display_system`` into ``paths.cache``;
-    ``set_command`` is the user's own wallpaper setter command, if any.
+    """Change the running profile ``stored``'s wallpaper, on a thread of its own, which is
+    returned.
+
+    With ``advance`` its slideshow moves on to the next image (a tick, or "next");
+    otherwise its current selection is shown again, and if it has none yet, the first
+    image is chosen and remembered. The wallpaper is rendered for ``display_system`` into
+    ``paths.cache``; ``set_command`` is the user's own wallpaper setter command, if any.
+    With ``skip_if_busy``, nothing happens while another change is waiting to run.
     """
-    if not (
-        profile.spanmode.startswith("single")
-        or profile.spanmode.startswith("advanced")
-        or profile.spanmode.startswith("multi")
-    ):
-        sp_logging.G_LOGGER.info("Unkown profile spanmode: %s", profile.spanmode)
+    if not _known_spanmode(stored.profile):
         return None
     gate_acquired = False
     if skip_if_busy:
@@ -206,13 +208,40 @@ def change_wallpaper_job(
         if not gate_acquired:
             sp_logging.G_LOGGER.info("Wallpaper change skipped because another change is pending.")
             return None
+    return _start(lambda: _change_wallpaper(stored, advance, display_system, paths, set_command), gate_acquired)
+
+
+def apply_draft_job(profile: Profile, images, paths: AppPaths, *, display_system: DisplaySystem, set_command=""):
+    """Show ``images`` with ``profile``'s settings, on a thread of its own, which is returned.
+
+    For settings that aren't a running profile's: the editor's unsaved ones, the align
+    test or the command line. The render is kept as a draft, and no slideshow moves on.
+    """
+    if not _known_spanmode(profile):
+        return None
+    if not images:
+        sp_logging.G_LOGGER.error("Nothing to show for '%s': it has no images.", profile.name)
+        return None
+    images = list(images)
+    return _start(lambda: _show(profile, images, None, display_system, paths, set_command), False)
+
+
+def _known_spanmode(profile: Profile) -> bool:
+    if profile.spanmode.startswith(("single", "advanced", "multi")):
+        return True
+    sp_logging.G_LOGGER.info("Unkown profile spanmode: %s", profile.spanmode)
+    return False
+
+
+def _start(change, gate_acquired):
+    """Run ``change`` on a thread, after any change waiting before it and never two at once."""
 
     def run_change():
         if not gate_acquired:
             G_WALLPAPER_CHANGE_PENDING.acquire()
         try:
             with G_WALLPAPER_CHANGE_LOCK:
-                _change_wallpaper(profile, force, advance, display_system, paths, set_command)
+                change()
         finally:
             G_WALLPAPER_CHANGE_PENDING.release()
 
@@ -221,10 +250,10 @@ def change_wallpaper_job(
     return thrd
 
 
-def run_profile_job(profile, change, startup=False):
-    """Start running ``profile``: set its wallpaper now and arm its slideshow.
+def run_profile_job(stored: StoredProfile, change, startup=False):
+    """Start running the profile ``stored``: set its wallpaper now and arm its slideshow.
 
-    ``change(profile, advance=..., skip_if_busy=...)`` starts one wallpaper change; the
+    ``change(stored, advance=..., skip_if_busy=...)`` starts one wallpaper change; the
     slideshow timer calls it on every tick. When ``startup`` is True the wallpaper is not
     changed immediately: the currently shown wallpaper is kept and, for slideshow
     profiles, only the repeating timer is armed so cycling happens later on its own
@@ -232,34 +261,24 @@ def run_profile_job(profile, change, startup=False):
     """
     repeating_timer = None
     thrd = None
-    if sp_logging.DEBUG:
-        sp_logging.G_LOGGER.info("running profile job with profile: %s", profile.name)
-
+    sp_logging.G_LOGGER.info("Running profile: %s", stored.profile.name)
     if not startup:
-        thrd = change(profile)
-    if profile.slideshow:
-        repeating_timer = RepeatedTimer(
-            profile.delay_list[0],
-            change,
-            profile,
-            advance=True,
-            skip_if_busy=True,
-        )
+        thrd = change(stored)
+    if stored.profile.slideshow:
+        repeating_timer = RepeatedTimer(stored.profile.delay, change, stored, advance=True, skip_if_busy=True)
     return (repeating_timer, thrd)
 
 
-def quick_profile_job(profile, *, display_system: DisplaySystem, paths: AppPaths, set_command="") -> bool:
+def quick_profile_job(stored: StoredProfile, *, display_system: DisplaySystem, paths: AppPaths, set_command="") -> bool:
     """Show the last wallpaper again at startup, without rendering anything.
 
-    That is the last render of ``profile``, or a draft shown after it: the editor's Apply,
-    the align test or the command line. Returns False if ``profile`` has no render to
-    show, so that the caller can render it.
+    That is the last render of the profile ``stored``, or a draft shown after it: the
+    editor's Apply, the align test or the command line. Returns False if the profile has
+    no render to show, so that the caller can render it.
     """
-    if profile.profile_id is None:
-        return False
-    rendered = render_cache.latest(render_cache.slot(paths.cache, profile.profile_id))
+    rendered = render_cache.latest(render_cache.slot(paths.cache, stored.profile_id))
     if rendered is None:
-        sp_logging.G_LOGGER.info("Profile '%s' has no earlier render to show.", profile.name)
+        sp_logging.G_LOGGER.info("Profile '%s' has no earlier render to show.", stored.profile.name)
         return False
     draft = render_cache.latest(render_cache.slot(paths.cache, None))
     if draft is not None and draft.modified > rendered.modified:
@@ -276,7 +295,7 @@ def quick_profile_job(profile, *, display_system: DisplaySystem, paths: AppPaths
     if desktop.takes_pieces(set_command) and pieces:
         sp_logging.G_LOGGER.info("Use wallpaper crop pieces: %s", pieces)
         setter, args, kwargs = _restore_pieces, (image, pieces), {"paths": paths, "set_command": set_command}
-    elif IS_WINDOWS and not _windows_restores(profile, display_system):
+    elif IS_WINDOWS and not _windows_restores(stored.profile, display_system):
         return True  # Windows keeps the wallpaper itself
     else:
         setter, args = set_wallpaper, (image,)
@@ -285,7 +304,7 @@ def quick_profile_job(profile, *, display_system: DisplaySystem, paths: AppPaths
     return True
 
 
-def _windows_restores(profile, display_system: DisplaySystem) -> bool:
+def _windows_restores(profile: Profile, display_system: DisplaySystem) -> bool:
     """Whether Windows gets the wallpaper again at startup: only a perspective render does."""
     if profile.spanmode != "advanced" or not display_system.use_perspective:
         return False

@@ -1,46 +1,53 @@
+"""Finding the profiles in the profiles directory: which load, which can't and why, and
+deleting them."""
+
 import os
 import sys
 import unicodedata
 
 import pytest
 
+from superpaper import profile_store
 from superpaper.profile_id import ProfileId, ProfileIdError
+from superpaper.profile_store import ProfileDiagnosticKind, ProfileStore
+from tests.conftest import load_profile
 
 
 def profile_bytes(name, extra=b""):
     return f"name={name}\nspanmode=single\nslideshow=false\n".encode() + extra
 
 
-def test_discovery_returns_valid_profiles_in_filename_order(profile_modules, app_paths, monkeypatch, tmp_path):
-    data, _ = profile_modules
+def loaded(app_paths):
+    """The profiles that load, as the tray finds them."""
+    store = ProfileStore(app_paths)
+    store.reload()
+    return store.profiles
+
+
+def test_discovery_returns_valid_profiles_in_filename_order(app_paths):
     profiles = app_paths.profiles
     (profiles / "Zulu.profile").write_bytes(profile_bytes("Zulu"))
     (profiles / "Alpha.profile").write_bytes(profile_bytes("Alpha"))
     (profiles / "nested").mkdir()
     (profiles / "nested" / "Hidden.profile").write_bytes(profile_bytes("Hidden"))
 
-    inventory = data.discover_profile_inventory(app_paths)
+    inventory = profile_store.discover(app_paths)
 
     assert [entry.profile_id.value for entry in inventory.entries] == ["Alpha", "Zulu"]
-    assert [profile.profile_id for profile in data.list_profiles(app_paths)] == [ProfileId("Alpha"), ProfileId("Zulu")]
+    assert [stored.profile_id for stored in loaded(app_paths)] == [ProfileId("Alpha"), ProfileId("Zulu")]
 
 
 @pytest.mark.parametrize("stem", ["back\\slash", "bell\x07", "cli", "Create a new profile"])
-def test_unsafe_filenames_are_ignored_without_prompt(profile_modules, app_paths, monkeypatch, tmp_path, stem):
-    data, _ = profile_modules
-    profiles = app_paths.profiles
-    path = profiles / f"{stem}.profile"
+def test_unsafe_filenames_are_diagnosed_and_left_alone(app_paths, stem):
+    path = app_paths.profiles / f"{stem}.profile"
     original = profile_bytes(stem)
     path.write_bytes(original)
-    prompts = []
-    monkeypatch.setattr(data, "show_message_dialog", lambda *args, **kwargs: prompts.append(args) or True)
 
-    inventory = data.discover_profile_inventory(app_paths)
+    store = ProfileStore(app_paths)
+    diagnostics = store.reload()
 
-    assert inventory.entries == ()
-    assert [diagnostic.kind.name for diagnostic in inventory.diagnostics] == ["INVALID_FILENAME"]
-    assert data.list_profiles(app_paths) == []
-    assert prompts == []
+    assert store.profiles == []
+    assert [diagnostic.kind for diagnostic in diagnostics] == [ProfileDiagnosticKind.INVALID_FILENAME]
     assert path.read_bytes() == original
 
 
@@ -54,262 +61,206 @@ def test_unsafe_filenames_are_ignored_without_prompt(profile_modules, app_paths,
         ("Work", "work"),
     ],
 )
-def test_profiles_saved_by_older_versions_keep_loading(
-    profile_modules, app_paths, monkeypatch, tmp_path, stem, name_line
-):
-    data, _ = profile_modules
-    profiles = app_paths.profiles
-    path = profiles / f"{stem}.profile"
+def test_profiles_saved_by_older_versions_keep_loading(app_paths, stem, name_line):
+    path = app_paths.profiles / f"{stem}.profile"
     original = profile_bytes(name_line)
     path.write_bytes(original)
 
-    (profile,) = data.list_profiles(app_paths)
+    (stored,) = loaded(app_paths)
 
-    assert profile.profile_id == ProfileId(stem)
-    assert profile.name == stem
+    assert stored.profile_id == ProfileId(stem)
+    assert stored.profile.name == stem
     assert path.read_bytes() == original
 
 
-def test_case_variant_profiles_both_load(profile_modules, app_paths, monkeypatch, tmp_path):
-    data, _ = profile_modules
+def test_case_variant_profiles_both_load(app_paths):
     profiles = app_paths.profiles
     (profiles / "Work.profile").write_bytes(profile_bytes("Work"))
     (profiles / "work.profile").write_bytes(profile_bytes("work"))
     if len(list(profiles.iterdir())) == 1:
         pytest.skip("the filesystem is case-insensitive")
 
-    inventory = data.discover_profile_inventory(app_paths)
+    inventory = profile_store.discover(app_paths)
 
     assert [entry.profile_id.value for entry in inventory.entries] == ["Work", "work"]
-    assert data.open_profile(app_paths, "Work").name == "Work"
-    assert data.open_profile(app_paths, "work").name == "work"
+    assert load_profile(app_paths, "Work").profile.name == "Work"
+    assert load_profile(app_paths, "work").profile.name == "work"
 
 
 @pytest.mark.parametrize("outside", [False, True])
-def test_symlinked_profiles_load(profile_modules, app_paths, monkeypatch, tmp_path, outside):
-    data, _ = profile_modules
-    profiles = app_paths.profiles
-    target = (tmp_path if outside else profiles) / "target"
+def test_symlinked_profiles_load(app_paths, tmp_path, outside):
+    target = (tmp_path if outside else app_paths.profiles) / "target"
     target.write_bytes(profile_bytes("linked"))
-    (profiles / "linked.profile").symlink_to(target)
+    (app_paths.profiles / "linked.profile").symlink_to(target)
 
-    inventory = data.discover_profile_inventory(app_paths)
+    inventory = profile_store.discover(app_paths)
 
     assert [entry.profile_id.value for entry in inventory.entries] == ["linked"]
-    assert data.open_profile(app_paths, "linked").profile_id == ProfileId("linked")
+    assert load_profile(app_paths, "linked").profile_id == ProfileId("linked")
 
 
-def test_broken_symlink_is_a_diagnostic(profile_modules, app_paths, monkeypatch, tmp_path):
-    data, _ = profile_modules
-    profiles = app_paths.profiles
-    (profiles / "gone.profile").symlink_to(tmp_path / "missing")
+def test_broken_symlink_is_a_diagnostic(app_paths, tmp_path):
+    (app_paths.profiles / "gone.profile").symlink_to(tmp_path / "missing")
 
-    inventory = data.discover_profile_inventory(app_paths)
+    inventory = profile_store.discover(app_paths)
 
     assert inventory.entries == ()
-    assert [diagnostic.kind for diagnostic in inventory.diagnostics] == [data.ProfileDiagnosticKind.NOT_REGULAR_FILE]
+    assert [diagnostic.kind for diagnostic in inventory.diagnostics] == [ProfileDiagnosticKind.NOT_REGULAR_FILE]
 
 
-def test_open_rejects_paths_and_accepts_unicode_names(profile_modules, app_paths, monkeypatch, tmp_path):
-    data, _ = profile_modules
-    profiles = app_paths.profiles
+def test_unicode_names_load_by_their_own_form(app_paths):
     composed = unicodedata.normalize("NFC", "Työ")
-    path = profiles / f"{composed}.profile"
-    path.write_bytes(profile_bytes(composed))
-
-    assert data.open_profile(app_paths, "../outside") is None
-    assert data.open_profile(app_paths, str(path)) is None
-    assert data.open_profile(app_paths, composed).profile_id == ProfileId(composed)
-    assert data.open_profile(app_paths, ProfileId(composed)).profile_id == ProfileId(composed)
-
-
-def test_decomposed_unicode_filename_loads(profile_modules, app_paths, monkeypatch, tmp_path):
-    data, _ = profile_modules
-    profiles = app_paths.profiles
     decomposed = unicodedata.normalize("NFD", "Työ")
-    (profiles / f"{decomposed}.profile").write_bytes(profile_bytes(decomposed))
+    (app_paths.profiles / f"{composed}.profile").write_bytes(profile_bytes(composed))
+    if composed != decomposed:
+        (app_paths.profiles / f"{decomposed}.profile").write_bytes(profile_bytes(decomposed))
 
-    assert [profile.name for profile in data.list_profiles(app_paths)] == [decomposed]
+    names = [stored.profile.name for stored in loaded(app_paths)]
 
-
-def test_rename_source_lookup_uses_original_id(profile_modules, app_paths, monkeypatch, tmp_path):
-    data, _ = profile_modules
-    profiles = app_paths.profiles
-    (profiles / "Original.profile").write_bytes(profile_bytes("Original", b"hotkey=control+x\n"))
-
-    source = data.open_profile(app_paths, ProfileId("Original"))
-
-    assert source.hk_binding == ("control", "x")
-    assert data.open_profile(app_paths, ProfileId("Renamed")) is None
+    assert composed in names
+    assert decomposed in names
+    assert load_profile(app_paths, ProfileId(composed)).profile_id == ProfileId(composed)
 
 
-def test_delete_uses_loaded_content_and_rejects_replacement(profile_modules, app_paths, monkeypatch, tmp_path):
-    data, _ = profile_modules
-    profiles = app_paths.profiles
-    path = profiles / "Work.profile"
+def test_a_name_line_never_becomes_an_identity(app_paths, tmp_path):
+    (app_paths.profiles / "Original.profile").write_bytes(profile_bytes("../outside", b"hotkey=control+x\n"))
+    outside = tmp_path / "outside.profile"
+    outside.write_bytes(b"sentinel")
+
+    (stored,) = loaded(app_paths)
+
+    assert stored.profile_id == ProfileId("Original")
+    assert stored.profile.hotkey == ("control", "x")
+    with pytest.raises(ProfileIdError):
+        ProfileId.parse("../outside")
+    profile_store.delete_managed_profile(app_paths, stored)
+    assert outside.read_bytes() == b"sentinel"
+
+
+def test_delete_uses_loaded_content_and_rejects_replacement(app_paths):
+    path = app_paths.profiles / "Work.profile"
     original = profile_bytes("Work", b"hotkey=control+x\n")
     replacement = profile_bytes("Work", b"hotkey=control+y\n")
     path.write_bytes(original)
     original_stat = path.stat()
-    loaded = data.open_profile(app_paths, ProfileId("Work"))
+    stored = load_profile(app_paths, "Work")
     path.write_bytes(replacement)
     os.utime(path, ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns))
 
-    with pytest.raises(data.ManagedPathError):
-        data.delete_managed_profile(app_paths, loaded)
+    with pytest.raises(profile_store.ManagedPathError):
+        profile_store.delete_managed_profile(app_paths, stored)
 
     assert path.read_bytes() == replacement
 
 
-def test_deleting_a_symlinked_profile_removes_only_the_link(profile_modules, app_paths, monkeypatch, tmp_path):
-    data, _ = profile_modules
-    profiles = app_paths.profiles
+def test_deleting_a_symlinked_profile_removes_only_the_link(app_paths, tmp_path):
     dotfile = tmp_path / "dotfiles" / "Work.profile"
     dotfile.parent.mkdir()
     dotfile.write_bytes(profile_bytes("Work"))
-    link = profiles / "Work.profile"
+    link = app_paths.profiles / "Work.profile"
     link.symlink_to(dotfile)
-    loaded = data.open_profile(app_paths, ProfileId("Work"))
 
-    data.delete_managed_profile(app_paths, loaded)
+    profile_store.delete_managed_profile(app_paths, load_profile(app_paths, "Work"))
 
     assert not link.is_symlink()
     assert dotfile.read_bytes() == profile_bytes("Work")
 
 
-def test_delete_selection_ignores_editable_traversal_and_deletes_selected_profile(
-    profile_modules, app_paths, monkeypatch, tmp_path
-):
-    data, _ = profile_modules
+def test_deleting_one_profile_leaves_the_others(app_paths):
     profiles = app_paths.profiles
-    selected_path = profiles / "Work.profile"
-    other_path = profiles / "Other.profile"
-    outside = tmp_path / "outside.profile"
-    selected_path.write_bytes(profile_bytes("Work"))
-    other_path.write_bytes(profile_bytes("Other"))
-    outside.write_bytes(b"sentinel")
-    loaded = data.list_profiles(app_paths)
+    (profiles / "Work.profile").write_bytes(profile_bytes("Work"))
+    (profiles / "Other.profile").write_bytes(profile_bytes("Other"))
+    store = ProfileStore(app_paths)
+    store.reload()
 
-    # The editable name field can hold anything; it never becomes an identity.
-    with pytest.raises(ProfileIdError):
-        ProfileId.parse("../outside")
-    selected = data.managed_profile_for_selection(loaded, ProfileId("Work"))
-    data.delete_managed_profile(app_paths, selected)
+    store.delete(store.get(ProfileId("Work")))
 
-    assert not selected_path.exists()
-    assert other_path.exists()
-    assert outside.read_bytes() == b"sentinel"
+    assert [path.name for path in profiles.iterdir()] == ["Other.profile"]
+    assert [stored.profile_id for stored in store.profiles] == [ProfileId("Other")]
 
 
-def test_malformed_content_keeps_legacy_deletion_prompt(profile_modules, app_paths, monkeypatch, tmp_path):
-    data, _ = profile_modules
-    profiles = app_paths.profiles
-    path = profiles / "broken.profile"
+@pytest.mark.parametrize("setting", [b"diagonal_inches=0;24\n", b"delay=soon\n", b"ppi=96.5\n"])
+def test_a_value_that_cant_be_used_makes_a_profile_malformed(app_paths, setting):
+    path = app_paths.profiles / "broken.profile"
+    original = profile_bytes("broken", setting)
+    path.write_bytes(original)
+
+    store = ProfileStore(app_paths)
+    (diagnostic,) = store.reload()
+
+    assert store.profiles == []
+    assert diagnostic.kind is ProfileDiagnosticKind.MALFORMED_CONTENT
+    assert path.read_bytes() == original
+
+
+@pytest.mark.parametrize("setting", [b"zoom=\n", b"align=\n", b"a line without a setting\n", b"name\n"])
+def test_a_profile_earlier_versions_loaded_still_loads(app_paths, setting):
+    (app_paths.profiles / "lenient.profile").write_bytes(profile_bytes("lenient", setting))
+
+    assert [stored.profile_id.value for stored in loaded(app_paths)] == ["lenient"]
+
+
+def test_a_malformed_profile_is_deleted_as_it_was_diagnosed(app_paths):
+    path = app_paths.profiles / "broken.profile"
     path.write_bytes(profile_bytes("broken", b"delay=not-a-number\n"))
-    prompts = []
-    monkeypatch.setattr(data, "show_message_dialog", lambda *args, **kwargs: prompts.append(args) or False)
+    (diagnostic,) = ProfileStore(app_paths).reload()
 
-    assert data.list_profiles(app_paths) == []
-    assert len(prompts) == 1
-    assert path.exists()
-
-
-def test_malformed_profile_is_deleted_when_confirmed(profile_modules, app_paths, monkeypatch, tmp_path):
-    data, _ = profile_modules
-    profiles = app_paths.profiles
-    path = profiles / "broken.profile"
-    path.write_bytes(profile_bytes("broken", b"delay=not-a-number\n"))
-    monkeypatch.setattr(data, "show_message_dialog", lambda *args, **kwargs: True)
-
-    assert data.list_profiles(app_paths) == []
+    assert profile_store.delete_malformed(diagnostic) is True
     assert not path.exists()
 
 
-def test_malformed_prompt_retains_replacement_made_during_confirmation(
-    profile_modules, app_paths, monkeypatch, tmp_path
-):
-    data, _ = profile_modules
-    profiles = app_paths.profiles
-    path = profiles / "broken.profile"
+def test_a_malformed_profile_replaced_meanwhile_is_kept(app_paths):
+    path = app_paths.profiles / "broken.profile"
     path.write_bytes(profile_bytes("broken", b"delay=not-a-number\n"))
+    (diagnostic,) = ProfileStore(app_paths).reload()
     replacement = profile_bytes("broken", b"hotkey=control+x\n")
+    path.write_bytes(replacement)
 
-    def replace_then_confirm(*_args, **_kwargs):
-        path.unlink()
-        path.write_bytes(replacement)
-        return True
-
-    monkeypatch.setattr(data, "show_message_dialog", replace_then_confirm)
-
-    assert data.list_profiles(app_paths) == []
+    assert profile_store.delete_malformed(diagnostic) is False
     assert path.read_bytes() == replacement
 
 
-def test_loading_a_read_only_profile_never_writes(profile_modules, app_paths, monkeypatch, tmp_path):
-    data, _ = profile_modules
-    profiles = app_paths.profiles
-    path = profiles / "saved.profile"
+def test_loading_a_read_only_profile_never_writes(app_paths):
+    path = app_paths.profiles / "saved.profile"
     original = profile_bytes("other")
     path.write_bytes(original)
     path.chmod(0o444)
-    prompts = []
-    monkeypatch.setattr(data, "show_message_dialog", lambda *args, **kwargs: prompts.append(args) or True)
 
-    assert [profile.name for profile in data.list_profiles(app_paths)] == ["saved"]
-    assert data.open_profile(app_paths, "saved").name == "saved"
-    assert prompts == []
+    assert [stored.profile.name for stored in loaded(app_paths)] == ["saved"]
     assert path.read_bytes() == original
 
 
 @pytest.mark.skipif(sys.platform == "win32" or os.geteuid() == 0, reason="needs POSIX permissions, not root")
-def test_unreadable_profile_is_diagnostic_without_deletion_prompt(profile_modules, app_paths, monkeypatch, tmp_path):
-    data, _ = profile_modules
-    profiles = app_paths.profiles
-    path = profiles / "saved.profile"
+def test_an_unreadable_profile_is_an_io_error_not_malformed(app_paths):
+    path = app_paths.profiles / "saved.profile"
     path.write_bytes(profile_bytes("saved"))
     path.chmod(0)
-    prompts = []
-    monkeypatch.setattr(data, "show_message_dialog", lambda *args, **kwargs: prompts.append(args) or True)
 
-    inventory = data.discover_profile_inventory(app_paths)
-    profiles_listed = data.list_profiles(app_paths)
+    store = ProfileStore(app_paths)
+    diagnostics = store.reload()
     path.chmod(0o644)
 
-    assert inventory.entries == ()
-    assert inventory.diagnostics[0].kind is data.ProfileDiagnosticKind.IO_ERROR
-    assert profiles_listed == []
-    assert prompts == []
+    assert store.profiles == []
+    assert [diagnostic.kind for diagnostic in diagnostics] == [ProfileDiagnosticKind.IO_ERROR]
     assert path.read_bytes() == profile_bytes("saved")
 
 
-@pytest.mark.parametrize(
-    "setting",
-    [b"diagonal_inches=0;24\n", b"zoom=\n", b"align=\n"],
-)
-def test_construction_failure_is_malformed_and_prompted(profile_modules, app_paths, monkeypatch, tmp_path, setting):
-    data, _ = profile_modules
-    profiles = app_paths.profiles
-    path = profiles / "broken.profile"
-    original = profile_bytes("broken", setting)
-    path.write_bytes(original)
-    prompts = []
-    monkeypatch.setattr(data, "show_message_dialog", lambda *args, **kwargs: prompts.append(args) or False)
-
-    assert data.list_profiles(app_paths) == []
-    assert len(prompts) == 1
-    assert path.read_bytes() == original
-
-
 @pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="FIFOs are unavailable")
-def test_fifo_profile_is_diagnostic_without_blocking_or_prompt(profile_modules, app_paths, monkeypatch, tmp_path):
-    data, _ = profile_modules
-    profiles = app_paths.profiles
-    os.mkfifo(profiles / "pipe.profile")
-    prompts = []
-    monkeypatch.setattr(data, "show_message_dialog", lambda *args, **kwargs: prompts.append(args) or True)
+def test_fifo_profile_is_diagnostic_without_blocking(app_paths):
+    os.mkfifo(app_paths.profiles / "pipe.profile")
 
-    inventory = data.discover_profile_inventory(app_paths)
+    inventory = profile_store.discover(app_paths)
 
     assert inventory.entries == ()
-    assert inventory.diagnostics[0].kind is data.ProfileDiagnosticKind.NOT_REGULAR_FILE
-    assert prompts == []
+    assert inventory.diagnostics[0].kind is ProfileDiagnosticKind.NOT_REGULAR_FILE
+
+
+def test_selections_of_profiles_that_are_gone_are_forgotten(app_paths):
+    selections = app_paths.cache / "selections"
+    selections.mkdir()
+    for name in ("Work.json", "Gone.json", "notes.txt"):
+        (selections / name).write_text("[]", encoding="utf-8")
+
+    profile_store.sweep_selections(app_paths.cache, [ProfileId("Work")])
+
+    assert sorted(path.name for path in selections.iterdir()) == ["Work.json", "notes.txt"]

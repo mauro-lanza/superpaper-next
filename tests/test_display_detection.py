@@ -5,7 +5,9 @@ from types import SimpleNamespace
 import pytest
 
 from superpaper import display_store, displays
+from superpaper import wallpaper_processing as wpproc
 from superpaper.profile_id import ProfileId
+from superpaper.profiles import Profile
 from tests.conftest import monitor
 
 
@@ -88,26 +90,14 @@ def test_negative_saved_bezels_are_ignored(display_layout, tmp_path, caplog):
 
 
 class SingleImageProfile:
-    name = "test"
+    """A running profile that spans one image, as the wallpaper change sees it."""
+
+    profile = Profile(name="test", spanmode="single")
     profile_id = ProfileId("test")
-    spanmode = "single"
-    zoom = 1.0
-    offsets = (0.0, 0.0)
-
-    @staticmethod
-    def has_valid_selection():
-        return True
-
-    @staticmethod
-    def next_wallpaper_files():
-        return ["image.png"]
-
-    @staticmethod
-    def display_corrections(_resolutions):
-        return SimpleNamespace(ppimode=False)
+    selection = SimpleNamespace(is_complete=lambda: True, current=lambda: ["image.png"])
 
 
-def blocking_render(monkeypatch, wpproc):
+def blocking_render(monkeypatch):
     """Make the running profile's render wait until released; return (started, release)."""
     started = Event()
     release = Event()
@@ -116,14 +106,13 @@ def blocking_render(monkeypatch, wpproc):
         started.set()
         release.wait(timeout=1)
 
-    monkeypatch.setattr(wpproc, "G_ACTIVE_PROFILE", SingleImageProfile.name)
+    monkeypatch.setattr(wpproc, "G_ACTIVE_PROFILE", SingleImageProfile.profile.name)
     monkeypatch.setattr(wpproc.render, "simple", render)
     return started, release
 
 
-def test_detecting_displays_does_not_wait_for_a_render(profile_modules, monkeypatch, app_paths, display_layout):
-    _, wpproc = profile_modules
-    started, release = blocking_render(monkeypatch, wpproc)
+def test_detecting_displays_does_not_wait_for_a_render(monkeypatch, app_paths, display_layout):
+    started, release = blocking_render(monkeypatch)
     render = wpproc.change_wallpaper_job(SingleImageProfile(), app_paths, display_system=display_layout())
     assert started.wait(timeout=1)
 
@@ -136,9 +125,8 @@ def test_detecting_displays_does_not_wait_for_a_render(profile_modules, monkeypa
     render.join(timeout=1)
 
 
-def test_wallpaper_changes_do_not_queue(profile_modules, monkeypatch, app_paths, display_layout):
-    _, wpproc = profile_modules
-    started, release = blocking_render(monkeypatch, wpproc)
+def test_wallpaper_changes_do_not_queue(monkeypatch, app_paths, display_layout):
+    started, release = blocking_render(monkeypatch)
     layout = display_layout()
     first = wpproc.change_wallpaper_job(SingleImageProfile(), app_paths, display_system=layout)
     assert started.wait(timeout=1)
