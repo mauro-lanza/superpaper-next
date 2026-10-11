@@ -576,7 +576,7 @@ class WallpaperPreviewPanel(wx.Panel):
         """Start diplay position config mode."""
         self.old_ppinorm_offs = self.display_sys.get_ppinorm_offsets()  # back up the offsets
         self.frame.toggle_radio_and_profile_choice(False)
-        self.frame.toggle_bezel_buttons(False, False)
+        self.frame.display_band.toggle_bezel_buttons(False, False)
         self.config_mode = True
         self.toggle_buttons(False, True)
         self.show_staticbmps(False)
@@ -607,9 +607,9 @@ class WallpaperPreviewPanel(wx.Panel):
         self.draggable_shapes = []  # Destroys DragShapes
         self.positions_dragged = False
         self.frame.toggle_radio_and_profile_choice(True)
-        self.frame.toggle_bezel_buttons(False, True)
+        self.frame.display_band.toggle_bezel_buttons(False, True)
         self.Refresh()
-        self.frame._update_system_dirty()
+        self.frame.display_band.update_dirty()
 
     def onReset(self, evt):
         """Reset Display preview positions to the initial guess."""
@@ -648,7 +648,7 @@ class WallpaperPreviewPanel(wx.Panel):
         self.full_refresh_preview(True, True, False)
         # self.show_staticbmps(True)
         self.frame.toggle_radio_and_profile_choice(True)
-        self.frame.toggle_bezel_buttons(False, True)
+        self.frame.display_band.toggle_bezel_buttons(False, True)
         self.positions_dragged = False
         self.Refresh()
 
