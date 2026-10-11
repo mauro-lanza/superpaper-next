@@ -5,8 +5,6 @@ New wallpaper configuration GUI for Superpaper.
 import copy
 import os
 import sys
-import threading
-import time
 from operator import itemgetter
 from typing import Literal, overload
 
@@ -23,6 +21,7 @@ from superpaper.configuration_dialogs import (
     HelpFrame,
     HelpPopup,
     PerspectiveConfig,
+    draft_shown,
     source_icon,
 )
 from superpaper.message_dialog import show_message_dialog
@@ -1351,26 +1350,28 @@ class WallpaperSettingsPanel(wx.Panel):
         chosen = self._chosen_images(profile)
         # The chosen images, or else the first ones of the edited sources.
         images = Selection(profile.sources, profile.sortmode, profile.selection_size, images=chosen).current()
-        busy = wx.BusyCursor()
         sp_logging.G_LOGGER.info("onApply preview (unsaved): %s", profile.name)
+        loaded = self.loaded_profile
+
+        def applied(problem):
+            # The applied image becomes the current selection so reopening the
+            # dialog (or a later render) shows the same wallpaper instead of
+            # reverting to the previously saved one (#158).
+            if problem is None and chosen and loaded is not None:
+                loaded.selection.pin(chosen)
+            draft_shown(problem)
+
+        wx.BeginBusyCursor()
         # Render with the dialog's live DisplaySystem so staged (unsaved)
         # display settings — bezels, sizes, positions — are reflected. This
         # deliberately does NOT reload the saved layout, which lets the user
         # test system tweaks via Apply before committing them.
-        done = threading.Event()
         self.parent_tray_obj.apply_draft(
-            profile, images, display_system=copy.deepcopy(self.display_sys), on_done=lambda _problem: done.set()
+            profile,
+            images,
+            display_system=copy.deepcopy(self.display_sys),
+            on_done=lambda problem: wx.CallAfter(applied, problem),
         )
-        # Pump the event loop while rendering so the GUI stays responsive.
-        while not done.is_set():
-            wx.YieldIfNeeded()
-            time.sleep(0.05)
-        # The applied image becomes the current selection so reopening the
-        # dialog (or a later render) shows the same wallpaper instead of
-        # reverting to the previously saved one (#158).
-        if chosen and self.loaded_profile is not None:
-            self.loaded_profile.selection.pin(chosen)
-        del busy
 
     def _show_problems(self, problems):
         """Tell the user what keeps the profile from being saved or applied."""
@@ -1656,19 +1657,11 @@ class WallpaperSettingsPanel(wx.Panel):
         else:
             perspective = "default"
 
-        busy = wx.BusyCursor()
-
+        wx.BeginBusyCursor()
         # With the saved display settings, detected again before the draft is rendered.
         self.parent_tray_obj.refresh_displays()
         profile = profiles.draft(testimage, spanmode="advanced", perspective=perspective, offsets=offsets)
-        done = threading.Event()
-        self.parent_tray_obj.apply_draft(profile, testimage, on_done=lambda _problem: done.set())
-        # Pump the event loop while rendering so the GUI stays responsive
-        # instead of freezing.
-        while not done.is_set():
-            wx.YieldIfNeeded()
-            time.sleep(0.05)
-        del busy
+        self.parent_tray_obj.apply_draft(profile, testimage, on_done=lambda problem: wx.CallAfter(draft_shown, problem))
 
     def onPerspectives(self, event):
         """Open perspective configuration dialog."""

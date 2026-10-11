@@ -4,7 +4,6 @@ GUI dialogs for Superpaper.
 
 import os
 import sys
-import threading
 from dataclasses import replace
 
 import wx  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-import]
@@ -44,6 +43,15 @@ def source_icon(path, size):
         .Resize(wx.Size(*size), wx.Point(pos))
         .ConvertToBitmap()
     )
+
+
+def draft_shown(problem):
+    """Finish a draft (Apply, an align test) on the main thread once it is done: end the
+    busy cursor it started, and say why it wasn't shown, if it wasn't. The dialog that
+    asked for it may be closed by then."""
+    wx.EndBusyCursor()
+    if problem is not None:
+        show_message_dialog(problem, "Error")
 
 
 class BrowsePaths(wx.Dialog):
@@ -1069,23 +1077,19 @@ class PerspectiveConfig(wx.Dialog):
                 )
                 return 0
 
-        busy = wx.BusyCursor()
-
         # Save entered perspective values and get its name
         save_succ = self.onSave()
         if save_succ == 0:
             # Save failed or canceled, abort test.
-            del busy
             return 0
         perspective = self.choice_profiles.GetString(self.choice_profiles.GetSelection())
 
-        wx.Yield()
-        # onSave has reloaded the tray's layout.
+        # onSave has asked the tray to reload its layout, which happens before the draft.
         profile = profiles.draft(testimage, spanmode="advanced", perspective=perspective, offsets=offsets)
-        done = threading.Event()
-        self.frame.parent_tray_obj.apply_draft(profile, testimage, on_done=lambda _problem: done.set())
-        done.wait()
-        del busy
+        wx.BeginBusyCursor()
+        self.frame.parent_tray_obj.apply_draft(
+            profile, testimage, on_done=lambda problem: wx.CallAfter(draft_shown, problem)
+        )
         return 1
 
     def onChooseTestImage(self, event):
