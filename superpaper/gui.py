@@ -5,6 +5,7 @@ New wallpaper configuration GUI for Superpaper.
 import copy
 import os
 import sys
+import threading
 import time
 from operator import itemgetter
 from typing import Literal, overload
@@ -1356,9 +1357,12 @@ class WallpaperSettingsPanel(wx.Panel):
         # display settings — bezels, sizes, positions — are reflected. This
         # deliberately does NOT reload the saved layout, which lets the user
         # test system tweaks via Apply before committing them.
-        thrd = self.parent_tray_obj.apply_draft(profile, images, display_system=copy.deepcopy(self.display_sys))
+        done = threading.Event()
+        self.parent_tray_obj.apply_draft(
+            profile, images, display_system=copy.deepcopy(self.display_sys), on_done=lambda _problem: done.set()
+        )
         # Pump the event loop while rendering so the GUI stays responsive.
-        while thrd is not None and thrd.is_alive():
+        while not done.is_set():
             wx.YieldIfNeeded()
             time.sleep(0.05)
         # The applied image becomes the current selection so reopening the
@@ -1528,13 +1532,12 @@ class WallpaperSettingsPanel(wx.Panel):
             show_message_dialog(str(error), "Error")
             del busy
             return None
+        if current_profile_id is not None:
+            # If it runs, it keeps running under its (possibly new) name, and edits such
+            # as the slideshow delay take effect at once. Before the reload below, which
+            # would otherwise find the running profile's old name gone.
+            self.parent_tray_obj.session.update(current_profile_id, saved_profile)
         self.parent_tray_obj.reload_profiles(event)
-        if saving_active_profile:
-            # The running profile keeps running under its (possibly new) name, and
-            # edits such as the slideshow delay take effect without a restart.
-            # Saving any other profile leaves the running slideshow alone.
-            self.parent_tray_obj.active_profile = saved_profile
-            self.parent_tray_obj.rearm_active_timer()
         self.update_choiceprofile()
         self.parent_tray_obj.update_hotkey(profile.name, old_hotkey, profile.hotkey)
         self.choice_profiles.SetSelection(self.choice_profiles.FindString(profile.name))
@@ -1655,13 +1658,14 @@ class WallpaperSettingsPanel(wx.Panel):
 
         busy = wx.BusyCursor()
 
-        # With the saved display settings.
+        # With the saved display settings, detected again before the draft is rendered.
         self.parent_tray_obj.refresh_displays()
         profile = profiles.draft(testimage, spanmode="advanced", perspective=perspective, offsets=offsets)
-        thrd = self.parent_tray_obj.apply_draft(profile, testimage)
+        done = threading.Event()
+        self.parent_tray_obj.apply_draft(profile, testimage, on_done=lambda _problem: done.set())
         # Pump the event loop while rendering so the GUI stays responsive
         # instead of freezing.
-        while thrd is not None and thrd.is_alive():
+        while not done.is_set():
             wx.YieldIfNeeded()
             time.sleep(0.05)
         del busy

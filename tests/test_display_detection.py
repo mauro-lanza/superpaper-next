@@ -1,13 +1,8 @@
 import configparser
-from threading import Event
-from types import SimpleNamespace
 
 import pytest
 
 from superpaper import display_store, displays
-from superpaper import wallpaper_processing as wpproc
-from superpaper.profile_id import ProfileId
-from superpaper.profiles import Profile
 from tests.conftest import monitor
 
 
@@ -87,57 +82,6 @@ def test_negative_saved_bezels_are_ignored(display_layout, tmp_path, caplog):
     assert layout.bezels_in_mm() == [(0.0, 0.0), (0.0, 0.0)]
     assert layout.get_ppinorm_offsets() == [(0, 0), (2000, 0)]
     assert "Ignoring the saved bezels" in caplog.text
-
-
-class SingleImageProfile:
-    """A running profile that spans one image, as the wallpaper change sees it."""
-
-    profile = Profile(name="test", spanmode="single")
-    profile_id = ProfileId("test")
-    selection = SimpleNamespace(is_complete=lambda: True, current=lambda: ["image.png"])
-
-
-def blocking_render(monkeypatch):
-    """Make the running profile's render wait until released; return (started, release)."""
-    started = Event()
-    release = Event()
-
-    def render(_source, _layout, **_options):
-        started.set()
-        release.wait(timeout=1)
-
-    monkeypatch.setattr(wpproc, "G_ACTIVE_PROFILE", SingleImageProfile.profile.name)
-    monkeypatch.setattr(wpproc.render, "simple", render)
-    return started, release
-
-
-def test_detecting_displays_does_not_wait_for_a_render(monkeypatch, app_paths, display_layout):
-    started, release = blocking_render(monkeypatch)
-    render = wpproc.change_wallpaper_job(SingleImageProfile(), app_paths, display_system=display_layout())
-    assert started.wait(timeout=1)
-
-    # A render keeps the layout it was given, so a new one can be made meanwhile.
-    refreshed = display_layout([monitor(0, 0, 2560, 1440)])
-
-    assert render.is_alive()
-    assert refreshed.resolutions() == [(2560, 1440)]
-    release.set()
-    render.join(timeout=1)
-
-
-def test_wallpaper_changes_do_not_queue(monkeypatch, app_paths, display_layout):
-    started, release = blocking_render(monkeypatch)
-    layout = display_layout()
-    first = wpproc.change_wallpaper_job(SingleImageProfile(), app_paths, display_system=layout)
-    assert started.wait(timeout=1)
-
-    skipped = wpproc.change_wallpaper_job(
-        SingleImageProfile(), app_paths, display_system=layout, advance=True, skip_if_busy=True
-    )
-
-    assert skipped is None
-    release.set()
-    first.join(timeout=1)
 
 
 @pytest.mark.parametrize("kwargs", [{"max_attempts": 0}, {"retry_delay": -1}])

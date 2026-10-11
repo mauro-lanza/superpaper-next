@@ -4,7 +4,7 @@ GUI dialogs for Superpaper.
 
 import os
 import sys
-import time
+import threading
 from dataclasses import replace
 
 import wx  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-import]
@@ -1082,9 +1082,9 @@ class PerspectiveConfig(wx.Dialog):
         wx.Yield()
         # onSave has reloaded the tray's layout.
         profile = profiles.draft(testimage, spanmode="advanced", perspective=perspective, offsets=offsets)
-        thrd = self.frame.parent_tray_obj.apply_draft(profile, testimage)
-        while thrd is not None and thrd.is_alive():
-            time.sleep(0.5)
+        done = threading.Event()
+        self.frame.parent_tray_obj.apply_draft(profile, testimage, on_done=lambda _problem: done.set())
+        done.wait()
         del busy
         return 1
 

@@ -79,53 +79,6 @@ def write_profile(path: Path, *, spanmode="single", sources=(), selected=()):
     return path
 
 
-class ManualTimer:
-    def __init__(self, clock, interval, callback):
-        self.clock = clock
-        self.interval = interval
-        self.callback = callback
-        self.daemon = False
-        self.started = False
-        self.cancelled = False
-
-    def start(self):
-        self.started = True
-
-    def cancel(self):
-        self.cancelled = True
-
-    def fire(self, *, even_if_cancelled=False):
-        if not self.cancelled or even_if_cancelled:
-            self.callback()
-
-
-class ManualClock:
-    def __init__(self):
-        self.timers = []
-
-    def timer(self, interval, callback):
-        timer = ManualTimer(self, interval, callback)
-        self.timers.append(timer)
-        return timer
-
-
-@pytest.fixture
-def manual_clock(monkeypatch):
-    from superpaper import wallpaper_processing as wpproc
-
-    clock = ManualClock()
-    monkeypatch.setattr(wpproc, "Timer", clock.timer)
-    return clock
-
-
-@pytest.fixture
-def slideshow_profile():
-    """A saved profile, as the slideshow sees it: its settings."""
-    from superpaper.profiles import Profile
-
-    return SimpleNamespace(profile=Profile(name="slides", slideshow=True, delay=12.5))
-
-
 @pytest.fixture
 def headless_tray_module(monkeypatch):
     """Import tray orchestration against minimal wx/view stubs."""
@@ -164,9 +117,7 @@ def headless_tray_module(monkeypatch):
 
     import superpaper.tray as tray
 
-    previous_active_profile = tray.wpproc.G_ACTIVE_PROFILE
     yield tray
-    tray.wpproc.G_ACTIVE_PROFILE = previous_active_profile
     if had_package_tray:
         superpaper.tray = previous_package_tray
     elif hasattr(superpaper, "tray"):

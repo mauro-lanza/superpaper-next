@@ -1,7 +1,9 @@
+"""The tray: its menus, hotkeys and startup ask the session to do things, and it keeps the
+session told about the saved profiles."""
+
 from pathlib import Path
-from threading import Lock
 from types import SimpleNamespace
-from unittest.mock import Mock, call
+from unittest.mock import Mock
 
 import pytest
 
@@ -11,21 +13,6 @@ from superpaper.profile_store import ProfileStore
 from superpaper.profiles import Profile
 from superpaper.settings import Settings
 
-
-class RecordingTimer:
-    def __init__(self, events, running=True):
-        self.events = events
-        self.is_running = running
-
-    def start(self):
-        self.events.append("start")
-        self.is_running = True
-
-    def stop(self):
-        self.events.append("stop")
-        self.is_running = False
-
-
 PATHS = AppPaths(config=Path("/config"), profiles=Path("/config/profiles"), cache=Path("/cache"))
 LAYOUT = SimpleNamespace(name="the detected display layout")
 
@@ -33,9 +20,10 @@ LAYOUT = SimpleNamespace(name="the detected display layout")
 class FakeStore:
     """The saved profiles; reloading finds what ``on_disk`` holds then."""
 
-    def __init__(self, profiles):
+    def __init__(self, profiles, active=None):
         self.profiles = list(profiles)
         self.on_disk = list(profiles)
+        self.last_running = active
 
     def get(self, profile_id):
         return next((stored for stored in self.profiles if stored.profile_id == profile_id), None)
@@ -44,18 +32,29 @@ class FakeStore:
         self.profiles = list(self.on_disk)
         return ()
 
+    def active(self):
+        return self.last_running
 
-def controller(tray, active_profile=None, timer=None, profiles=()):
+
+class FakeSession:
+    """The session, recording what it is asked to do."""
+
+    def __init__(self, running=None):
+        self.running = running
+        self.paused = False
+        self.display_system = LAYOUT
+        self.requests = []
+
+    def __getattr__(self, request):
+        return lambda *args, **kwargs: self.requests.append((request, *args, *kwargs.values()))
+
+
+def controller(tray, running=None, profiles=(), active=None):
     icon = object.__new__(tray.TaskBarIcon)
     icon.paths = PATHS
-    icon.store = FakeStore(profiles)
+    icon.store = FakeStore(profiles, active)
     icon.g_settings = Settings()
-    icon.display_system = LAYOUT
-    icon.refresh_displays = lambda: None
-    icon.job_lock = Lock()
-    icon.active_profile = active_profile
-    icon.repeating_timer = timer
-    icon.is_paused = False
+    icon.session = FakeSession(running)
     icon.hk2 = None
     icon.seen_binding = set()
     return icon
@@ -66,134 +65,81 @@ def profile(name):
     return SimpleNamespace(profile=Profile(name=name, slideshow=True, delay=30.0), profile_id=ProfileId(name))
 
 
-def test_start_profile_activates_and_persists(headless_tray_module, monkeypatch):
+def test_the_menus_ask_the_session(headless_tray_module):
     tray = headless_tray_module
-    active = profile("active")
-    replacement_timer = object()
-    worker = object()
-    writes = []
-    monkeypatch.setattr(tray, "run_profile_job", lambda selected, change, startup: (replacement_timer, worker))
-    monkeypatch.setattr(
-        tray, "write_active_profile", lambda cache_dir, profile_id: writes.append((cache_dir, profile_id))
-    )
+    work = profile("Work")
     icon = controller(tray)
+    done = object()
 
-    assert icon.start_profile(None, active) is worker
-    assert icon.active_profile is active
-    assert icon.repeating_timer is replacement_timer
-    assert tray.wpproc.G_ACTIVE_PROFILE == "active"
-    assert writes == [(PATHS.cache, ProfileId("active"))]
-
-
-def test_switch_profile_stops_old_timer_first(headless_tray_module, monkeypatch):
-    tray = headless_tray_module
-    events = []
-    old_timer = RecordingTimer(events)
-    old_profile = profile("old")
-    new_profile = profile("new")
-
-    def run(selected, change, startup):
-        events.append(("run", selected.profile.name))
-        return (object(), "worker")
-
-    monkeypatch.setattr(tray, "run_profile_job", run)
-    monkeypatch.setattr(tray, "write_active_profile", lambda cache_dir, name: events.append(("write", name)))
-    icon = controller(tray, old_profile, old_timer)
-
-    assert icon.start_profile(None, new_profile) == "worker"
-    assert events == ["stop", ("run", "new"), ("write", ProfileId("new"))]
-
-
-def test_selecting_active_profile_means_next(headless_tray_module):
-    tray = headless_tray_module
-    active = profile("active")
-    icon = controller(tray, active)
-    icon.next_wallpaper = Mock()
-    event = object()
-
-    assert icon.start_profile(event, active) == 0
-    icon.next_wallpaper.assert_called_once_with(event)
-
-
-def test_start_previous_profile_restore_and_explicit_apply(headless_tray_module, monkeypatch):
-    tray = headless_tray_module
-    active = profile("active")
-    calls = []
-    timer = object()
-    restored = True
-    monkeypatch.setattr(
-        tray, "quick_profile_job", lambda selected, **kwargs: calls.append(("quick", selected)) or restored
-    )
-    monkeypatch.setattr(
-        tray,
-        "run_profile_job",
-        lambda selected, change, startup: calls.append(("run", selected, startup)) or (timer, object()),
-    )
-    icon = controller(tray)
-
-    icon.start_prev_profile(active, apply_now=False)
-    assert calls == [("quick", active), ("run", active, True)]
-    assert icon.repeating_timer is timer
-
-    # With no earlier render to show again, the wallpaper is rendered now, without cycling.
-    calls.clear()
-    restored = False
-    icon.start_prev_profile(active, apply_now=False)
-    assert calls == [("quick", active), ("run", active, False)]
-
-    calls.clear()
-    icon.start_prev_profile(active, apply_now=True)
-    assert calls == [("run", active, False)]
-
-
-def test_manual_next_stops_and_restarts_running_timer(headless_tray_module, monkeypatch):
-    tray = headless_tray_module
-    events = []
-    timer = RecordingTimer(events)
-    active = profile("active")
-    monkeypatch.setattr(
-        tray,
-        "change_wallpaper_job",
-        lambda selected, paths, **options: events.append(("change", selected, options["advance"])),
-    )
-    icon = controller(tray, active, timer)
-
+    icon.start_profile(None, work)
     icon.next_wallpaper(None)
-
-    assert events == ["stop", ("change", active, True), "start"]
-
-
-def test_pause_and_resume_timer(headless_tray_module):
-    tray = headless_tray_module
-    events = []
-    timer = RecordingTimer(events)
-    icon = controller(tray, profile("active"), timer)
-
     icon.pause_timer(None)
-    assert events == ["stop"]
+    icon.refresh_displays()
+    icon.apply_draft(work.profile, ["/image.png"], display_system="unsaved", on_done=done)
+
+    assert icon.session.requests == [
+        ("activate", work),
+        ("next",),
+        ("toggle_pause",),
+        ("refresh_displays",),
+        ("apply_draft", work.profile, ["/image.png"], "unsaved", done),
+    ]
+
+
+def test_starting_no_profile_asks_nothing(headless_tray_module):
+    icon = controller(headless_tray_module)
+
+    icon.start_profile(None, None)
+
+    assert icon.session.requests == []
+
+
+def test_the_tray_shows_what_the_session_runs(headless_tray_module):
+    work = profile("Work")
+    icon = controller(headless_tray_module, running=work)
+    icon.session.paused = True
+
+    assert icon.active_profile is work
     assert icon.is_paused is True
-
-    icon.pause_timer(None)
-    assert events == ["stop", "start"]
-    assert icon.is_paused is False
+    assert icon.display_system is LAYOUT
 
 
-def test_rearm_replaces_running_timer_without_rendering(headless_tray_module, monkeypatch):
-    tray = headless_tray_module
-    events = []
-    active = profile("renamed")
-    old_timer = RecordingTimer(events)
-    new_timer = object()
-    run = Mock(return_value=(new_timer, None))
-    monkeypatch.setattr(tray, "run_profile_job", run)
-    icon = controller(tray, active, old_timer)
+def test_quitting_stops_the_session(headless_tray_module):
+    icon = controller(headless_tray_module)
+    icon._sni_tray = None
+    icon.frame = SimpleNamespace(Close=lambda: None)
+    icon.Destroy = lambda: None
 
-    icon.rearm_active_timer()
+    icon.on_exit(None)
 
-    assert events == ["stop"]
-    assert icon.repeating_timer is new_timer
-    assert tray.wpproc.G_ACTIVE_PROFILE == "renamed"
-    assert run.call_args == call(active, icon.change_wallpaper, startup=True)
+    assert icon.session.requests == [("shutdown",)]
+
+
+def test_a_normal_start_carries_on_with_the_last_profile(headless_tray_module):
+    work = profile("Work")
+    icon = controller(headless_tray_module, profiles=[work], active=work)
+
+    icon._run_at_startup(None)
+
+    assert icon.session.requests == [("restore", work)]
+
+
+def test_a_start_with_a_profile_runs_it(headless_tray_module):
+    work, home = profile("Work"), profile("Home")
+    icon = controller(headless_tray_module, profiles=[work, home], active=work)
+
+    icon._run_at_startup(ProfileId("Home"))
+
+    assert icon.session.requests == [("activate", home)]
+
+
+@pytest.mark.parametrize("startup", [None, ProfileId("Missing")])
+def test_a_start_with_nothing_to_run_runs_nothing(headless_tray_module, startup):
+    icon = controller(headless_tray_module, profiles=[profile("Work")])
+
+    icon._run_at_startup(startup)
+
+    assert icon.session.requests == []
 
 
 @pytest.mark.parametrize(
@@ -216,34 +162,24 @@ def test_startup_outside_path_cannot_select_by_path(headless_tray_module):
     assert icon.get_profile_by_id(ProfileId("Other")) is None
 
 
-@pytest.mark.parametrize("timer_running", [True, False])
-def test_reload_clears_active_profile_missing_from_inventory(headless_tray_module, timer_running):
-    tray = headless_tray_module
-    events = []
-    timer = RecordingTimer(events, running=timer_running)
-    removed = profile("removed")
-    icon = controller(tray, removed, timer, profiles=[removed])
-    tray.wpproc.G_ACTIVE_PROFILE = "removed"
-    icon.store.on_disk = [profile("other")]
-
-    icon.reload_profiles(None)
-
-    assert icon.active_profile is None
-    assert icon.repeating_timer is None
-    assert tray.wpproc.G_ACTIVE_PROFILE is None
-    assert events == (["stop"] if timer_running else [])
-
-
-def test_reload_points_the_active_profile_at_its_current_record(headless_tray_module):
-    tray = headless_tray_module
-    before = profile("Work")
+@pytest.mark.parametrize("still_saved", [True, False])
+def test_reloading_tells_the_session_what_became_of_the_running_profile(headless_tray_module, still_saved):
+    running = profile("Work")
     edited_elsewhere = profile("Work")
-    icon = controller(tray, before, profiles=[before])
-    icon.store.on_disk = [edited_elsewhere]
+    icon = controller(headless_tray_module, running=running, profiles=[running])
+    icon.store.on_disk = [edited_elsewhere] if still_saved else [profile("Other")]
 
     icon.reload_profiles(None)
 
-    assert icon.active_profile is edited_elsewhere
+    assert icon.session.requests == [("update", ProfileId("Work"), edited_elsewhere if still_saved else None)]
+
+
+def test_reloading_while_nothing_runs_tells_the_session_nothing(headless_tray_module):
+    icon = controller(headless_tray_module, profiles=[profile("Work")])
+
+    icon.reload_profiles(None)
+
+    assert icon.session.requests == []
 
 
 def broken_profile(tmp_path):
@@ -314,43 +250,24 @@ def test_only_profiles_that_cant_be_read_as_profiles_are_offered_for_deletion(
     assert sorted(path.name for path in paths.profiles.iterdir()) == ["cli.profile", "folder.profile", "gone.profile"]
 
 
-def test_rearm_preserves_paused_state(headless_tray_module, monkeypatch):
-    tray = headless_tray_module
-    active = profile("active")
-    replacement = RecordingTimer([])
-    monkeypatch.setattr(tray, "run_profile_job", lambda selected, change, startup: (replacement, None))
-    icon = controller(tray, active, RecordingTimer([], running=False))
-    icon.is_paused = True
-
-    icon.rearm_active_timer()
-
-    assert icon.is_paused is True
-    assert replacement.is_running is False
-
-
-def test_profile_hotkey_starts_the_currently_loaded_profile(headless_tray_module, monkeypatch):
+def test_profile_hotkey_starts_the_currently_loaded_profile(headless_tray_module):
     tray = headless_tray_module
     stale = profile("Work")
     current = profile("Work")
-    started = []
     icon = controller(tray, profiles=[current])
-    monkeypatch.setattr(icon, "start_profile", lambda event, selected: started.append(selected))
 
     # system_hotkey hands the consumer the arguments the binding was registered with.
     icon.profile_consumer(None, ("control", "w"), [(stale.profile_id,)])
 
-    assert started == [current]
+    assert icon.session.requests == [("activate", current)]
 
 
-def test_hotkey_for_a_deleted_profile_does_nothing(headless_tray_module, monkeypatch):
-    tray = headless_tray_module
-    started = []
-    icon = controller(tray)
-    monkeypatch.setattr(icon, "start_profile", lambda event, selected: started.append(selected))
+def test_hotkey_for_a_deleted_profile_does_nothing(headless_tray_module):
+    icon = controller(headless_tray_module)
 
     icon.profile_consumer(None, ("control", "w"), [(ProfileId("Deleted"),)])
 
-    assert started == []
+    assert icon.session.requests == []
 
 
 def test_profile_hotkey_changes_are_ignored_while_hotkeys_are_disabled(headless_tray_module):
@@ -383,83 +300,3 @@ def test_removing_a_profile_hotkey_unbinds_it(headless_tray_module):
     icon.hk2.unregister.assert_called_once_with(("control", "x"))
     icon.hk2.register.assert_not_called()
     assert icon.seen_binding == set()
-
-
-def test_profiles_start_on_freshly_detected_displays(headless_tray_module, monkeypatch):
-    tray = headless_tray_module
-    events = []
-    monkeypatch.setattr(tray, "run_profile_job", lambda selected, change, startup: events.append("run") or (None, None))
-    monkeypatch.setattr(tray, "write_active_profile", lambda cache_dir, profile_id: None)
-    icon = controller(tray)
-    icon.refresh_displays = lambda: events.append("refresh")
-
-    icon.start_profile(None, profile("active"))
-
-    assert events == ["refresh", "run"]
-
-
-def test_wallpaper_changes_use_the_settings_current_at_the_time(headless_tray_module, monkeypatch):
-    tray = headless_tray_module
-    changes = []
-    monkeypatch.setattr(
-        tray, "change_wallpaper_job", lambda selected, paths, **options: changes.append((paths, options["set_command"]))
-    )
-    icon = controller(tray)
-    icon.g_settings = Settings(set_command="first {image}")
-    icon.change_wallpaper(profile("active"), advance=True, skip_if_busy=True)
-
-    # A slideshow tick after the custom command was changed in Settings uses the new one.
-    icon.g_settings = Settings(set_command="second {image}")
-    icon.change_wallpaper(profile("active"), advance=True, skip_if_busy=True)
-
-    assert changes == [(PATHS, "first {image}"), (PATHS, "second {image}")]
-
-
-def test_wallpaper_changes_use_the_displays_current_at_the_time(headless_tray_module, monkeypatch):
-    tray = headless_tray_module
-    layouts = []
-    monkeypatch.setattr(
-        tray, "change_wallpaper_job", lambda selected, paths, **options: layouts.append(options["display_system"])
-    )
-    icon = controller(tray)
-    icon.change_wallpaper(profile("active"), advance=True, skip_if_busy=True)
-
-    # After a refresh (a saved display setting, a profile switch) ticks use the new layout;
-    # the editor's Apply renders for its own, unsaved one.
-    refreshed = SimpleNamespace(name="refreshed")
-    icon.display_system = refreshed
-    icon.change_wallpaper(profile("active"), advance=True, skip_if_busy=True)
-
-    assert layouts == [LAYOUT, refreshed]
-
-
-def test_a_draft_renders_for_the_layout_it_is_given(headless_tray_module, monkeypatch):
-    tray = headless_tray_module
-    drafts = []
-    monkeypatch.setattr(
-        tray,
-        "apply_draft_job",
-        lambda draft, images, paths, **options: drafts.append((draft, images, options["display_system"])),
-    )
-    icon = controller(tray)
-    draft = profile("unsaved edits")
-    unsaved = SimpleNamespace(name="unsaved")
-
-    # The editor's Apply renders for its own, unsaved layout; the align test for the saved one.
-    icon.apply_draft(draft, ["/image.png"], display_system=unsaved)
-    icon.apply_draft(draft, ["/test.png"])
-
-    assert drafts == [(draft, ["/image.png"], unsaved), (draft, ["/test.png"], LAYOUT)]
-
-
-def test_a_failed_display_refresh_keeps_the_previous_layout(headless_tray_module, monkeypatch, tmp_path):
-    tray = headless_tray_module
-    monkeypatch.setattr(tray.displays, "get_monitors", list)
-    monkeypatch.setattr(tray.displays.time, "sleep", lambda _delay: None)
-    icon = controller(tray)
-    icon.paths = AppPaths(config=tmp_path, profiles=tmp_path / "profiles", cache=tmp_path)
-
-    with pytest.raises(tray.displays.DisplayDetectionError):
-        tray.TaskBarIcon.refresh_displays(icon)
-
-    assert icon.display_system is LAYOUT
