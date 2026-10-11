@@ -66,7 +66,7 @@ def test_profiles_saved_by_older_versions_keep_loading(
     (profile,) = data.list_profiles(app_paths)
 
     assert profile.profile_id == ProfileId(stem)
-    assert profile.name == stem
+    assert profile.profile.name == stem
     assert path.read_bytes() == original
 
 
@@ -81,8 +81,8 @@ def test_case_variant_profiles_both_load(profile_modules, app_paths, monkeypatch
     inventory = data.discover_profile_inventory(app_paths)
 
     assert [entry.profile_id.value for entry in inventory.entries] == ["Work", "work"]
-    assert data.open_profile(app_paths, "Work").name == "Work"
-    assert data.open_profile(app_paths, "work").name == "work"
+    assert data.open_profile(app_paths, "Work").profile.name == "Work"
+    assert data.open_profile(app_paths, "work").profile.name == "work"
 
 
 @pytest.mark.parametrize("outside", [False, True])
@@ -129,7 +129,7 @@ def test_decomposed_unicode_filename_loads(profile_modules, app_paths, monkeypat
     decomposed = unicodedata.normalize("NFD", "Työ")
     (profiles / f"{decomposed}.profile").write_bytes(profile_bytes(decomposed))
 
-    assert [profile.name for profile in data.list_profiles(app_paths)] == [decomposed]
+    assert [profile.profile.name for profile in data.list_profiles(app_paths)] == [decomposed]
 
 
 def test_rename_source_lookup_uses_original_id(profile_modules, app_paths, monkeypatch, tmp_path):
@@ -139,7 +139,7 @@ def test_rename_source_lookup_uses_original_id(profile_modules, app_paths, monke
 
     source = data.open_profile(app_paths, ProfileId("Original"))
 
-    assert source.hk_binding == ("control", "x")
+    assert source.profile.hotkey == ("control", "x")
     assert data.open_profile(app_paths, ProfileId("Renamed")) is None
 
 
@@ -255,8 +255,8 @@ def test_loading_a_read_only_profile_never_writes(profile_modules, app_paths, mo
     prompts = []
     monkeypatch.setattr(data, "show_message_dialog", lambda *args, **kwargs: prompts.append(args) or True)
 
-    assert [profile.name for profile in data.list_profiles(app_paths)] == ["saved"]
-    assert data.open_profile(app_paths, "saved").name == "saved"
+    assert [profile.profile.name for profile in data.list_profiles(app_paths)] == ["saved"]
+    assert data.open_profile(app_paths, "saved").profile.name == "saved"
     assert prompts == []
     assert path.read_bytes() == original
 
@@ -282,11 +282,8 @@ def test_unreadable_profile_is_diagnostic_without_deletion_prompt(profile_module
     assert path.read_bytes() == profile_bytes("saved")
 
 
-@pytest.mark.parametrize(
-    "setting",
-    [b"diagonal_inches=0;24\n", b"zoom=\n", b"align=\n"],
-)
-def test_construction_failure_is_malformed_and_prompted(profile_modules, app_paths, monkeypatch, tmp_path, setting):
+@pytest.mark.parametrize("setting", [b"diagonal_inches=0;24\n", b"delay=soon\n", b"ppi=96.5\n"])
+def test_a_value_that_cant_be_used_is_malformed_and_prompted(profile_modules, app_paths, monkeypatch, setting):
     data, _ = profile_modules
     profiles = app_paths.profiles
     path = profiles / "broken.profile"
@@ -298,6 +295,17 @@ def test_construction_failure_is_malformed_and_prompted(profile_modules, app_pat
     assert data.list_profiles(app_paths) == []
     assert len(prompts) == 1
     assert path.read_bytes() == original
+
+
+@pytest.mark.parametrize("setting", [b"zoom=\n", b"align=\n", b"a line without a setting\n", b"name\n"])
+def test_a_profile_earlier_versions_loaded_still_loads(profile_modules, app_paths, monkeypatch, setting):
+    data, _ = profile_modules
+    (app_paths.profiles / "lenient.profile").write_bytes(profile_bytes("lenient", setting))
+    prompts = []
+    monkeypatch.setattr(data, "show_message_dialog", lambda *args, **kwargs: prompts.append(args) or True)
+
+    assert [stored.profile_id.value for stored in data.list_profiles(app_paths)] == ["lenient"]
+    assert prompts == []
 
 
 @pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="FIFOs are unavailable")

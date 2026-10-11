@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 import pytest
 
 
@@ -64,7 +66,7 @@ def test_run_profile_job_matrix(
     expect_timer,
 ):
     _, wpproc = profile_modules
-    slideshow_profile.slideshow = slideshow
+    slideshow_profile.profile = replace(slideshow_profile.profile, slideshow=slideshow)
     changes = []
     thread = object()
 

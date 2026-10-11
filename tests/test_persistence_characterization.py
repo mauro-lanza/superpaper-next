@@ -1,72 +1,78 @@
-import os
+"""The .profile format as earlier versions wrote and read it, and general_settings."""
 
 import pytest
 
+from superpaper import profiles
+from superpaper.profiles import Profile
 from superpaper.settings import read_settings, write_settings
 from tests.conftest import write_profile
 
 
-def platform_bytes(text):
-    return text.replace("\n", os.linesep).encode("utf-8")
-
-
-def test_minimal_profile_uses_legacy_defaults(profile_modules, tmp_path):
-    data, _ = profile_modules
+def test_minimal_profile_uses_legacy_defaults(tmp_path):
     image = tmp_path / "wallpaper.png"
-    image.touch()
-    profile_path = tmp_path / "minimal.profile"
-    profile_path.write_text(f"name=minimal\ndisplay0paths={image}\n", encoding="utf-8")
 
-    profile = data.ProfileData(profile_path)
+    profile = profiles.parse(f"name=minimal\ndisplay0paths={image}\n")
 
-    assert profile.name == "minimal"
-    assert profile.spanmode == "single"
-    assert profile.slideshow is True
-    assert profile.delay_list == [600]
-    assert profile.sortmode == "shuffle"
-    assert profile.perspective == "default"
-    assert profile.zoom == 1.0
-    assert profile.offsets == (0.0, 0.0)
-    assert profile.paths_array == [[str(image)]]
+    assert profile == Profile(name="minimal", sources=((str(image),),))
+    assert (profile.spanmode, profile.slideshow, profile.delay, profile.sortmode) == ("single", True, 600.0, "shuffle")
+    assert (profile.perspective, profile.zoom, profile.pan) == ("default", 1.0, (0.0, 0.0))
 
 
-def test_temp_profile_save_bytes_are_canonical(profile_modules, tmp_path):
-    data, _ = profile_modules
-    profile = data.TempProfileData()
-    profile.name = "canonical"
-    profile.spanmode = "advanced"
-    profile.spangroups = "01,2"
-    profile.slideshow = True
-    profile.delay = "60"
-    profile.sortmode = "alphabetical"
-    profile.manual_offsets = "1,-2;3,4"
-    profile.hk_binding = "control+super+w"
-    profile.perspective = "desk"
-    profile.zoom = 1.25
-    profile.align = (-0.5, 1.0)
-    profile.selected = ["/images/a.png", "/images/b.png"]
-    profile.paths_array = ["/images/a.png", "/images/b.png"]
+def test_a_profile_is_written_as_the_editor_always_wrote_it():
+    profile = Profile(
+        name="canonical",
+        spanmode="advanced",
+        spangroups=((0, 1), (2,)),
+        slideshow=True,
+        delay=60.0,
+        sortmode="alphabetical",
+        corrections=(("offsets", ((1, -2), (3, 4))),),
+        hotkey=("control", "super", "w"),
+        perspective="desk",
+        zoom=1.25,
+        pan=(-0.5, 1.0),
+        selected=("/images/a.png",),
+        sources=(("/images/a.png",), ("/images/b.png", "/more")),
+    )
 
-    expected = (
+    # The selection is remembered beside the profile, not in it.
+    assert profiles.serialize(profile) == (
         "name=canonical\n"
         "spanmode=advanced\n"
         "spangroups=01,2\n"
         "slideshow=True\n"
-        "delay=60\n"
+        "delay=60.0\n"
         "sortmode=alphabetical\n"
         "offsets=1,-2;3,4\n"
         "hotkey=control+super+w\n"
         "perspective=desk\n"
         "zoom=1.25\n"
         "align=-0.5,1.0\n"
-        "selected=/images/a.png;/images/b.png\n"
         "display0paths=/images/a.png\n"
-        "display1paths=/images/b.png\n"
+        "display1paths=/images/b.png;/more\n"
     )
-    output = tmp_path / "canonical.profile"
 
-    assert profile.save(filename=output) == output
-    assert output.read_bytes() == platform_bytes(expected)
+
+def test_a_written_profile_reads_back_the_same(tmp_path):
+    profile = Profile(
+        name="round trip",
+        spanmode="multi",
+        slideshow=False,
+        hotkey=("alt", "1"),
+        perspective="disabled",
+        zoom=1.5,
+        pan=(0.25, -1.0),
+        corrections=(("offsets", ((0, 0), (12, -3))),),
+        sources=((str(tmp_path / "a=b"),), ("/one", "/two")),
+    )
+
+    assert profiles.parse(profiles.serialize(profile)) == profile
+
+
+def test_a_slideshow_profile_reads_back_the_same():
+    profile = Profile(name="slides", delay=1230.0, sortmode="date_seeded_shuffle", sources=(("/images",),))
+
+    assert profiles.parse(profiles.serialize(profile)) == profile
 
 
 def test_general_settings_round_trip_is_canonical(tmp_path):
@@ -101,39 +107,71 @@ def test_general_settings_round_trip_is_canonical(tmp_path):
     assert settings_path.read_bytes() == expected.encode()
 
 
-def test_profile_read_does_not_modify_bytes(profile_modules, tmp_path):
+def test_loading_a_profile_leaves_its_file_alone(profile_modules, app_paths, tmp_path):
     data, _ = profile_modules
     image = tmp_path / "wallpaper.png"
     image.touch()
-    profile_path = tmp_path / "noise.profile"
+    profile_path = app_paths.profiles / "noise.profile"
     raw = f"name=noise\r\nspanmode=single\r\ndisplay0paths={image}"
     profile_path.write_bytes(raw.encode())
 
-    data.ProfileData(profile_path)
+    stored = data.open_profile(app_paths, "noise")
+    stored.selection.advance()
 
+    assert stored.profile.sources == ((str(image),),)
     assert profile_path.read_bytes() == raw.encode()
 
 
-def test_source_paths_may_contain_equals_signs(profile_modules, tmp_path):
+def test_source_paths_may_contain_equals_signs(profile_modules, app_paths, tmp_path):
     data, _ = profile_modules
     folder = tmp_path / "a=b"
     folder.mkdir()
     image = folder / "wallpaper.png"
     image.touch()
 
-    profile = data.ProfileData(write_profile(tmp_path / "test.profile", sources=[folder]))
+    write_profile(app_paths.profiles / "test.profile", sources=[folder])
+    stored = data.open_profile(app_paths, "test")
 
-    assert profile.paths_array == [[str(folder)]]
-    assert profile.selection.current() == [str(image)]
+    assert stored.profile.sources == ((str(folder),),)
+    assert stored.selection.current() == [str(image)]
 
 
-def test_identical_sources_are_written_with_their_own_display_numbers(profile_modules):
-    data, _ = profile_modules
-    profile = data.TempProfileData()
-    profile.name = "twins"
-    profile.paths_array = ["/images", "/images"]
+def test_identical_sources_are_written_with_their_own_display_numbers():
+    profile = Profile(name="twins", sources=(("/images",), ("/images",)))
 
-    assert profile.serialize().splitlines()[-2:] == ["display0paths=/images", "display1paths=/images"]
+    assert profiles.serialize(profile).splitlines()[-2:] == ["display0paths=/images", "display1paths=/images"]
+
+
+@pytest.mark.parametrize(
+    ("line", "value"),
+    [
+        # Earlier versions loaded these with the defaults, so they still load.
+        ("zoom=", ("zoom", 1.0)),
+        ("zoom=big", ("zoom", 1.0)),
+        ("zoom=0.5", ("zoom", 1.0)),
+        ("align=", ("pan", (0.0, 0.0))),
+        ("align=0.5", ("pan", (0.0, 0.0))),
+        ("align=0.5,-2,9", ("pan", (0.5, -1.0))),
+        ("spanmode=diagonal", ("spanmode", "single")),
+        ("sortmode=random", ("sortmode", "shuffle")),
+        ("spangroups=0,x", ("spangroups", None)),
+        ("hotkey=", ("hotkey", None)),
+        ("a line without a setting", ("name", "lenient")),
+        ("unknown=setting", ("name", "lenient")),
+    ],
+)
+def test_values_earlier_versions_tolerated_still_load(line, value):
+    key, expected = value
+
+    assert getattr(profiles.parse(f"name=lenient\n{line}\n"), key) == expected
+
+
+@pytest.mark.parametrize(
+    "line", ["delay=", "delay=soon", "bezels=thin", "ppi=96.5", "diagonal_inches=24;big", "diagonal_inches=0;24"]
+)
+def test_values_that_cant_be_used_make_a_profile_unusable(line):
+    with pytest.raises(profiles.ProfileFormatError):
+        profiles.parse(f"name=broken\n{line}\n")
 
 
 # Profiles from before display layouts existed corrected positions with ppi=,
@@ -161,23 +199,18 @@ TWO_RESOLUTIONS = [(1920, 1080), (1280, 1024)]
         ("ppi=0;0\nbezels=5.0", True, [0, 0], [(0, 0), (0, 0)]),
     ],
 )
-def test_legacy_corrections_become_pixel_offsets(profile_modules, tmp_path, lines, ppimode, ppi_array, manual_offsets):
-    data, _ = profile_modules
-    path = tmp_path / "legacy.profile"
-    path.write_text(f"name=legacy\nspanmode=advanced\n{lines}\ndisplay0paths={tmp_path}\n", encoding="utf-8")
+def test_legacy_corrections_become_pixel_offsets(lines, ppimode, ppi_array, manual_offsets):
+    profile = profiles.parse(f"name=legacy\nspanmode=advanced\n{lines}\ndisplay0paths=/images\n")
 
-    corrections = data.ProfileData(path, persist_selection=False).display_corrections(TWO_RESOLUTIONS)
+    corrections = profile.display_corrections(TWO_RESOLUTIONS)
 
     assert corrections.ppimode is ppimode
     assert corrections.ppi_array == ppi_array
     assert corrections.manual_offsets == manual_offsets
 
 
-def test_corrections_follow_the_displays_present(profile_modules, tmp_path):
-    data, _ = profile_modules
-    path = tmp_path / "legacy.profile"
-    path.write_text(f"name=legacy\nppi=100;80\nbezels=5.0\ndisplay0paths={tmp_path}\n", encoding="utf-8")
-    profile = data.ProfileData(path, persist_selection=False)
+def test_corrections_follow_the_displays_present():
+    profile = profiles.parse("name=legacy\nppi=100;80\nbezels=5.0\ndisplay0paths=/images\n")
 
     # A third display plugged in later is shifted by the bezels to its left too.
     three = profile.display_corrections([*TWO_RESOLUTIONS, (1920, 1080)])
@@ -190,13 +223,17 @@ def test_corrections_follow_the_displays_present(profile_modules, tmp_path):
     ("displays", "manual_offsets"),
     [(1, [(1, 2)]), (2, [(1, 2), (3, -4)]), (3, [(1, 2), (3, -4), (0, 0)])],
 )
-def test_command_line_offsets_apply_to_the_displays_present(profile_modules, tmp_path, displays, manual_offsets):
-    data, _ = profile_modules
-    image = tmp_path / "wallpaper.png"
-    image.touch()
-    profile = data.CLIProfileData([str(image)], advanced=True, offsets=["1", "2", "3", "-4"])
+def test_command_line_offsets_apply_to_the_displays_present(displays, manual_offsets):
+    advanced = profiles.draft(["/image.png"], spanmode="advanced", offsets=[(1, 2), (3, -4)])
 
-    corrections = profile.display_corrections(displays * [(1920, 1080)])
+    corrections = advanced.display_corrections(displays * [(1920, 1080)])
 
-    assert corrections.ppimode is False
-    assert corrections.manual_offsets == manual_offsets
+    # The renderer takes one offset per display present.
+    assert corrections.manual_offsets[:displays] == manual_offsets
+
+
+def test_command_line_offsets_only_apply_to_advanced_spanning():
+    simple = profiles.draft(["/image.png"], spanmode="single", offsets=[(1, 2)])
+
+    assert simple.display_corrections([(1920, 1080)]).ppimode is False
+    assert simple.corrections == ()

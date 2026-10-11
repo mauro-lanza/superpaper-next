@@ -11,6 +11,7 @@ from superpaper import render
 from superpaper import wallpaper_processing as wpproc
 from superpaper.desktop.process import Result
 from superpaper.profile_id import ProfileId
+from superpaper.profiles import Profile
 from tests.conftest import monitor
 
 # Two 2x2 displays with a one-pixel gap between them, the second one pixel lower.
@@ -25,18 +26,18 @@ def write_image(path, size=(5, 3), colour=(10, 20, 30), *, modified=None):
     return str(path)
 
 
-def profile(name, files, *, spanmode="single", saved=True, ppimode=False):
-    """A profile as the wallpaper change sees it; ``calls`` records advancing its selection."""
+def settings(name, *, spanmode="single", legacy_corrections=False):
+    """A profile's settings; ``legacy_corrections`` adds an offsets= line from before display layouts."""
+    corrections = (("offsets", ((0, 0), (0, 0))),) if legacy_corrections else ()
+    return Profile(name=name, spanmode=spanmode, slideshow=False, corrections=corrections)
+
+
+def profile(name, files, *, spanmode="single", saved=True):
+    """A saved profile as the wallpaper change sees it; ``calls`` records advancing its selection."""
     calls = []
     return SimpleNamespace(
-        name=name,
+        profile=settings(name, spanmode=spanmode),
         profile_id=ProfileId(name) if saved else None,
-        spanmode=spanmode,
-        spangroups=None,
-        perspective="default",
-        zoom=1.0,
-        offsets=(0.0, 0.0),
-        display_corrections=lambda resolutions: SimpleNamespace(ppimode=ppimode, manual_offsets=[(0, 0)] * 2),
         selection=SimpleNamespace(
             is_complete=lambda: True,
             advance=lambda: calls.append("advance") or list(files),
@@ -115,17 +116,15 @@ def test_the_previous_render_stays_while_the_desktop_refuses_the_new_one(
 
 def test_drafts_leave_the_profiles_renders_alone(tmp_path, app_paths, display_layout, desktop):
     write_image(app_paths.cache / "simple-a.png")
-    settings = profile("simple", [], saved=False)
 
-    draft(settings, [write_image(tmp_path / "source.png")], app_paths, display_layout(TINY_DISPLAYS))
+    draft(settings("simple"), [write_image(tmp_path / "source.png")], app_paths, display_layout(TINY_DISPLAYS))
 
     assert desktop.handed == [(str(app_paths.cache / "preview" / "draft-a.png"), None)]
     assert cached(app_paths) == ["preview/draft-a.png", "simple-a.png"]
-    assert settings.calls == []
 
 
 def test_a_draft_without_images_shows_nothing(app_paths, display_layout, desktop, caplog):
-    assert wpproc.apply_draft_job(profile("p", []), [], app_paths, display_system=display_layout()) is None
+    assert wpproc.apply_draft_job(settings("p"), [], app_paths, display_system=display_layout()) is None
 
     assert errors(caplog) == ["Nothing to show for 'p': it has no images."]
     assert desktop.handed == []
@@ -154,7 +153,7 @@ def test_a_profile_that_is_no_longer_running_is_left_alone(tmp_path, app_paths, 
 
 
 @pytest.mark.parametrize(
-    ("spanmode", "ppimode", "renderer"),
+    ("spanmode", "legacy_corrections", "renderer"),
     [
         ("single", False, "simple"),
         # A single-image profile with legacy corrections (offsets=, ppi=, ...) is spanned
@@ -164,13 +163,15 @@ def test_a_profile_that_is_no_longer_running_is_left_alone(tmp_path, app_paths, 
         ("multi", False, "multi"),
     ],
 )
-def test_the_span_mode_picks_the_renderer(app_paths, display_layout, desktop, monkeypatch, spanmode, ppimode, renderer):
+def test_the_span_mode_picks_the_renderer(
+    app_paths, display_layout, desktop, monkeypatch, spanmode, legacy_corrections, renderer
+):
     called = []
     for name in ("simple", "advanced", "multi"):
         monkeypatch.setattr(render, name, lambda *args, name=name, **kwargs: called.append(name))
     files = ["one.png", "two.png"] if spanmode == "multi" else ["one.png"]
 
-    draft(profile("p", [], spanmode=spanmode, ppimode=ppimode), files, app_paths, display_layout())
+    draft(settings("p", spanmode=spanmode, legacy_corrections=legacy_corrections), files, app_paths, display_layout())
 
     assert called == [renderer]
 
@@ -178,7 +179,7 @@ def test_the_span_mode_picks_the_renderer(app_paths, display_layout, desktop, mo
 def test_an_image_that_cant_be_used_skips_the_change(tmp_path, app_paths, display_layout, desktop, caplog):
     gone = tmp_path / "gone.png"
 
-    draft(profile("simple", []), [str(gone)], app_paths, display_layout(TINY_DISPLAYS))
+    draft(settings("simple"), [str(gone)], app_paths, display_layout(TINY_DISPLAYS))
 
     assert errors(caplog) == [f"Wallpaper change skipped: The image {gone} doesn't exist."]
     assert desktop.handed == []
@@ -192,7 +193,7 @@ def test_images_that_dont_fit_the_displays_are_not_rendered(
     files = [write_image(tmp_path / f"{index}.png") for index in range(2)]
     one_display = display_layout([monitor(0, 0, 2, 2, 10, 10)])
 
-    draft(profile("p", [], spanmode=spanmode), files, app_paths, one_display)
+    draft(settings("p", spanmode=spanmode), files, app_paths, one_display)
 
     assert errors(caplog) == ["No complete wallpaper selection is available for profile 'p'."]
     assert desktop.handed == []

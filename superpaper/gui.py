@@ -5,7 +5,6 @@ New wallpaper configuration GUI for Superpaper.
 import copy
 import os
 import sys
-import tempfile
 import time
 from operator import itemgetter
 from typing import Literal, overload
@@ -16,6 +15,7 @@ from PIL import ImageEnhance
 
 import superpaper.displays as displays
 import superpaper.sp_logging as sp_logging
+from superpaper import profiles
 from superpaper.configuration_dialogs import (
     BrowsePaths,
     DisplayPositionEntry,
@@ -25,19 +25,18 @@ from superpaper.configuration_dialogs import (
     source_icon,
 )
 from superpaper.data import (
-    CLIProfileData,
-    TempProfileData,
     delete_managed_profile,
     managed_profile_for_selection,
     open_profile,
-    parse_profile_file,
     save_managed_profile,
+    validate_managed_profile_id,
 )
 from superpaper.message_dialog import show_message_dialog
 from superpaper.paths import resource
 from superpaper.profile_id import ProfileId, ProfileIdError
+from superpaper.profiles import Profile
 from superpaper.render import SourceImageError, open_source_image, resize_to_fill
-from superpaper.selection import is_supported_image
+from superpaper.selection import Selection, is_supported_image
 from superpaper.settings import read_settings
 
 
@@ -168,7 +167,7 @@ class WallpaperSettingsPanel(wx.Panel):
         self.Bind(wx.EVT_COMBOBOX, self._on_field_changed)
 
         if self.parent_tray_obj.active_profile:
-            active_prof_name = self.parent_tray_obj.active_profile.name
+            active_prof_name = self.parent_tray_obj.active_profile.profile.name
             active_id = self.choice_profiles.FindString(active_prof_name)
             self.choice_profiles.SetSelection(active_id)
             self.populate_fields(self.parent_tray_obj.active_profile)
@@ -190,7 +189,7 @@ class WallpaperSettingsPanel(wx.Panel):
         self.list_of_profiles = self.parent_tray_obj.list_of_profiles
         self.profnames = []
         for prof in self.list_of_profiles:
-            self.profnames.append(prof.name)
+            self.profnames.append(prof.profile.name)
         self.profnames.append("Create a new profile")
         self.choice_profiles = wx.ComboBox(self, -1, name="ProfileChoice", choices=self.profnames, style=wx.CB_READONLY)
         self.choice_profiles.Bind(wx.EVT_COMBOBOX, self.onSelect)
@@ -594,20 +593,20 @@ class WallpaperSettingsPanel(wx.Panel):
     #
     # Profile loading and display methods
     #
-    def populate_fields(self, profile):
-        """Populates config dialog fields with data from a profile."""
+    def populate_fields(self, stored):
+        """Populates config dialog fields with a saved profile's settings."""
         self._loading = True
-        self.current_profile_id = profile.profile_id
-        self.expected_source_digest = profile.source_digest
-        self.loaded_profile = profile
+        profile = stored.profile
+        self.current_profile_id = stored.profile_id
+        self.expected_source_digest = stored.digest
+        self.loaded_profile = stored
         self.tc_name.ChangeValue(profile.name)
 
         self.show_advanced_settings = False
         self.use_multi_image = False
         corrections = profile.display_corrections(self.display_sys.resolutions())
         legacy_advanced = bool(
-            profile.spanmode == "single"
-            and bool(corrections.ppimode or profile.bezels or profile.manual_offsets_useronly)
+            profile.spanmode == "single" and bool(corrections.ppimode or profile.bezels or profile.offsets)
         )
 
         # Basic settings
@@ -628,7 +627,7 @@ class WallpaperSettingsPanel(wx.Panel):
         if profile.slideshow:
             self.cb_slideshow.SetValue(True)
             wx.PostEvent(self.cb_slideshow, wx.CommandEvent(commandEventType=wx.EVT_CHECKBOX.typeId))
-            self.tc_sshow_delay.ChangeValue(str(profile.delay_list[0] / 60))
+            self.tc_sshow_delay.ChangeValue(str(profile.delay / 60))
             if profile.sortmode == "shuffle":
                 self.ch_sshow_sort.SetSelection(0)
             elif profile.sortmode == "alphabetical":
@@ -643,9 +642,9 @@ class WallpaperSettingsPanel(wx.Panel):
             self.tc_sshow_delay.Clear()
             self.ch_sshow_sort.SetSelection(wx.NOT_FOUND)
 
-        if profile.hk_binding:
+        if profile.hotkey:
             self.cb_hotkey.SetValue(True)
-            self.tc_hotkey_bind.ChangeValue(self.show_hkbinding(profile.hk_binding))
+            self.tc_hotkey_bind.ChangeValue(self.show_hkbinding(profile.hotkey))
         else:
             self.cb_hotkey.SetValue(False)
             self.tc_hotkey_bind.Clear()
@@ -655,10 +654,10 @@ class WallpaperSettingsPanel(wx.Panel):
         self.show_adv_setting_sizer(self.show_advanced_settings)
         # profile.inches: not stored in profile anymore
         # profile.bezels: not stored in profile anymore
-        if profile.manual_offsets_useronly:
+        if profile.offsets:
             self.cb_offsets.SetValue(True)
             # A profile may give fewer offsets than there are displays; the rest are 0,0.
-            offsets = profile.manual_offsets_useronly + len(self.tc_list_offsets) * [(0, 0)]
+            offsets = list(profile.offsets) + len(self.tc_list_offsets) * [(0, 0)]
             for tc, off in zip(self.tc_list_offsets, offsets):
                 offstr = f"{off[0]},{off[1]}"
                 tc.SetValue(offstr)
@@ -689,12 +688,12 @@ class WallpaperSettingsPanel(wx.Panel):
                 ch.SetSelection(0)
 
         # Paths displays: get number to show from profile.
-        self.paths_array_to_listctrl(profile.paths_array)
+        self.paths_array_to_listctrl(profile.sources)
 
         # Image scaling & position
         zoom_pct = round(profile.zoom * 100)
-        offx_pct = round(profile.offsets[0] * 100)
-        offy_pct = round(profile.offsets[1] * 100)
+        offx_pct = round(profile.pan[0] * 100)
+        offy_pct = round(profile.pan[1] * 100)
         self.sld_zoom.SetValue(zoom_pct)
         self.sld_offx.SetValue(offx_pct)
         self.sld_offy.SetValue(offy_pct)
@@ -702,15 +701,15 @@ class WallpaperSettingsPanel(wx.Panel):
         self.st_offx_val.SetLabel(str(offx_pct))
         self.st_offy_val.SetLabel(str(offy_pct))
         self.wpprev_pnl.zoom = profile.zoom
-        self.wpprev_pnl.offset = profile.offsets
+        self.wpprev_pnl.offset = profile.pan
 
         # Update wallpaper preview from selected profile
         if self.show_advanced_settings:
             display_data = self.display_sys.get_disp_list(True)
         else:
             display_data = self.display_sys.get_disp_list(False)
-        # Preview the tray's instance when it has one: its selection follows the slideshow.
-        live_profile = self.parent_tray_obj.get_profile_by_name(profile.name) or profile
+        # Preview the tray's record when it has one: its selection follows the slideshow.
+        live_profile = self.parent_tray_obj.get_profile_by_name(profile.name) or stored
         self.wpprev_pnl.preview_wallpaper(
             live_profile.selection.current(),
             self.show_advanced_settings,
@@ -721,7 +720,7 @@ class WallpaperSettingsPanel(wx.Panel):
         self.wpprev_pnl.toggle_buttons(show_config=self.show_advanced_settings, in_config=False)
 
         # Loaded data is the new clean baseline. Slideshow normalization in
-        # _collect_temp_profile means the later (posted) checkbox events produce
+        # _collect_profile means the later (posted) checkbox events produce
         # the same serialization, so this stays clean without a deferred call.
         self._loading = False
         self._set_clean_baseline()
@@ -753,10 +752,11 @@ class WallpaperSettingsPanel(wx.Panel):
         """Serialize the current field state for change comparison.
 
         Mirrors exactly what Save would write to disk (minus the background
-        selection), so dirtiness tracks real persisted differences.
+        selection), so dirtiness tracks real persisted differences. Fields that can't
+        be read yet (typing in progress) count through their problems, which quote them.
         """
-        tmp_profile, _groups = self._collect_temp_profile(resolve_selection=False)
-        return tmp_profile.serialize()
+        profile, problems = self._collect_profile()
+        return profiles.serialize(profile) + "\n".join(problems)
 
     def _set_clean_baseline(self):
         """Record the current field state as the saved/clean baseline."""
@@ -883,7 +883,7 @@ class WallpaperSettingsPanel(wx.Panel):
         self.list_of_profiles = self.parent_tray_obj.list_of_profiles
         self.profnames = []
         for prof in self.list_of_profiles:
-            self.profnames.append(prof.name)
+            self.profnames.append(prof.profile.name)
         self.profnames.append("Create a new profile")
         self.choice_profiles.SetItems(self.profnames)
 
@@ -1351,46 +1351,38 @@ class WallpaperSettingsPanel(wx.Panel):
         but the stored ``.profile`` on disk and the daemon's active/running
         profile are left untouched. Use Save to persist the changes.
         """
-        tmp_profile, _groups = self._collect_temp_profile(resolve_selection=True)
-        if not tmp_profile.test_save():
+        profile, problems = self._collect_profile()
+        problems += profiles.validate(profile)
+        if problems:
+            self._show_problems(problems)
             sp_logging.G_LOGGER.info("onApply: validation failed, nothing applied.")
             return
+        chosen = self._chosen_images(profile)
+        # The chosen images, or else the first ones of the edited sources.
+        images = Selection(profile.sources, profile.sortmode, profile.selection_size, images=chosen).current()
         busy = wx.BusyCursor()
-        # ProfileData parses from a file, so serialize the working copy to a
-        # throwaway file (never the real profile) and render that. This reuses
-        # the full ProfileData feature set (zoom/pan, span modes, selection)
-        # instead of duplicating render logic.
-        fd, temp_file = tempfile.mkstemp(prefix="sp_preview_", suffix=".profile")
-        os.close(fd)
-        try:
-            tmp_profile.save(filename=temp_file)
-            preview_profile = parse_profile_file(temp_file)
-            sp_logging.G_LOGGER.info("onApply preview (unsaved): %s", preview_profile.name)
-            # Render with the dialog's live DisplaySystem so staged (unsaved)
-            # display settings — bezels, sizes, positions — are reflected. This
-            # deliberately does NOT reload the saved layout, which lets the user
-            # test system tweaks via Apply before committing them.
-            thrd = self.parent_tray_obj.apply_draft(
-                preview_profile, preview_profile.selection.current(), display_system=copy.deepcopy(self.display_sys)
-            )
-            # Pump the event loop while rendering so the GUI stays responsive.
-            while thrd is not None and thrd.is_alive():
-                wx.YieldIfNeeded()
-                time.sleep(0.05)
-            # The applied image becomes the current selection so reopening the
-            # dialog (or a later render) shows the same wallpaper instead of
-            # reverting to the previously saved one (#158). Persist it on the
-            # live profile instance.
-            if tmp_profile.selected:
-                live = self._loaded_profile_with_selection()
-                if live is not None:
-                    live.selection.pin(tmp_profile.selected)
-        finally:
-            try:
-                os.remove(temp_file)
-            except OSError:
-                pass
-            del busy
+        sp_logging.G_LOGGER.info("onApply preview (unsaved): %s", profile.name)
+        # Render with the dialog's live DisplaySystem so staged (unsaved)
+        # display settings — bezels, sizes, positions — are reflected. This
+        # deliberately does NOT reload the saved layout, which lets the user
+        # test system tweaks via Apply before committing them.
+        thrd = self.parent_tray_obj.apply_draft(profile, images, display_system=copy.deepcopy(self.display_sys))
+        # Pump the event loop while rendering so the GUI stays responsive.
+        while thrd is not None and thrd.is_alive():
+            wx.YieldIfNeeded()
+            time.sleep(0.05)
+        # The applied image becomes the current selection so reopening the
+        # dialog (or a later render) shows the same wallpaper instead of
+        # reverting to the previously saved one (#158).
+        if chosen:
+            live = self._loaded_profile_with_selection()
+            if live is not None:
+                live.selection.pin(chosen)
+        del busy
+
+    def _show_problems(self, problems):
+        """Tell the user what keeps the profile from being saved or applied."""
+        show_message_dialog("\n\n".join(problems), "Error")
 
     def _get_selected_wallpaper_path(self):
         """Get the file path of the currently selected item in the wallpaper list."""
@@ -1416,211 +1408,185 @@ class WallpaperSettingsPanel(wx.Panel):
         """
         return self.loaded_profile
 
-    def _collect_temp_profile(self, resolve_selection=False):
-        """Builds a TempProfileData from the current dialog fields.
+    def _chosen_images(self, profile: Profile):
+        """The images chosen to show, for one image spanned (single or advanced): the one
+        focused in the source list, or else what the profile open in the dialog shows.
 
-        Returns a ``(tmp_profile, groups)`` tuple where ``groups`` is the span
-        groups mapping (or ``None``) used for the preview.
-
-        When ``resolve_selection`` is True the persistent wallpaper selection is
-        filled in (from the focused list item, falling back to the saved
-        profile). It is left out for change-tracking, where the background
-        selection must not count as an unsaved profile change. This method never
-        raises on partial input so it is safe to call on every field edit.
+        That profile is the one loaded, by its original name, so a rename in progress
+        keeps the selection (#158). None for one image per display, which a slideshow or
+        the first images of the sources provide.
         """
-        tmp_profile = TempProfileData()
-        tmp_profile.name = self.tc_name.GetLineText(0)
-        tmp_profile.slideshow = self.cb_slideshow.GetValue()
-        if tmp_profile.slideshow:
+        if profile.spanmode == "multi":
+            return None
+        selected_file = self._get_selected_wallpaper_path()
+        if selected_file and os.path.isfile(selected_file):
+            return [selected_file]
+        existing = self._loaded_profile_with_selection()
+        if existing is not None:
+            return existing.selection.images
+        return None
+
+    def _collect_profile(self) -> tuple[Profile, list[str]]:
+        """The profile the dialog's fields describe, with what keeps fields from being
+        read, such as a delay that isn't a number. Never raises on partial input, so it
+        is safe to call on every field edit."""
+        problems = []
+        slideshow = self.cb_slideshow.GetValue()
+        delay = 600.0
+        sortmode = "shuffle"
+        if slideshow:
             delay_text = self.tc_sshow_delay.GetLineText(0)
-            try:
-                # save delay as seconds for compatibility!
-                tmp_profile.delay = str(60 * float(delay_text))
-            except ValueError:
-                # Mid-edit / invalid input; keep raw text so test_save rejects it.
-                tmp_profile.delay = delay_text
+            if not delay_text.strip():
+                problems.append("When using slideshow you need to enter a delay.")
+            else:
+                try:
+                    delay = 60 * float(delay_text)  # minutes here, seconds in the file
+                except ValueError:
+                    problems.append(f"The slideshow delay must be a number of minutes, not '{delay_text}'.")
             # The sort dropdown may have no selection yet (-1); GetString(-1)
             # raises in wx, so only read it when a sort order is chosen.
             sort_sel = self.ch_sshow_sort.GetSelection()
             if sort_sel != wx.NOT_FOUND:
-                tmp_profile.sortmode = self.ch_sshow_sort.GetString(sort_sel).lower().replace(" ", "_")
+                sortmode = self.ch_sshow_sort.GetString(sort_sel).lower().replace(" ", "_")
+        hotkey = None
         if self.cb_hotkey.GetValue():
-            tmp_profile.hk_binding = self.tc_hotkey_bind.GetLineText(0)
+            hotkey_text = self.tc_hotkey_bind.GetLineText(0).strip()
+            hotkey = tuple(hotkey_text.split("+")) if hotkey_text else None
 
-        # span mode
-        span_sel = self.radiobox_spanmode.GetSelection()
-        if span_sel == 0:
-            tmp_profile.spanmode = "single"
-        elif span_sel == 1:
-            tmp_profile.spanmode = "advanced"
-        elif span_sel == 2:
-            tmp_profile.spanmode = "multi"
+        spanmode = {0: "single", 1: "advanced", 2: "multi"}.get(self.radiobox_spanmode.GetSelection(), "single")
 
-        # manual offsets
+        # manual offsets; an empty field means no offset
+        corrections = ()
         if self.cb_offsets.GetValue():
-            offs_strs = []
+            offsets = []
             for tc in self.tc_list_offsets:
-                line = tc.GetLineText(0)
-                if line:
-                    offs_strs.append(line)
-                else:
-                    # if offset field is empty, assume user wants no offset
-                    offs_strs.append("0,0")
-            tmp_profile.manual_offsets = ";".join(offs_strs)
-        # perspective
+                line = tc.GetLineText(0) or "0,0"
+                try:
+                    x, y = (int(part) for part in line.split(","))
+                except ValueError:
+                    problems.append(f"Display offsets must be given in (width,height) pixel pairs, not '{line}'.")
+                    x, y = 0, 0
+                offsets.append((x, y))
+            corrections = (("offsets", tuple(offsets)),)
         persp_sel = self.ch_persp.GetSelection()
-        if persp_sel != wx.NOT_FOUND:
-            tmp_profile.perspective = self.ch_persp.GetString(persp_sel)
-        else:
-            tmp_profile.perspective = "default"
+        perspective = self.ch_persp.GetString(persp_sel) if persp_sel != wx.NOT_FOUND else "default"
 
         # image scaling & position. Zoom/pan only applies to a single fixed
         # image; a slideshow always renders at defaults regardless of slider state.
-        if self.cb_slideshow.GetValue():
-            tmp_profile.zoom = 1.0
-            tmp_profile.align = (0.0, 0.0)
+        if slideshow:
+            zoom, pan = 1.0, (0.0, 0.0)
         else:
-            tmp_profile.zoom = self.sld_zoom.GetValue() / 100.0
-            tmp_profile.align = (self.sld_offx.GetValue() / 100.0, self.sld_offy.GetValue() / 100.0)
+            zoom = self.sld_zoom.GetValue() / 100.0
+            pan = (self.sld_offx.GetValue() / 100.0, self.sld_offy.GetValue() / 100.0)
 
-        # wallpaper selection (persistent). For single/advanced span the
-        # focused list item is the chosen image. If the user didn't pick a new
-        # one, preserve any selection already saved in the profile. Skipped for
-        # change-tracking, where the background selection is not a profile change.
-        if resolve_selection and tmp_profile.spanmode != "multi":
-            selected_file = self._get_selected_wallpaper_path()
-            if selected_file and os.path.isfile(selected_file):
-                tmp_profile.selected = [selected_file]
-            else:
-                # No new image picked in the list: preserve the selection of the
-                # profile currently open in the dialog. Look it up by the original
-                # (dropdown) name, NOT tmp_profile.name, which may have just been
-                # edited (rename) and not exist on disk yet -- otherwise the
-                # selection is lost and the preview/applied image cycles (#158).
-                existing = self._loaded_profile_with_selection()
-                if existing and existing.selection.images:
-                    tmp_profile.selected = existing.selection.images
-
-        # span groups
-        groups = None
+        spangroups = None
         if self.cb_spangroups.GetValue():
             groups = self.read_spangroups()
-            flat_groups = []
-            if groups is not None:
-                for grp in groups:
-                    ids = "".join([str(i) for i in groups[grp]])
-                    flat_groups.append(ids)
-            tmp_profile.spangroups = ",".join(flat_groups)
+            if groups:
+                spangroups = tuple(tuple(groups[group]) for group in groups)
 
-        # Paths
-        # extract data from path_listctrl
-        path_lc_contents = []
+        # The sources, from the source list: one field, or one per display.
+        rows = []
         columns = self.path_listctrl.GetColumnCount()
         for idx in range(self.path_listctrl.GetItemCount()):
-            item_dat = []
-            for col in range(columns):
-                item_dat.append(self.path_listctrl.GetItemText(idx, col))
-            path_lc_contents.append(item_dat)
-
-        # format paths
+            rows.append([self.path_listctrl.GetItemText(idx, col) for col in range(columns)])
         if columns == 1:
-            flat_contents = [path for row in path_lc_contents for path in row]
-            semicol_sep_paths = ";".join(flat_contents)
-            tmp_profile.paths_array.append(semicol_sep_paths)
+            sources = (tuple(path for row in rows for path in row),)
         else:
-            path_lc_contents = sorted(path_lc_contents, key=itemgetter(0))
-            paths_dict = {}
-            for row in path_lc_contents:
-                disp_id, path_item = row
-                if disp_id in paths_dict:
-                    paths_dict[disp_id].append(path_item)
-                else:
-                    paths_dict[disp_id] = [path_item]
-            for disp_id in paths_dict:
-                semicol_sep_paths = ";".join(paths_dict[disp_id])
-                tmp_profile.paths_array.append(semicol_sep_paths)
+            by_display: dict[str, list[str]] = {}
+            for disp_id, path_item in sorted(rows, key=itemgetter(0)):
+                by_display.setdefault(disp_id, []).append(path_item)
+            sources = tuple(tuple(paths) for paths in by_display.values())
 
-        return tmp_profile, groups
+        profile = Profile(
+            name=self.tc_name.GetLineText(0),
+            spanmode=spanmode,
+            spangroups=spangroups,
+            slideshow=slideshow,
+            delay=delay,
+            sortmode=sortmode,
+            sources=sources,
+            hotkey=hotkey,
+            perspective=perspective,
+            zoom=zoom,
+            pan=pan,
+            corrections=corrections,
+        )
+        return profile, problems
 
     def onSave(self, event):
-        """Saves currently open profile into file. A test method is called to verify data."""
+        """Saves the profile the fields describe, if it is valid; returns its path."""
         busy = None
         if event:
             busy = wx.BusyCursor()
-        tmp_profile, groups = self._collect_temp_profile(resolve_selection=True)
-
-        # log
-        sp_logging.G_LOGGER.info(tmp_profile.name)
-        sp_logging.G_LOGGER.info(tmp_profile.spanmode)
-        sp_logging.G_LOGGER.info(tmp_profile.slideshow)
-        sp_logging.G_LOGGER.info(tmp_profile.delay)
-        sp_logging.G_LOGGER.info(tmp_profile.sortmode)
-        sp_logging.G_LOGGER.info(tmp_profile.manual_offsets)
-        sp_logging.G_LOGGER.info(tmp_profile.hk_binding)
-        sp_logging.G_LOGGER.info(tmp_profile.paths_array)
-
-        # test collected data and save if it is valid, otherwise pass
+        profile, problems = self._collect_profile()
+        sp_logging.G_LOGGER.info("Saving profile: %s", profile)
         current_profile_id = self.current_profile_id
-        if tmp_profile.test_save(profiles_dir=self.paths.profiles, current_profile_id=current_profile_id):
-            old_profile_binding = self.loaded_profile.hk_binding if self.loaded_profile is not None else None
-            active = self.parent_tray_obj.active_profile
-            saving_active_profile = (
-                current_profile_id is not None and active is not None and active.profile_id == current_profile_id
-            )
+        if profile.name.strip():
             try:
-                saved_file = save_managed_profile(
-                    self.paths,
-                    tmp_profile,
-                    current_profile_id=current_profile_id,
-                    expected_source_digest=self.expected_source_digest,
-                    update_active=saving_active_profile and tmp_profile.name != current_profile_id.value,
-                )
-            except OSError as error:
-                sp_logging.G_LOGGER.warning("Could not save profile: %s", error)
-                show_message_dialog(str(error), "Error")
-                del busy
-                return None
-            self.parent_tray_obj.reload_profiles(event)
-            if saving_active_profile:
-                # The running profile keeps running under its (possibly new) name, and
-                # edits such as the slideshow delay take effect without a restart.
-                # Saving any other profile leaves the running slideshow alone.
-                self.parent_tray_obj.active_profile = self.parent_tray_obj.get_profile_by_name(tmp_profile.name)
-                self.parent_tray_obj.rearm_active_timer()
-            self.update_choiceprofile()
-            self.parent_tray_obj.update_hotkey(tmp_profile.name, old_profile_binding, tmp_profile.hk_binding)
-            self.choice_profiles.SetSelection(self.choice_profiles.FindString(tmp_profile.name))
-            # Update wallpaper preview from selected profile. The profile's
-            # persistent selection (if any) is what next_wallpaper_files returns.
-            saved_profile = open_profile(self.paths, ProfileId.parse(tmp_profile.name))
-            if saved_profile is None:
-                show_message_dialog("The saved profile could not be reloaded.", "Error")
-                del busy
-                return None
-            self.current_profile_id = saved_profile.profile_id
-            self.expected_source_digest = saved_profile.source_digest
-            self.loaded_profile = saved_profile
-            if self.show_advanced_settings:
-                display_data = self.display_sys.get_disp_list(True)
-            else:
-                display_data = self.display_sys.get_disp_list(False)
-            preview_files = saved_profile.selection.current()
-            self.wpprev_pnl.preview_wallpaper(
-                preview_files,
-                self.show_advanced_settings,
-                self.use_multi_image,
-                display_data,
-                groups,
-            )
-            # Saved state becomes the new clean baseline.
-            self.list_of_profiles = self.parent_tray_obj.list_of_profiles
-            self._set_clean_baseline()
-            del busy
-            return saved_file
-        else:
-            sp_logging.G_LOGGER.info("test_save failed.")
+                validate_managed_profile_id(self.paths.profiles, profile.name, current_profile_id)
+            except (OSError, ProfileIdError, ValueError) as error:
+                problems.insert(0, str(error))
+        problems += profiles.validate(profile)
+        if problems:
+            sp_logging.G_LOGGER.info("The profile was not saved: %s", problems)
+            self._show_problems(problems)
             del busy
             return None
+        old_hotkey = self.loaded_profile.profile.hotkey if self.loaded_profile is not None else None
+        active = self.parent_tray_obj.active_profile
+        saving_active_profile = (
+            current_profile_id is not None and active is not None and active.profile_id == current_profile_id
+        )
+        try:
+            saved_file = save_managed_profile(
+                self.paths,
+                profile,
+                selected=self._chosen_images(profile),
+                current_profile_id=current_profile_id,
+                expected_source_digest=self.expected_source_digest,
+                update_active=saving_active_profile and profile.name != current_profile_id.value,
+            )
+        except OSError as error:
+            sp_logging.G_LOGGER.warning("Could not save profile: %s", error)
+            show_message_dialog(str(error), "Error")
+            del busy
+            return None
+        self.parent_tray_obj.reload_profiles(event)
+        if saving_active_profile:
+            # The running profile keeps running under its (possibly new) name, and
+            # edits such as the slideshow delay take effect without a restart.
+            # Saving any other profile leaves the running slideshow alone.
+            self.parent_tray_obj.active_profile = self.parent_tray_obj.get_profile_by_name(profile.name)
+            self.parent_tray_obj.rearm_active_timer()
+        self.update_choiceprofile()
+        self.parent_tray_obj.update_hotkey(profile.name, old_hotkey, profile.hotkey)
+        self.choice_profiles.SetSelection(self.choice_profiles.FindString(profile.name))
+        # Update wallpaper preview from the saved profile and what it shows.
+        saved_profile = open_profile(self.paths, ProfileId.parse(profile.name))
+        if saved_profile is None:
+            show_message_dialog("The saved profile could not be reloaded.", "Error")
+            del busy
+            return None
+        self.current_profile_id = saved_profile.profile_id
+        self.expected_source_digest = saved_profile.digest
+        self.loaded_profile = saved_profile
+        if self.show_advanced_settings:
+            display_data = self.display_sys.get_disp_list(True)
+        else:
+            display_data = self.display_sys.get_disp_list(False)
+        self.wpprev_pnl.preview_wallpaper(
+            saved_profile.selection.current(),
+            self.show_advanced_settings,
+            self.use_multi_image,
+            display_data,
+            self.read_spangroups() if self.cb_spangroups.GetValue() else None,
+        )
+        # Saved state becomes the new clean baseline.
+        self.list_of_profiles = self.parent_tray_obj.list_of_profiles
+        self._set_clean_baseline()
+        del busy
+        return saved_file
 
     def onCreateNewProfile(self, event):
         """Empties the wallpaper profile config fields."""
@@ -1713,16 +1679,12 @@ class WallpaperSettingsPanel(wx.Panel):
         for off_tc in self.tc_list_offsets:
             off = off_tc.GetLineText(0).split(",")
             try:
-                offsets.append([int(off[0]), int(off[1])])
+                offsets.append((int(off[0]), int(off[1])))
             except IndexError, ValueError:
                 show_message_dialog(
                     f"Offsets must be integer pairs separated with a comma!\nProblematic offset is {off}"
                 )
                 return -1
-        flat_offsets = []
-        for off in offsets:
-            for pix in off:
-                flat_offsets.append(pix)
 
         persp_sel = self.ch_persp.GetSelection()
         if persp_sel != wx.NOT_FOUND:
@@ -1732,12 +1694,10 @@ class WallpaperSettingsPanel(wx.Panel):
 
         busy = wx.BusyCursor()
 
-        # Use the simplified CLI profile class, with the saved display settings.
+        # With the saved display settings.
         self.parent_tray_obj.refresh_displays()
-        profile = CLIProfileData(
-            testimage, advanced=True, perspective=perspective, spangroups=None, offsets=flat_offsets
-        )
-        thrd = self.parent_tray_obj.apply_draft(profile, profile.files)
+        profile = profiles.draft(testimage, spanmode="advanced", perspective=perspective, offsets=offsets)
+        thrd = self.parent_tray_obj.apply_draft(profile, testimage)
         # Pump the event loop while rendering so the GUI stays responsive
         # instead of freezing.
         while thrd is not None and thrd.is_alive():
@@ -1759,7 +1719,7 @@ class WallpaperSettingsPanel(wx.Panel):
         ):
             old_persp_str = "default"
         else:
-            old_persp_str = self.list_of_profiles[open_item].perspective
+            old_persp_str = self.list_of_profiles[open_item].profile.perspective
         persp_choices = ["default", *list(self.display_sys.perspective_dict.keys()), "disabled"]
         self.ch_persp.SetItems(persp_choices)
         if old_persp_str in persp_choices:

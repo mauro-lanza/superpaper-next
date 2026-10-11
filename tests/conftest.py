@@ -118,7 +118,10 @@ def manual_clock(monkeypatch):
 
 @pytest.fixture
 def slideshow_profile():
-    return SimpleNamespace(name="slides", slideshow=True, delay_list=[12.5])
+    """A saved profile, as the slideshow sees it: its settings."""
+    from superpaper.profiles import Profile
+
+    return SimpleNamespace(profile=Profile(name="slides", slideshow=True, delay=12.5))
 
 
 @pytest.fixture

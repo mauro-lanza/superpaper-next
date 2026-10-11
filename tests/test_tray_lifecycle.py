@@ -7,6 +7,7 @@ import pytest
 
 from superpaper.paths import AppPaths
 from superpaper.profile_id import ProfileId
+from superpaper.profiles import Profile
 from superpaper.settings import Settings
 
 
@@ -45,7 +46,8 @@ def controller(tray, active_profile=None, timer=None):
 
 
 def profile(name):
-    return SimpleNamespace(name=name, profile_id=ProfileId(name), slideshow=True, delay_list=[30])
+    """A saved slideshow profile, as the tray holds it."""
+    return SimpleNamespace(profile=Profile(name=name, slideshow=True, delay=30.0), profile_id=ProfileId(name))
 
 
 def test_start_profile_activates_and_persists(headless_tray_module, monkeypatch):
@@ -75,7 +77,7 @@ def test_switch_profile_stops_old_timer_first(headless_tray_module, monkeypatch)
     new_profile = profile("new")
 
     def run(selected, change, startup):
-        events.append(("run", selected.name))
+        events.append(("run", selected.profile.name))
         return (object(), "worker")
 
     monkeypatch.setattr(tray, "run_profile_job", run)
@@ -259,7 +261,7 @@ def test_hotkey_for_a_deleted_profile_does_nothing(headless_tray_module, monkeyp
 def test_profile_hotkey_changes_are_ignored_while_hotkeys_are_disabled(headless_tray_module):
     icon = controller(headless_tray_module)
 
-    icon.update_hotkey("Work", ("control", "x"), "control+y")
+    icon.update_hotkey("Work", ("control", "x"), ("control", "y"))
 
     assert icon.seen_binding == set()
 
@@ -269,7 +271,7 @@ def test_profile_hotkey_change_rebinds_by_identity(headless_tray_module):
     icon.hk2 = Mock()
     icon.seen_binding = {("control", "x")}
 
-    icon.update_hotkey("Work", ("control", "x"), "control+y")
+    icon.update_hotkey("Work", ("control", "x"), ("control", "y"))
 
     icon.hk2.unregister.assert_called_once_with(("control", "x"))
     icon.hk2.register.assert_called_once_with(("control", "y"), ProfileId("Work"), overwrite=False)
@@ -281,7 +283,7 @@ def test_removing_a_profile_hotkey_unbinds_it(headless_tray_module):
     icon.hk2 = Mock()
     icon.seen_binding = {("control", "x")}
 
-    icon.update_hotkey("Work", ("control", "x"), "")
+    icon.update_hotkey("Work", ("control", "x"), None)
 
     icon.hk2.unregister.assert_called_once_with(("control", "x"))
     icon.hk2.register.assert_not_called()

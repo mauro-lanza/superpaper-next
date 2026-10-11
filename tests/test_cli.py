@@ -179,11 +179,11 @@ def test_tray_logs_to_the_cache_when_logging_is_on(monkeypatch, app_paths):
 
 def test_setimages_dispatches_one_shot_render(monkeypatch, tmp_path, app_paths):
     from superpaper import cli
+    from superpaper.profiles import Profile
 
     image = tmp_path / "wallpaper.png"
     image.touch()
     captured = {}
-    profile = SimpleNamespace(files=[str(image)])
 
     class Job:
         joined = False
@@ -199,33 +199,29 @@ def test_setimages_dispatches_one_shot_render(monkeypatch, tmp_path, app_paths):
         captured["detections"] = captured.get("detections", 0) + 1
         return layout
 
-    def profile_factory(files, advanced, perspective, groups, offsets):
-        captured["profile_args"] = (files, advanced, perspective, groups, offsets)
-        return profile
-
     def render(profile, images, paths, *, display_system, set_command):
         captured["render"] = (profile, images, paths, display_system, set_command)
         return job
 
     monkeypatch.setattr(sys, "argv", ["superpaper", "--setimages", str(image)])
-    monkeypatch.setattr(cli, "CLIProfileData", profile_factory)
     monkeypatch.setattr(cli, "DisplaySystem", detect)
     monkeypatch.setattr(cli, "apply_draft_job", render)
 
     assert cli.cli_logic(app_paths) == 0
-    assert captured["profile_args"] == ([str(image)], False, None, None, None)
-    assert captured["render"] == (profile, [str(image)], app_paths, layout, "")
+    # One image spans the displays, without a perspective.
+    draft = Profile(name="cli", slideshow=False, sources=((str(image),),), perspective="disabled")
+    assert captured["render"] == (draft, [str(image)], app_paths, layout, "")
     assert captured["detections"] == 1
     assert job.joined is True
 
 
 def test_advanced_cli_arguments_are_preserved(monkeypatch, tmp_path, app_paths):
     from superpaper import cli
+    from superpaper.profiles import Profile
 
     image = tmp_path / "wallpaper.png"
     image.touch()
     captured = {}
-    profile = SimpleNamespace(files=[str(image)])
     display_system = SimpleNamespace(perspective_dict={"desk": object()}, size_hint=lambda: None)
     monkeypatch.setattr(
         sys,
@@ -248,12 +244,6 @@ def test_advanced_cli_arguments_are_preserved(monkeypatch, tmp_path, app_paths):
         ],
     )
     monkeypatch.setattr(cli, "DisplaySystem", lambda config_dir: display_system)
-
-    def profile_factory(*args):
-        captured["profile_args"] = args
-        return profile
-
-    monkeypatch.setattr(cli, "CLIProfileData", profile_factory)
     monkeypatch.setattr(
         cli,
         "apply_draft_job",
@@ -263,9 +253,30 @@ def test_advanced_cli_arguments_are_preserved(monkeypatch, tmp_path, app_paths):
     )
 
     assert cli.cli_logic(app_paths) == 0
-    assert captured["profile_args"] == ([str(image)], True, "desk", [[0], [1, 2]], ["1", "2"])
+    draft = Profile(
+        name="cli",
+        spanmode="advanced",
+        spangroups=((0,), (1, 2)),
+        slideshow=False,
+        sources=((str(image),),),
+        perspective="desk",
+        corrections=(("offsets", ((1, 2),)),),
+    )
     # The layout that knows the perspective is the one the wallpaper is rendered for.
-    assert captured["render"] == (profile, app_paths, display_system, "setter {image}")
+    assert captured["render"] == (draft, app_paths, display_system, "setter {image}")
+
+
+def test_offsets_must_be_whole_numbers(monkeypatch, tmp_path, app_paths):
+    from superpaper import cli
+
+    image = tmp_path / "wallpaper.png"
+    image.touch()
+    monkeypatch.setattr(sys, "argv", ["superpaper", "--setimages", str(image), "--advanced", "--offsets", "1", "x"])
+
+    with pytest.raises(SystemExit) as exit_info:
+        cli.cli_logic(app_paths)
+
+    assert exit_info.value.code == 1
 
 
 @pytest.mark.parametrize(("advanced", "hinted"), [(True, True), (False, False)])
@@ -394,7 +405,7 @@ def test_profile_launch_accepts_profiles_saved_by_older_versions(monkeypatch, tm
 
 @pytest.mark.parametrize(
     "setting",
-    ["delay=not-a-number", "diagonal_inches=0;24", "zoom=", "align="],
+    ["delay=not-a-number", "diagonal_inches=0;24", "ppi=96.5"],
 )
 def test_profile_lookup_rejects_malformed_content_before_tray(monkeypatch, app_paths, setting):
     from superpaper import cli

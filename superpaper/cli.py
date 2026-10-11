@@ -7,7 +7,8 @@ from typing import NoReturn
 
 import superpaper.desktop as desktop
 import superpaper.sp_logging as sp_logging
-from superpaper.data import CLIProfileData, discover_profile_inventory
+from superpaper import profiles
+from superpaper.data import discover_profile_inventory
 from superpaper.desktop.spanmode import set_spanmode
 from superpaper.displays import DisplayDetectionError, DisplaySystem
 from superpaper.paths import AppPaths, ensure_dirs
@@ -172,6 +173,10 @@ def cli_logic(paths: AppPaths):
             "Number of offset pixels not even. If passing manual offsets, give width and height offset "
             "for each display, even if not actually offsetting every display."
         )
+    try:
+        offsets = [int(pixels) for pixels in args.offsets or []]
+    except ValueError:
+        _exit_with_error(f"The offsets must be whole numbers of pixels: {' '.join(args.offsets)}")
     set_command = ""
     if args.command:
         if len(args.command) > 1:
@@ -186,8 +191,21 @@ def cli_logic(paths: AppPaths):
     if args.advanced and (hint := display_system.size_hint()):
         sp_logging.G_LOGGER.warning("%s", hint)
     set_spanmode()
-    profile = CLIProfileData(args.setimages, args.advanced, args.perspective, spangrp, args.offsets)
-    job_thread = apply_draft_job(profile, profile.files, paths, display_system=display_system, set_command=set_command)
+    images = [os.path.realpath(image) for image in args.setimages]
+    if args.advanced:
+        spanmode = "advanced"
+    elif len(images) == 1:
+        spanmode = "single"
+    else:
+        spanmode = "multi"
+    profile = profiles.draft(
+        images,
+        spanmode=spanmode,
+        perspective=args.perspective,
+        spangroups=spangrp,
+        offsets=list(zip(offsets[::2], offsets[1::2])),
+    )
+    job_thread = apply_draft_job(profile, images, paths, display_system=display_system, set_command=set_command)
     if job_thread is not None:
         job_thread.join()
     return 0

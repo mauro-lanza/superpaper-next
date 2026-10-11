@@ -6,6 +6,7 @@ import pytest
 
 from superpaper import display_store, displays
 from superpaper.profile_id import ProfileId
+from superpaper.profiles import Profile
 from tests.conftest import monitor
 
 
@@ -88,16 +89,11 @@ def test_negative_saved_bezels_are_ignored(display_layout, tmp_path, caplog):
 
 
 class SingleImageProfile:
-    name = "test"
-    profile_id = ProfileId("test")
-    spanmode = "single"
-    zoom = 1.0
-    offsets = (0.0, 0.0)
-    selection = SimpleNamespace(is_complete=lambda: True, current=lambda: ["image.png"])
+    """A running profile that spans one image, as the wallpaper change sees it."""
 
-    @staticmethod
-    def display_corrections(_resolutions):
-        return SimpleNamespace(ppimode=False)
+    profile = Profile(name="test", spanmode="single")
+    profile_id = ProfileId("test")
+    selection = SimpleNamespace(is_complete=lambda: True, current=lambda: ["image.png"])
 
 
 def blocking_render(monkeypatch, wpproc):
@@ -109,7 +105,7 @@ def blocking_render(monkeypatch, wpproc):
         started.set()
         release.wait(timeout=1)
 
-    monkeypatch.setattr(wpproc, "G_ACTIVE_PROFILE", SingleImageProfile.name)
+    monkeypatch.setattr(wpproc, "G_ACTIVE_PROFILE", SingleImageProfile.profile.name)
     monkeypatch.setattr(wpproc.render, "simple", render)
     return started, release
 

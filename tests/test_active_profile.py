@@ -20,7 +20,7 @@ def test_active_profile_round_trip(profile_modules, app_paths, tmp_path):
     data.write_active_profile(app_paths.cache, "test")
 
     assert (cache / "running_profile").read_text(encoding="utf-8") == "test"
-    assert data.read_active_profile(app_paths).name == "test"
+    assert data.read_active_profile(app_paths).profile.name == "test"
 
 
 def test_active_profile_accepts_lf(profile_modules, app_paths, tmp_path):
@@ -28,7 +28,7 @@ def test_active_profile_accepts_lf(profile_modules, app_paths, tmp_path):
     cache = prepare_profile(app_paths, tmp_path)
     (cache / "running_profile").write_text("test\n", encoding="utf-8")
 
-    assert data.read_active_profile(app_paths).name == "test"
+    assert data.read_active_profile(app_paths).profile.name == "test"
 
 
 def test_active_profile_accepts_crlf(profile_modules, app_paths, tmp_path):
@@ -36,7 +36,7 @@ def test_active_profile_accepts_crlf(profile_modules, app_paths, tmp_path):
     cache = prepare_profile(app_paths, tmp_path)
     (cache / "running_profile").write_bytes(b"test\r\n")
 
-    assert data.read_active_profile(app_paths).name == "test"
+    assert data.read_active_profile(app_paths).profile.name == "test"
 
 
 def test_active_profile_uses_first_record(profile_modules, app_paths, tmp_path):
@@ -44,7 +44,7 @@ def test_active_profile_uses_first_record(profile_modules, app_paths, tmp_path):
     cache = prepare_profile(app_paths, tmp_path)
     (cache / "running_profile").write_text("test\nmissing\n", encoding="utf-8")
 
-    assert data.read_active_profile(app_paths).name == "test"
+    assert data.read_active_profile(app_paths).profile.name == "test"
 
 
 def test_empty_active_profile_returns_none(profile_modules, app_paths, tmp_path):
@@ -82,7 +82,7 @@ def test_pointer_resolves_a_profile_whose_name_line_differs(profile_modules, app
     profiles = app_paths.profiles
     (profiles / "test.profile").write_text("name=other\n", encoding="utf-8")
 
-    assert data.read_active_profile(app_paths).name == "test"
+    assert data.read_active_profile(app_paths).profile.name == "test"
     assert pointer.read_text(encoding="utf-8") == "test"
 
 
@@ -96,7 +96,7 @@ def test_pointer_resolves_a_symlinked_profile(profile_modules, app_paths, tmp_pa
     (profiles / "test.profile").symlink_to(target)
     (cache / "running_profile").write_text("test", encoding="utf-8")
 
-    assert data.read_active_profile(app_paths).name == "test"
+    assert data.read_active_profile(app_paths).profile.name == "test"
 
 
 def test_invalid_active_profile_write_does_not_touch_pointer(profile_modules, app_paths, tmp_path):
