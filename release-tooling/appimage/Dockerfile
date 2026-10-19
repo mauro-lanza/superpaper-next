@@ -107,7 +107,7 @@ RUN python3.14 -m venv "${VIRTUAL_ENV}" \
 # instead of a version: the build fails if the fetched asset ever differs from
 # the reviewed one, guarding against a silently changed/compromised upstream.
 # To upgrade, download the new asset, verify it, and update APPIMAGETOOL_SHA256.
-ARG APPIMAGETOOL_SHA256=a6d71e2b6cd66f8e8d16c37ad164658985e0cf5fcaa950c90a482890cb9d13e0
+ARG APPIMAGETOOL_SHA256=95cbe7cce9717fce90c484e34052ee7c7f1d7635b33c12525b4776826a7d29b6
 RUN wget -q -O /usr/local/bin/appimagetool \
         "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage" \
     && echo "${APPIMAGETOOL_SHA256}  /usr/local/bin/appimagetool" | sha256sum -c - \
