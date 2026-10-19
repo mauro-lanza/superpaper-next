@@ -18,13 +18,19 @@ logger = logging.getLogger(__name__)
 # current activity). Kept in the config directory.
 MAPPING_FILE = "kde_desktop_mapping.json"
 
-# Lists every desktop as "id,screen;"; a desktop of an activity that isn't showing is on
-# screen -1.
+# Lists every desktop as "id,screen;"; a desktop of an activity that isn't showing, prior to plasma 6.8, used to have -1 as id 
+# but now we have to check if the geometry is > 0.
 DESKTOPS_SCRIPT = """
 var allDesktops = desktops();
 var result = [];
 for(var i = 0; i < allDesktops.length; i++) {
-    result.push(allDesktops[i].id + ',' + allDesktops[i].screen);
+    var screen = allDesktops[i].screen;
+    if(screen >= 0 && screen < screenCount) {
+        var geometry = screenGeometry(screen);
+        if(geometry.width > 0 && geometry.height > 0) {
+            result.push(allDesktops[i].id + ',' + screen);
+        }
+    }
 }
 print(result.join(';'));
 """
@@ -32,7 +38,7 @@ print(result.join(';'));
 # Gives each desktop the image for its screen. The desktops on a screen now, sorted by
 # their screen's top and then (deciding) its left edge, order the screens the way
 # Superpaper orders the displays. A desktop without a screen, of an activity that isn't
-# showing, is guessed to be on the screen its position in the list suggests.
+# showing, is exluded if the geometry is > 0.
 WALLPAPER_SCRIPT = Template("""
 var imagesByDesktop = ${images_by_desktop};
 var defaultImages = ${default_images};
@@ -41,8 +47,12 @@ var allDesktops = desktops();
 
 var activeDesktops = [];
 for(var idx = 0; idx < allDesktops.length; idx++) {
-    if(allDesktops[idx].screen != -1) {
-        activeDesktops.push(allDesktops[idx]);
+    var screen = allDesktops[idx].screen;
+    if(screen >= 0 && screen < screenCount) {
+        var geometry = screenGeometry(screen);
+        if(geometry.width > 0 && geometry.height > 0) {
+            activeDesktops.push(allDesktops[idx]);
+        }
     }
 }
 
@@ -191,8 +201,7 @@ def desktop_activities(state_dir: Path) -> dict[int, str]:
             if "," in item:
                 desktop_id, screen_id = (int(part) for part in item.split(",")[:2])
                 all_desktop_ids.append(desktop_id)
-                if screen_id != -1:
-                    active_desktop_ids.append(desktop_id)
+                active_desktop_ids.append(desktop_id)
     except Exception:  # dbus-python is missing, or Plasma answered something else
         logger.exception("Failed to get desktop-activity mapping")
         return {}
