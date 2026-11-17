@@ -8,7 +8,7 @@ from PIL import ImageEnhance
 
 import superpaper.sp_logging as sp_logging
 from superpaper.paths import resource
-from superpaper.render import SourceImageError, open_source_image, resize_to_fill
+from superpaper.render import SourceImageError, open_preview_image, resize_to_fill
 from superpaper.ui.help import HelpPopup
 from superpaper.ui.positions_dialog import DisplayPositionEntry
 
@@ -328,8 +328,7 @@ class WallpaperPreviewPanel(wx.Panel):
     def resize_and_bitmap(self, fname, size, enhance_color=False):
         """Take filename of an image and resize and crop it to size."""
         try:
-            # Opened as the renderer opens it, so the preview matches the result.
-            pil = resize_to_fill(open_source_image(fname), size, quality="fast", zoom=self.zoom, offset=self.offset)
+            pil = resize_to_fill(open_preview_image(fname), size, quality="fast", zoom=self.zoom, offset=self.offset)
         except SourceImageError as error:  # unreadable, truncated, too large, or no longer there
             sp_logging.G_LOGGER.info("Cannot preview image '%s': %s", fname, error)
             black_bmp = wx.Bitmap.FromRGBA(size[0], size[1], red=0, green=0, blue=0, alpha=255)

@@ -5,6 +5,8 @@ superpaper.desktop shows it.
 """
 
 import logging
+import os
+from collections import OrderedDict
 from collections.abc import Sequence
 from operator import itemgetter
 from typing import TYPE_CHECKING
@@ -24,6 +26,10 @@ Image.MAX_IMAGE_PIXELS = None
 
 MAX_PIXELS = 250_000_000
 """The largest image Superpaper opens, in pixels: about 750 MB once decoded."""
+
+PREVIEW_MAX_PIXELS = 4_000_000
+PREVIEW_CACHE_SIZE = 8
+_preview_cache: OrderedDict[tuple[str, int, int], Image.Image] = OrderedDict()
 
 
 class SourceImageError(Exception):
@@ -61,6 +67,75 @@ def open_source_image(path) -> Image.Image:
             message = f"The image {path} can't be read: {error}"
             raise SourceImageError(message) from error
     return image
+
+
+def _downscaled(image: Image.Image) -> Image.Image:
+    if image.width * image.height <= PREVIEW_MAX_PIXELS:
+        return image
+    scale = (PREVIEW_MAX_PIXELS / (image.width * image.height)) ** 0.5
+    size = (max(1, int(image.width * scale)), max(1, int(image.height * scale)))
+    return image.resize(size, Image.Resampling.HAMMING, reducing_gap=2.0)
+
+
+def open_preview_image(path) -> Image.Image:
+    """Like open_source_image, but at most PREVIEW_MAX_PIXELS and remembered until the file changes.
+
+    The caller must not modify the result. Only the UI thread calls this, so no lock.
+    """
+    try:
+        stat = os.stat(path)
+    except OSError:
+        return open_source_image(path)  # raises the SourceImageError that says why
+    key = (os.fspath(path), stat.st_mtime_ns, stat.st_size)
+    cached = _preview_cache.get(key)
+    if cached is not None:
+        _preview_cache.move_to_end(key)
+        return cached
+    image = _downscaled(open_source_image(path))
+    _preview_cache[key] = image
+    while len(_preview_cache) > PREVIEW_CACHE_SIZE:
+        _preview_cache.popitem(last=False)
+    return image
+
+
+def source_icon_image(path, size: tuple[int, int]) -> Image.Image | None:
+    """The image at ``path`` shrunk to fit ``size`` keeping its aspect, or None if it can't be read.
+
+    Opened on its own, not through the preview cache, so a long source list doesn't evict
+    the preview's images; a JPEG is decoded at a reduced scale.
+    """
+    try:
+        with Image.open(path) as source:
+            if source.width * source.height > MAX_PIXELS:
+                return None
+            source.draft("RGB", size)
+            upright = ImageOps.exif_transpose(source)
+            image = upright if upright.mode == "RGB" else upright.convert("RGB")
+    except OSError, ValueError:
+        return None
+    width, height = image.size
+    scale = min(size[0] / width, size[1] / height)
+    fitted = (max(1, round(width * scale)), max(1, round(height * scale)))
+    return image.resize(fitted, Image.Resampling.BOX)
+
+
+def load_argb32(path) -> tuple[int, int, bytes] | None:
+    """The PNG at ``path`` as (width, height, ARGB32 bytes, big-endian), or None if it can't be read."""
+    if not path or not os.path.isfile(path):
+        return None
+    try:
+        with Image.open(path) as img:
+            rgba = img.convert("RGBA")
+    except (OSError, ValueError) as error:
+        logger.info("Failed to load the icon %s: %s", path, error)
+        return None
+    raw = rgba.tobytes("raw", "RGBA")
+    argb = bytearray(len(raw))
+    argb[0::4] = raw[3::4]
+    argb[1::4] = raw[0::4]
+    argb[2::4] = raw[1::4]
+    argb[3::4] = raw[2::4]
+    return (*rgba.size, bytes(argb))
 
 
 def compute_canvas(res_array, offset_array):
