@@ -145,7 +145,7 @@ class WallpaperSettingsPanel(wx.Panel):
         self.display_band = DisplayBand(
             self,
             self.display_sys,
-            self.wpprev_pnl,
+            self.wpprev_pnl.layout_editor,
             field_width=int(self.tc_width * 2 / 5),
             relayout=self.sizer_main.Layout,
             refresh_preview=self.refresh_layout_preview,
@@ -635,7 +635,7 @@ class WallpaperSettingsPanel(wx.Panel):
             display_data,
             self.read_spangroups(True),
         )
-        self.wpprev_pnl.toggle_buttons(show_config=self.show_advanced_settings, in_config=False)
+        self.wpprev_pnl.layout_editor.toggle_buttons(show_config=self.show_advanced_settings, in_config=False)
 
         # Loaded data is the new clean baseline. Slideshow normalization in
         # _collect_profile means the later (posted) checkbox events produce
@@ -910,7 +910,7 @@ class WallpaperSettingsPanel(wx.Panel):
         self.wpprev_pnl.update_display_data(
             display_data, self.show_advanced_settings, self.use_multi_image, spangroups=spangroups
         )
-        self.wpprev_pnl.toggle_buttons(show_config=self.show_advanced_settings, in_config=False)
+        self.wpprev_pnl.layout_editor.toggle_buttons(show_config=self.show_advanced_settings, in_config=False)
         self._update_dirty_state()
 
     def onCheckboxSlideshow(self, event):
