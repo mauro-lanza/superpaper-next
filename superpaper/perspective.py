@@ -17,6 +17,31 @@ import numpy as np
 
 import superpaper.sp_logging as sp_logging
 
+# "none" is display_store's no-default sentinel; "default" and "disabled" clash with the
+# editor's perspective choices.
+_RESERVED_PERSPECTIVE_NAMES = frozenset({"default", "disabled", "none"})
+
+
+def check_new_perspective_name(name: str) -> None:
+    """Raise ValueError if ``name`` cannot be given to a perspective being saved."""
+    if name.casefold() in _RESERVED_PERSPECTIVE_NAMES:
+        message = f"'{name}' is reserved; choose another perspective name."
+        raise ValueError(message)
+
+
+def lengths_to_ppi_norm(
+    max_ppi: float,
+    viewer_offset_mm: list[float],
+    swivels_mm: list[tuple[int, float, float, float]],
+    tilts_mm: list[tuple[float, float, float]],
+) -> tuple[list[float], list[tuple[int, float, float, float]], list[tuple[float, float, float]]]:
+    """Convert the dialog's lengths from millimetres to pixels at ``max_ppi``; angles and axes are kept."""
+    px_per_mm = max_ppi / 25.4
+    viewer_offset = [px_per_mm * length for length in viewer_offset_mm]
+    swivels = [(axis, angle, px_per_mm * lateral, px_per_mm * depth) for axis, angle, lateral, depth in swivels_mm]
+    tilts = [(angle, px_per_mm * vertical, px_per_mm * depth) for angle, vertical, depth in tilts_mm]
+    return viewer_offset, swivels, tilts
+
 
 def get_backprojected_display_system(crops, persp_data, plot=False):
     """
