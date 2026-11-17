@@ -10,6 +10,7 @@ import superpaper.perspective as persp
 import superpaper.render as render
 from superpaper import profiles
 from superpaper.paths import resource
+from superpaper.selection import real_file
 from superpaper.ui.help import HelpPopup
 from superpaper.ui.message import draft_shown, show_message_dialog
 
@@ -520,14 +521,13 @@ class PerspectiveConfig(wx.Dialog):
                 res = show_message_dialog(msg)
                 return 0
 
-        if image:
-            testimage = [os.path.realpath(image)]
-        else:
-            testimage = [str(resource("test.png"))]
-        if not os.path.isfile(testimage[0]):
-            msg = f"Test image not found in {testimage}."
+        wanted = image or str(resource("test.png"))
+        found = real_file(wanted)
+        if found is None:
+            msg = f"Test image not found in {[wanted]}."
             show_message_dialog(msg, "Error")
             return 0
+        testimage = [found]
 
         # Use the settings currently written out in the fields!
         offsets = []

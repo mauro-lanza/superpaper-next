@@ -17,22 +17,16 @@ It is intentionally self-contained and Linux-only; Windows and macOS keep using
 the wx ``TaskBarIcon``.
 """
 
-import os
 from typing import Any
 
 import superpaper.sp_logging as sp_logging
+from superpaper.render import load_argb32
 
 dbus: Any = None
-Image: Any = None
 
 try:
     import dbus  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-import]
     import dbus.service  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-import]
-except ImportError:
-    pass
-
-try:
-    from PIL import Image
 except ImportError:
     pass
 
@@ -63,23 +57,11 @@ def _load_icon_pixmap(path):
 
     Returns a list with a single pixmap entry, or an empty list on failure.
     """
-    if Image is None or not path or not os.path.isfile(path):
+    pixmap = load_argb32(path)
+    if pixmap is None:
         return []
-    try:
-        with Image.open(path) as img:
-            rgba = img.convert("RGBA")
-            width, height = rgba.size
-            # SNI wants ARGB32 in network (big-endian) byte order. PIL gives RGBA.
-            raw = rgba.tobytes("raw", "RGBA")
-            argb = bytearray(len(raw))
-            argb[0::4] = raw[3::4]  # A
-            argb[1::4] = raw[0::4]  # R
-            argb[2::4] = raw[1::4]  # G
-            argb[3::4] = raw[2::4]  # B
-        return [(width, height, dbus.ByteArray(bytes(argb)))]
-    except Exception as exc:
-        sp_logging.G_LOGGER.info("Failed to load SNI icon pixmap from %s: %s", path, exc)
-        return []
+    width, height, argb = pixmap
+    return [(width, height, dbus.ByteArray(argb))]
 
 
 class _MenuModel:

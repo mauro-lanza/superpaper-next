@@ -2,7 +2,6 @@
 displays and the display settings band."""
 
 import copy
-import os
 from operator import itemgetter
 
 import wx  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-import]
@@ -13,7 +12,7 @@ from superpaper.paths import resource
 from superpaper.profile_id import ProfileId, ProfileIdError
 from superpaper.profile_store import validate_managed_profile_id
 from superpaper.profiles import Profile
-from superpaper.selection import Selection, first_image
+from superpaper.selection import Selection, first_image, is_file, is_folder
 from superpaper.ui.browse_dialog import BrowsePaths, source_icon
 from superpaper.ui.display_band import DisplayBand
 from superpaper.ui.help import HelpFrame, HelpPopup
@@ -1156,7 +1155,7 @@ class WallpaperSettingsPanel(wx.Panel):
             path = self.path_listctrl.GetItemText(item_idx, 1)
         else:
             path = self.path_listctrl.GetItemText(item_idx, 0)
-        if os.path.isdir(path):
+        if is_folder(path):
             return None
         return path
 
@@ -1171,7 +1170,7 @@ class WallpaperSettingsPanel(wx.Panel):
         if profile.spanmode == "multi":
             return None
         selected_file = self._get_selected_wallpaper_path()
-        if selected_file and os.path.isfile(selected_file):
+        if selected_file and is_file(selected_file):
             return [selected_file]
         if self.loaded_profile is not None:
             return self.loaded_profile.selection.images
@@ -1402,7 +1401,7 @@ class WallpaperSettingsPanel(wx.Panel):
         """Align test, takes alignment settings from open profile and sets a test image wp."""
         # Use the settings currently written out in the fields!
         testimage = [str(resource("test.png"))]
-        if not os.path.isfile(testimage[0]):
+        if not is_file(testimage[0]):
             msg = f"Test image not found in {testimage}."
             show_message_dialog(msg, "Error")
             return -1
