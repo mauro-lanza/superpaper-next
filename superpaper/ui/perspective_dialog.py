@@ -1,7 +1,6 @@
 """Creating, editing, deleting and testing perspectives."""
 
 import os
-import sys
 
 import wx  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-import]
 
@@ -9,7 +8,6 @@ import superpaper.perspective as persp
 import superpaper.render as render
 from superpaper import profiles
 from superpaper.paths import resource
-from superpaper.settings import read_settings
 from superpaper.ui.help import HelpPopup
 from superpaper.ui.message import draft_shown, show_message_dialog
 
@@ -31,7 +29,7 @@ class PerspectiveConfig(wx.Dialog):
         self.persp_dict = self.display_sys.perspective_dict
         self.test_image = None
         self.help_bmp = wx.ArtProvider.GetBitmap(wx.ART_QUESTION, wx.ART_BUTTON, wx.Size(20, 20))
-        self.warn_large_img = read_settings(parent.settings_path, sys.platform).warn_large_img
+        self.warn_large_img = parent.settings.warn_large_img
 
         sizer_main = wx.BoxSizer(wx.VERTICAL)
 
