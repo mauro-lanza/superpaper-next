@@ -109,7 +109,8 @@ build = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 xfail_strict = true
-addopts = ["--strict-markers", "--strict-config"]
+addopts = ["--strict-markers", "--strict-config", "-m", "not gui"]
+markers = ["gui: drives real wx windows on a display; run with `pytest -m gui` (needs wxPython)"]
 
 # ---------------------------------------------------------------------------
 # Ruff: linter + formatter
