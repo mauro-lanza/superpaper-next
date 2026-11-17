@@ -1034,6 +1034,12 @@ class WallpaperSettingsPanel(wx.Panel):
         """The general settings as they are now, whichever window saved them."""
         return self._get_settings()
 
+    def adopt_perspectives(self, saved):
+        """Use the perspective choice of ``saved``, in place: the preview holds this layout."""
+        self.display_sys.use_perspective = saved.use_perspective
+        self.display_sys.default_perspective = saved.default_perspective
+        self.display_sys.perspective_dict = copy.deepcopy(saved.perspective_dict)
+
     def onBrowsePaths(self, event):
         """Opens the pick paths dialog."""
         multiple_image_area = self.use_multi_image or self.use_spangroups()

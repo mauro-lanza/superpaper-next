@@ -13,6 +13,7 @@ the user overrode both diagonals, entered a 10.5 mm bezel, dragged the second di
 and saved two perspectives.
 """
 
+import configparser
 from types import SimpleNamespace
 
 import pytest
@@ -162,3 +163,57 @@ def test_monitors_without_a_saved_layout_get_a_guessed_one(monkeypatch, saved_la
     assert system.get_ppinorm_offsets() == [(0, 0), (150, 1440)]
     assert system.default_perspective is None
     assert system.perspective_dict == {}
+
+
+def edit_the_layout(system):
+    """Unsaved band edits: bezels, diagonals and positions."""
+    count = len(system.disp_list)
+    system.update_display_diags([30.0] * count)
+    system.update_bezels([(3.0, 2.0)] * count)
+    system.update_ppinorm_offsets([(5, 6)] * count)
+
+
+def test_saving_the_perspective_choice_leaves_the_rest_of_the_saved_layout(monkeypatch, saved_layouts):
+    system = display_system(monkeypatch, saved_layouts, DUAL_MONITORS)
+    edit_the_layout(system)
+    system.use_perspective = False
+    system.default_perspective = "couch"
+    del system.perspective_dict["desk"]
+
+    system.save_perspective_choice()
+
+    expected = DISPLAY_SYSTEMS_DAT.replace(
+        "use_perspective = 1\ndef_perspective = desk", "use_perspective = 0\ndef_perspective = couch"
+    )
+    assert (saved_layouts / "display_systems.dat").read_text(encoding="utf-8") == expected
+    assert (saved_layouts / f"{DUAL_KEY}.persp").read_text(encoding="utf-8") == DUAL_PERSP[
+        DUAL_PERSP.index("[couch]") :
+    ]
+
+
+def test_the_perspective_choice_of_displays_without_a_saved_layout_saves_the_fresh_layout(monkeypatch, tmp_path):
+    system = display_system(monkeypatch, tmp_path, LAPTOP_MONITORS)
+    fresh_offsets = system.get_ppinorm_offsets()
+    edit_the_layout(system)
+    system.default_perspective = "desk"
+
+    system.save_perspective_choice()
+
+    reloaded = display_system(monkeypatch, tmp_path, LAPTOP_MONITORS)
+    assert reloaded.get_ppinorm_offsets() == fresh_offsets
+    assert reloaded.bezels_in_mm() == [(0.0, 0.0)]
+    assert reloaded.use_user_diags is False
+    assert reloaded.default_perspective == "desk"
+
+
+def test_an_unreadable_layout_file_leaves_the_perspectives_as_they_were(monkeypatch, saved_layouts):
+    system = display_system(monkeypatch, saved_layouts, DUAL_MONITORS)
+    system.perspective_dict.pop("couch")
+    persp = (saved_layouts / f"{DUAL_KEY}.persp").read_bytes()
+    (saved_layouts / "display_systems.dat").write_text("no section header\n", encoding="utf-8")
+
+    with pytest.raises(configparser.Error):
+        system.save_perspective_choice()
+
+    assert (saved_layouts / f"{DUAL_KEY}.persp").read_bytes() == persp
+    assert (saved_layouts / "display_systems.dat").read_text(encoding="utf-8") == "no section header\n"

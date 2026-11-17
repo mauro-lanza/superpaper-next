@@ -4,10 +4,12 @@ diagonal geometry that lines a wallpaper up across them.
 A layout is saved with display_store, under a key derived from the displays.
 """
 
+import copy
 import logging
 import math
 import threading
 import time
+from dataclasses import replace
 from pathlib import Path
 
 from screeninfo import get_monitors
@@ -467,15 +469,36 @@ class DisplaySystem:
         """Save the user's settings for these displays in display_systems.dat: where they
         are placed (bezels included), the bezels, any diagonal sizes entered, and the
         perspective choice. The layouts of other displays are kept."""
+        display_store.write_layout(self.config_dir, self.key, self._as_saved())
+
+    def save_perspective_choice(self):
+        """Save the perspectives in their <key>.persp file, and which one is the default
+        and whether they are used in display_systems.dat. The rest of the saved layout is
+        left as it is, whatever has been changed in this object since. A display_systems.dat
+        that can't be read changes nothing."""
+        saved = display_store.read_layout(self.config_dir, self.key)
+        if saved is None:
+            # Nothing is saved yet, so the layout in use is the one of a fresh system.
+            fresh = copy.deepcopy(self)
+            fresh.update_display_diags("auto")
+            fresh.update_bezels([(0.0, 0.0)] * len(fresh.disp_list))
+            saved = fresh._as_saved()
+        self.save_perspectives()
+        display_store.write_layout(
+            self.config_dir,
+            self.key,
+            replace(saved, use_perspective=self.use_perspective, default_perspective=self.default_perspective),
+        )
+
+    def _as_saved(self) -> display_store.SavedLayout:
         diagonal_inches = [display.diagonal_size()[1] for display in self.disp_list] if self.use_user_diags else None
-        saved = display_store.SavedLayout(
+        return display_store.SavedLayout(
             ppi_norm_offsets=self.get_ppinorm_offsets(),
             bezel_mms=self.bezels_in_mm(),
             user_diagonal_inches=diagonal_inches,
             use_perspective=self.use_perspective,
             default_perspective=self.default_perspective,
         )
-        display_store.write_layout(self.config_dir, self.key, saved)
 
     def _apply(self, saved: display_store.SavedLayout):
         """Apply a layout saved for these displays."""
