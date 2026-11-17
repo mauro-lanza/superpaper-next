@@ -423,10 +423,62 @@ class DisplaySystem:
         # convert to normalized pixel units
         max_ppmm = self.max_ppi() / 25.4
         bezels_ppi_norm = [(bz[0] * max_ppmm, bz[1] * max_ppmm) for bz in bezels_mm]
+        keep_layout = self._layout_is_valid()
+        old_cells = self._cells() if keep_layout else []
+        old_bezels = [dsp.ppi_norm_bezels for dsp in self.disp_list]
         for bz_px, dsp in zip(bezels_ppi_norm, self.disp_list):
             dsp.ppi_norm_bezels = bz_px
             logger.info("update_bezels: %s", bz_px)
-        self.compute_initial_preview_offsets()
+        if not keep_layout:
+            self.compute_initial_preview_offsets()
+            return
+        # Offsets are cell origins and the bezel is part of the cell, so a hand-arranged
+        # layout keeps its gaps only if every display moves by the growth of the bezels
+        # before it in the same row or column.
+        shifts = []
+        for i, (left, top, _, _) in enumerate(old_cells):
+            dx = dy = 0.0
+            for j, (o_left, o_top, o_right, o_bottom) in enumerate(old_cells):
+                if j == i:
+                    continue
+                delta = (bezels_ppi_norm[j][0] - old_bezels[j][0], bezels_ppi_norm[j][1] - old_bezels[j][1])
+                if o_right <= left + 1 and self._spans_overlap(top, old_cells[i][3], o_top, o_bottom):
+                    dx += delta[0]
+                if o_bottom <= top + 1 and self._spans_overlap(left, old_cells[i][2], o_left, o_right):
+                    dy += delta[1]
+            shifts.append((dx, dy))
+        for (dx, dy), dsp in zip(shifts, self.disp_list):
+            dsp.ppi_norm_offset = (dsp.ppi_norm_offset[0] + dx, dsp.ppi_norm_offset[1] + dy)
+        # Corner-touching displays share no row or column, so nothing shifts them apart.
+        if not self._layout_is_valid():
+            self.compute_initial_preview_offsets()
+
+    def _cells(self):
+        """Each display with its bezel as (left, top, right, bottom) in ppi norm pixels."""
+        return [
+            (
+                dsp.ppi_norm_offset[0],
+                dsp.ppi_norm_offset[1],
+                dsp.ppi_norm_offset[0] + dsp.ppi_norm_resolution[0] + dsp.ppi_norm_bezels[0],
+                dsp.ppi_norm_offset[1] + dsp.ppi_norm_resolution[1] + dsp.ppi_norm_bezels[1],
+            )
+            for dsp in self.disp_list
+        ]
+
+    @staticmethod
+    def _spans_overlap(start_a, end_a, start_b, end_b):
+        return min(end_a, end_b) - max(start_a, start_b) > 1
+
+    def _layout_is_valid(self):
+        """Whether every display has a position and no two displays overlap."""
+        if any(dsp.ppi_norm_offset is None for dsp in self.disp_list):
+            return False
+        cells = self._cells()
+        return not any(
+            self._spans_overlap(a[0], a[2], b[0], b[2]) and self._spans_overlap(a[1], a[3], b[1], b[3])
+            for i, a in enumerate(cells)
+            for b in cells[i + 1 :]
+        )
 
     def bezels_in_mm(self):
         """Return list of bezel thicknesses in millimeters."""
@@ -482,6 +534,7 @@ class DisplaySystem:
             fresh = copy.deepcopy(self)
             fresh.update_display_diags("auto")
             fresh.update_bezels([(0.0, 0.0)] * len(fresh.disp_list))
+            fresh.compute_initial_preview_offsets()
             saved = fresh._as_saved()
         self.save_perspectives()
         display_store.write_layout(

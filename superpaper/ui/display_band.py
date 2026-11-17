@@ -141,7 +141,7 @@ class DisplayBand(wx.CollapsiblePane):
         ds = self.display_sys
         return {
             "bezels": tuple((round(b[0], 2), round(b[1], 2)) for b in ds.bezels_in_mm()),
-            "offsets": tuple((round(o[0]), round(o[1])) for o in ds.get_ppinorm_offsets()),
+            "offsets": tuple((o[0], o[1]) for o in ds.get_ppinorm_offsets()),
             "use_user_diags": ds.use_user_diags,
             "diags": tuple(round(dsp.diagonal_size()[1], 2) for dsp in ds.disp_list),
         }
