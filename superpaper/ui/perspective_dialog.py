@@ -82,7 +82,6 @@ class PerspectiveConfig(wx.Dialog):
         # name txt ctrl
         st_name = wx.StaticText(statbox_profs, -1, "Profile name:")
         self.tc_name = wx.TextCtrl(statbox_profs, -1, size=wx.Size(self.tc_width, -1))
-        self.tc_name.SetMaxLength(14)
         # buttons
         self.button_new = wx.Button(statbox_profs, label="New")
         self.button_save = wx.Button(statbox_profs, label="Save")
@@ -398,35 +397,39 @@ class PerspectiveConfig(wx.Dialog):
             msg = "Profile name is required."
             show_message_dialog(msg)
             return 0
+        if persp_name not in self.persp_dict:
+            try:
+                persp.check_new_perspective_name(persp_name)
+            except ValueError as error:
+                show_message_dialog(str(error))
+                return 0
         toggle = self.cb_master.GetValue()
         is_ds_def = self.cb_dispsys_def.GetValue()
         centr_disp = int(self.choice_centr_disp.GetSelection())
-        px_per_mm = self.display_sys.max_ppi() / 25.4
         try:
-            # covert lenghts to ppi norm res
-            viewer_offset = [px_per_mm * float(tc.GetLineText(0)) for tc in self.tclist_vieweroffs]
+            viewer_offset_mm = [float(tc.GetLineText(0)) for tc in self.tclist_vieweroffs]
         except ValueError:
             msg = "Viewer offsets should be lenghts in millimeters, separate decimals with a point."
             show_message_dialog(msg)
             return 0
-        if viewer_offset[2] <= 0:
+        if viewer_offset_mm[2] <= 0:
             msg = "Viewer distance must be entered and positive."
             show_message_dialog(msg)
             return 0
-        viewer_data = (centr_disp, viewer_offset)
-        swivels = []
         sw_axii = self.collect_data_column(1)
         sw_angl = self.collect_data_column(2)
         sw_lato = self.collect_data_column(3)
         sw_depo = self.collect_data_column(4)
-        for ax, an, lo, do in zip(sw_axii, sw_angl, sw_lato, sw_depo):
-            swivels.append((ax, an, px_per_mm * lo, px_per_mm * do))
-        tilts = []
         ti_angl = self.collect_data_column(5)
         ti_vero = self.collect_data_column(6)
         ti_depo = self.collect_data_column(7)
-        for an, vo, do in zip(ti_angl, ti_vero, ti_depo):
-            tilts.append((an, px_per_mm * vo, px_per_mm * do))
+        viewer_offset, swivels, tilts = persp.lengths_to_ppi_norm(
+            self.display_sys.max_ppi(),
+            viewer_offset_mm,
+            list(zip(sw_axii, sw_angl, sw_lato, sw_depo)),
+            list(zip(ti_angl, ti_vero, ti_depo)),
+        )
+        viewer_data = (centr_disp, viewer_offset)
 
         # Warn before saving settings that would need huge intermediate images. They are
         # checked as they are, so the layout is only changed once they are accepted.
@@ -494,8 +497,8 @@ class PerspectiveConfig(wx.Dialog):
         # profile is being saved, so simply unchecking "Use perspective
         # corrections" and pressing OK actually sticks.
         self.checkCbmaster()
-        if self.tc_name.GetValue():
-            self.onSave()
+        if self.tc_name.GetValue() and not self.onSave():
+            return
         self.EndModal(wx.ID_OK)
 
     def onCancel(self, event):
@@ -560,7 +563,7 @@ class PerspectiveConfig(wx.Dialog):
                 "Image files (*.jpg;*.jpeg;*.png;*.bmp;*.gif;*.tiff;*.webp)"
                 "|*.jpg;*.jpeg;*.png;*.bmp;*.gif;*.tiff;*.webp"
             ),
-            defaultDir=self.frame.defdir,
+            defaultDir=self.frame.settings.browse_default_dir,
             style=wx.FD_OPEN | wx.FD_FILE_MUST_EXIST,
         ) as file_dialog:
             if file_dialog.ShowModal() == wx.ID_CANCEL:

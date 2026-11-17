@@ -27,6 +27,20 @@ def is_supported_image(filename: str) -> bool:
     return filename.lower().endswith(SUPPORTED_IMAGE_EXTENSIONS)
 
 
+def first_image(path: str) -> str | None:
+    """The image file itself, or the first supported image of a folder in name order; None if neither."""
+    if os.path.isdir(path):
+        try:
+            names = sorted(os.listdir(path))
+        except OSError as error:
+            logger.warning("A source folder could not be listed: '%s': %s", path, error)
+            return None
+        return next((os.path.join(path, name) for name in names if is_supported_image(name)), None)
+    if os.path.isfile(path):
+        return path
+    return None
+
+
 class Selection:
     """The images a profile shows now, and which come next.
 
