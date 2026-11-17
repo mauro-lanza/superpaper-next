@@ -20,6 +20,20 @@ def bezel_px(system, mm):
     return mm * system.max_ppi() / 25.4
 
 
+def test_a_diagonal_change_keeps_the_bezels_in_millimetres(system):
+    system.update_display_diags([27.0, 27.0])
+    system.update_bezels([(8.5, 0.0), (0.0, 3.3)])
+    px_before = system.bezels_in_px()
+
+    system.update_display_diags([28.0, 28.0])
+    assert system.bezels_in_mm() == [(8.5, 0.0), (0.0, 3.3)]
+    assert system.bezels_in_px() != px_before
+
+    system.update_display_diags([27.0, 27.0])
+    assert system.bezels_in_mm() == [(8.5, 0.0), (0.0, 3.3)]
+    assert system.bezels_in_px() == pytest.approx(px_before)
+
+
 def test_a_fresh_layout_gets_the_initial_layout_when_bezels_are_set(system):
     system.update_bezels([(10.0, 0.0), (0.0, 0.0)])
 

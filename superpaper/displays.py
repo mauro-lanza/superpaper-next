@@ -62,6 +62,7 @@ class Display:
         self.ppi = None
         self.ppi_norm_resolution = None
         self.ppi_norm_offset = None
+        self.bezel_mm = (0.0, 0.0)
         self.ppi_norm_bezels = (0, 0)
         self.perspective_angles = (0, 0)
         self.name = monitor.name
@@ -257,6 +258,15 @@ class DisplaySystem:
                 round(dsp.resolution[0] / r_ppi),
                 round(dsp.resolution[1] / r_ppi),
             )
+        # Unset bezels keep their integer pixels, so a fresh layout saves byte-identically.
+        if any(dsp.bezel_mm != (0, 0) for dsp in self.disp_list):
+            self._derive_bezel_px()
+
+    def _derive_bezel_px(self):
+        """Bezels are kept in millimetres; their ppi norm pixels follow the densest display."""
+        max_ppmm = self.max_ppi() / 25.4
+        for dsp in self.disp_list:
+            dsp.ppi_norm_bezels = (dsp.bezel_mm[0] * max_ppmm, dsp.bezel_mm[1] * max_ppmm)
 
     def get_ppi_norm_crops(self, manual_offsets):
         """Returns list of ppi_norm crop tuples to cut from ppi_norm canvas.
@@ -420,15 +430,14 @@ class DisplaySystem:
         if any(bez < 0 for bez_pair in bezels_mm for bez in bez_pair):
             message = f"Bezel thicknesses can't be negative: {bezels_mm}"
             raise ValueError(message)
-        # convert to normalized pixel units
-        max_ppmm = self.max_ppi() / 25.4
-        bezels_ppi_norm = [(bz[0] * max_ppmm, bz[1] * max_ppmm) for bz in bezels_mm]
         keep_layout = self._layout_is_valid()
         old_cells = self._cells() if keep_layout else []
         old_bezels = [dsp.ppi_norm_bezels for dsp in self.disp_list]
-        for bz_px, dsp in zip(bezels_ppi_norm, self.disp_list):
-            dsp.ppi_norm_bezels = bz_px
-            logger.info("update_bezels: %s", bz_px)
+        for bz_mm, dsp in zip(bezels_mm, self.disp_list):
+            dsp.bezel_mm = tuple(bz_mm)
+        self._derive_bezel_px()
+        bezels_ppi_norm = [dsp.ppi_norm_bezels for dsp in self.disp_list]
+        logger.info("update_bezels: %s", bezels_ppi_norm)
         if not keep_layout:
             self.compute_initial_preview_offsets()
             return
@@ -482,16 +491,7 @@ class DisplaySystem:
 
     def bezels_in_mm(self):
         """Return list of bezel thicknesses in millimeters."""
-        bezels_mm = []
-        max_ppmm = self.max_ppi() / 25.4
-        for dsp in self.disp_list:
-            bezels_mm.append(
-                (
-                    round(dsp.ppi_norm_bezels[0] / max_ppmm, 2),
-                    round(dsp.ppi_norm_bezels[1] / max_ppmm, 2),
-                )
-            )
-        return bezels_mm
+        return [(round(dsp.bezel_mm[0], 2), round(dsp.bezel_mm[1], 2)) for dsp in self.disp_list]
 
     def bezels_in_px(self):
         """Return list of bezel thicknesses in ppi norm px."""
