@@ -602,13 +602,7 @@ class PerspectiveConfig(wx.Dialog):
         )
         # use_per = self.cb_master.GetValue()
         # persname = self.choice_profiles.GetString(self.choice_profiles.GetSelection())
-        pop = HelpPopup(
-            self,
-            text,
-            show_image_quality=False,
-            # use_perspective=use_per,
-            # persp_name=persname
-        )
+        pop = HelpPopup(self, text)
         btn = evt.GetEventObject()
         pos = btn.ClientToScreen((0, 0))
         sz = btn.GetSize()

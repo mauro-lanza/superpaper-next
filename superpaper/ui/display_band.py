@@ -14,7 +14,7 @@ class DisplayBand(wx.CollapsiblePane):
     be used to dial in values, but they are only written to disk when Save is pressed;
     Revert restores the last saved state. Collapsed by default: set it once and forget it.
 
-    ``preview`` shows the layout and is where bezels are set. The editor provides the
+    ``layout_editor`` sets the bezels in the preview. The editor provides the
     rest: ``relayout()`` lays the editor out again, ``refresh_preview()`` shows the staged
     layout in the preview, ``enable_profile_editing(enable)`` locks the profile settings
     while bezels are being set, and ``on_saved()`` is called once the layout is saved.
@@ -24,7 +24,7 @@ class DisplayBand(wx.CollapsiblePane):
         self,
         parent,
         display_sys,
-        preview,
+        layout_editor,
         *,
         field_width,
         relayout,
@@ -38,7 +38,7 @@ class DisplayBand(wx.CollapsiblePane):
             style=wx.CP_DEFAULT_STYLE | wx.CP_NO_TLW_RESIZE,
         )
         self.display_sys = display_sys
-        self._preview = preview
+        self._layout_editor = layout_editor
         self._relayout = relayout
         self._refresh_preview = refresh_preview
         self._enable_profile_editing = enable_profile_editing
@@ -265,7 +265,7 @@ class DisplayBand(wx.CollapsiblePane):
     def onConfigureBezels(self, event):
         """Start bezel size config mode."""
         self._enable_profile_editing(False)
-        self._preview.start_bezel_config()
+        self._layout_editor.start_bezel_config()
         self.button_bezels.Disable()
         self.button_bezels_save.Enable()
         self.button_bezels_canc.Enable()
@@ -273,7 +273,7 @@ class DisplayBand(wx.CollapsiblePane):
     def onConfigureBezelsSave(self, event):
         """Exit bezel config mode, staging the new bezel sizes (not saved yet)."""
         self._enable_profile_editing(True)
-        self._preview.bezel_config_save()
+        self._layout_editor.bezel_config_save()
         self.button_bezels_save.Disable()
         self.button_bezels_canc.Disable()
         self.button_bezels.Enable()
@@ -282,7 +282,7 @@ class DisplayBand(wx.CollapsiblePane):
     def onConfigureBezelsCanc(self, event):
         """Cancel out of bezel size config mode."""
         self._enable_profile_editing(True)
-        self._preview.bezel_config_cancel()
+        self._layout_editor.bezel_config_cancel()
         self.button_bezels_save.Disable()
         self.button_bezels_canc.Disable()
         self.button_bezels.Enable()

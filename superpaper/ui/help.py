@@ -108,32 +108,10 @@ Tips:
 
 
 class HelpPopup(wx.PopupTransientWindow):
-    """Popup to show a bit of static text"""
+    """Popup to show a bit of static text, optionally followed by a line of quality advice."""
 
-    def __init__(
-        self,
-        parent,
-        text,
-        show_image_quality=False,
-        use_perspective=False,
-        persp_name=None,
-        style=wx.BORDER_DEFAULT,
-    ):
+    def __init__(self, parent, text, quality_text=None, style=wx.BORDER_DEFAULT):
         wx.PopupTransientWindow.__init__(self, parent, style)
-        self.mainframe = parent.frame
-        self.display_sys = None
-        # self.mainframe = parent.parent # persp dialog
-        if show_image_quality:
-            self.display_sys = self.mainframe.display_sys
-            self.advanced_on = self.mainframe.show_advanced_settings
-            self.show_image_quality = not self.mainframe.use_multi_image
-            self.use_perspective = use_perspective
-            self.persp_name = persp_name
-        else:
-            self.advanced_on = False
-            self.show_image_quality = False
-            self.use_perspective = False
-            self.persp_name = None
         pnl = wx.Panel(self)
         # pnl.SetBackgroundColour("CADET BLUE")
 
@@ -148,8 +126,8 @@ class HelpPopup(wx.PopupTransientWindow):
         sizer = wx.BoxSizer(wx.VERTICAL)
         for st in stlist:
             sizer.Add(st, 0, wx.ALL, 5)
-        if self.show_image_quality:
-            st_qual = wx.StaticText(pnl, -1, self.string_ideal_image_size())
+        if quality_text is not None:
+            st_qual = wx.StaticText(pnl, -1, quality_text)
             sizer.Add(st_qual, 0, wx.ALL, 5)
         pnl.SetSizer(sizer)
         sizer.Fit(pnl)
@@ -162,19 +140,31 @@ class HelpPopup(wx.PopupTransientWindow):
     def OnDismiss(self):
         self.Destroy()
 
+
+class ImageQualityHelpPopup(HelpPopup):
+    """Help popup of the preview, which also names the smallest source image for the
+    editor's current settings (unless each display has its own image)."""
+
+    def __init__(self, parent, text, *, editor, use_perspective, persp_name):
+        self.editor = editor
+        self.display_sys = editor.display_sys
+        self.advanced_on = editor.show_advanced_settings
+        self.use_perspective = use_perspective
+        self.persp_name = persp_name
+        quality_text = None if editor.use_multi_image else self.string_ideal_image_size()
+        super().__init__(parent, text, quality_text)
+
     def string_ideal_image_size(self):
         "Return a sentence what the minimum source image size is for best quality."
         senten = (
             "For the best image quality with current settings your\n"
             r" wallpapers should be {} or larger."
         )
-        display_sys = self.display_sys  # every popup that shows the image quality has one
-        if display_sys is None:
-            return ""
+        display_sys = self.display_sys
         if self.advanced_on:
-            if self.mainframe.cb_offsets.GetValue():
+            if self.editor.cb_offsets.GetValue():
                 offsets = []
-                for tc in self.mainframe.tc_list_offsets:
+                for tc in self.editor.tc_list_offsets:
                     off_str = tc.GetValue().split(",")
                     try:
                         offsets.append((int(off_str[0]), int(off_str[1])))
