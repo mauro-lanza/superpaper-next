@@ -13,7 +13,7 @@ from superpaper.paths import resource
 from superpaper.profile_id import ProfileId, ProfileIdError
 from superpaper.profile_store import validate_managed_profile_id
 from superpaper.profiles import Profile
-from superpaper.selection import Selection, is_supported_image
+from superpaper.selection import Selection, first_image
 from superpaper.ui.browse_dialog import BrowsePaths, source_icon
 from superpaper.ui.display_band import DisplayBand
 from superpaper.ui.help import HelpFrame, HelpPopup
@@ -1003,14 +1003,7 @@ class WallpaperSettingsPanel(wx.Panel):
             return
 
         # Resolve folder to first image inside it
-        preview_file = None
-        if os.path.isdir(path):
-            for f in sorted(os.listdir(path)):
-                if is_supported_image(f):
-                    preview_file = os.path.join(path, f)
-                    break
-        elif os.path.isfile(path):
-            preview_file = path
+        preview_file = first_image(path)
 
         if not preview_file:
             return

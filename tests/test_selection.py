@@ -7,6 +7,30 @@ from superpaper import selection
 from superpaper.selection import Selection
 
 
+def test_first_image_of_a_folder_is_first_by_name_among_supported(tmp_path):
+    touch(tmp_path / "a.txt", tmp_path / "c.PNG", tmp_path / "b.jpg")
+
+    assert selection.first_image(str(tmp_path)) == str(tmp_path / "b.jpg")
+
+
+def test_first_image_of_a_file_is_the_file_and_of_nothing_is_none(tmp_path):
+    (path,) = touch(tmp_path / "x.txt")
+
+    assert selection.first_image(path) == path
+    assert selection.first_image(str(tmp_path)) is None
+    assert selection.first_image(str(tmp_path / "gone")) is None
+
+
+def test_first_image_of_an_unreadable_folder_is_none_and_logged(tmp_path, monkeypatch, caplog):
+    def refuse(path):
+        raise PermissionError(13, "denied")
+
+    monkeypatch.setattr(selection.os, "listdir", refuse)
+
+    assert selection.first_image(str(tmp_path)) is None
+    assert "could not be listed" in caplog.text
+
+
 def touch(*paths):
     for path in paths:
         path.touch()
