@@ -1,7 +1,6 @@
 # Superpaper AppImage build
 
-Reproducible, host-isolated AppImage build for Linux. Fixes the launch failures
-reported on modern distributions (issues #170, #164, #169).
+Reproducible, host-isolated AppImage build for Linux.
 
 ## TL;DR
 
@@ -30,11 +29,11 @@ build reproduces the real shipping conditions.
 
 ## Why the AppRun isolates the host
 
-The shipped v2.3.0 AppImage bundled old GTK libs but still let GLib/GTK/
-fontconfig reach out to the **host** at runtime. On newer hosts that version
-skew broke each layer:
+GLib, GTK and fontconfig bundled in the AppImage are older than those of recent
+hosts. Left to reach the **host** at runtime, each layer breaks on the version
+skew, so `AppRun` isolates all of them:
 
-| Issue | Symptom | Cause | Fix in [`AppRun`](AppRun) |
+| Issue | Symptom without isolation | Cause | [`AppRun`](AppRun) |
 |-------|---------|-------|---------------------------|
 | #170 | GUI never appears | host gio module loaded into older bundled glib → `undefined symbol` | `GIO_MODULE_DIR` → empty bundled dir; no host modules loaded |
 | #164 | core dump on launch | host gsettings schema missing the `antialiasing` key | `XDG_DATA_DIRS` → bundled tree only + `GSETTINGS_BACKEND=memory` + bundled compiled schemas |

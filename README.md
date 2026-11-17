@@ -2,58 +2,10 @@
 
 A community-maintained fork of [Superpaper](https://github.com/hhannine/superpaper), an advanced multi monitor wallpaper manager for **Linux** and **Windows** operating systems, with partial support (no hotkeys) for **MacOS**.
 
-This fork focuses on KDE Plasma 6 support and improving the wallpaper selection experience. Development and testing is primarily done on Plasma 6; other desktop environments may work but are not actively tested.
+This fork focuses on KDE Plasma 6 support and the wallpaper selection experience. Development and testing is primarily done on Plasma 6; other desktop environments may work but are not actively tested.
 
 ![](https://raw.githubusercontent.com/hhannine/Superpaper/branch-resources/readme-banner.jpg)
 ![](https://raw.githubusercontent.com/hhannine/Superpaper/branch-resources/gui-screenshot.png)
-
-
-## What's new in this fork
-
-### KDE Plasma 6 & Activity Support
-*Contributed by [FredworkLemmas](https://github.com/FredworkLemmas)*
-
-- Per-activity wallpaper support: name your profiles to match your KDE Activities (case-sensitive) and the wallpaper will follow the active activity.
-- Updated installation and dependency handling for Plasma 6 environments.
-
-### Wallpaper Selection Improvements
-- **Select to use**: the wallpaper you choose is remembered as the profile's current wallpaper. Opening the app or switching to a profile shows that wallpaper and no longer cycles to a random image on launch.
-- **Click-to-preview**: clicking a wallpaper in the source list updates the preview panel immediately
-- **Apply selected image**: when slideshow is off, "Apply" sets the specific image you selected instead of a random one from the rotation
-- **Cycling on demand only**: the wallpaper changes when the slideshow timer fires or when you pick "Next Wallpaper" from the tray, never just because a profile was re-rendered
-- **Consistent preview after save**: the preview shows your selected wallpaper instead of a random pick from a freshly shuffled list
-
-### Image Scaling & Position
-- **Always fills the screen**: images are cover-fitted so there is never any letterboxing
-- **Zoom**: zoom further into the image while it keeps filling the display
-- **Horizontal / vertical positioning**: move the visible area within the image to place the content where you want it, with a live preview
-- Saved per profile. These controls apply to a single fixed image, so they are reset and disabled while a profile's slideshow is enabled.
-
-### Native Wayland System Tray
-- **Interactive tray on Wayland**: a native `StatusNotifierItem` tray icon replaces the legacy X11 tray, which appeared but was completely unclickable on modern Wayland desktops (notably KDE Plasma 6).
-- **Full tray controls**: left-click opens the wallpaper settings, middle-click advances the wallpaper, and right-click shows the full menu with your profiles grouped under a **Profiles** submenu.
-- Automatically used on Linux when a `StatusNotifierWatcher` is present, falling back to the classic tray otherwise.
-
-### Display System Settings
-- **Dedicated Save / Revert**: display sizes, bezels and physical positions are system-wide settings (shared by all profiles) and now have their own explicit Save and Revert instead of being written to disk silently.
-- **Test before you commit**: "Apply" renders with your staged, unsaved system settings, so you can check bezels and sizes before saving them permanently.
-- **Collapsible band**: the system settings live in a collapsible "Display system settings" band above the profile selector; its Save/Revert buttons gray out when nothing has changed.
-- **Manual display sizes**: input display sizes manually with always-visible inch fields (the old "Override detected sizes" toggle is gone).
-
-### Stability & Bug Fixes
-- **Responsive while applying**: the GUI no longer freezes while a profile is being applied.
-- **Outer bezels on apply**: outer bezels are now respected when the wallpaper is applied, matching the preview.
-- **CLI `--profile`**: launching with `--profile <name>` now resolves the profile and applies the wallpaper on startup.
-- **Robust file handling**: a missing wallpaper file can no longer cause an infinite loop, and an empty image list no longer crashes.
-- Plus NumPy 1.24+ compatibility, Zorin OS detection, Python 3.13 install fixes, and various correctness/type-safety improvements.
-
-
-## Planned Improvements
-
-- **Visual wallpaper selector**: replace the file path list with an image grid/icon view, showing the path on hover
-- **Interactive positioning**: drag-to-pan and scroll-to-zoom directly on the preview, in addition to the current sliders
-
-Python 3.14 is the compatibility floor for development after v2.3.2. The v2.3.2 release is the stable cutoff for older Python environments.
 
 
 ## Features
@@ -75,16 +27,18 @@ Python 3.14 is the compatibility floor for development after v2.3.2. The v2.3.2 
 - Set different image on every display
 - Span images on groups of displays: one image on laptop screen and another spanned on two external monitors, for example.
 - **Pixel density correction**: span an image flawlessly across displays of different shapes and sizes!
-- **Bezel correction**: let the image continuously span behind your bezels.
+- **Bezel correction**: let the image continuously span behind your bezels, outer bezels included.
 - **Perspective correction**: span the image even more flawlessly!
 - Manual pixel offsets for fine-tuning
-- **System display settings**: display sizes, bezels and positions are shared by all profiles, with a dedicated Save/Revert and a "test before save" Apply.
-- **Image zoom & positioning**: zoom into an image and move the visible area while it keeps filling the screen (single-image profiles)
-- Slideshow with configurable file order from local sources
+- **Image zoom & positioning**: images are cover-fitted, so they always fill the screen without letterboxing. Zoom further in and move the visible area, with a live preview. Saved per profile and available for single fixed images only: the controls are reset and disabled while a profile's slideshow is enabled.
+- **System display settings**: display sizes, bezels and physical positions are shared by all profiles. They live in a collapsible "Display system settings" band above the profile selector, with their own Save and Revert. "Apply" renders with the staged, unsaved values, so you can check them before saving.
+- **Wallpaper selection**: clicking a wallpaper in the source list updates the preview. The wallpaper you choose is the profile's current wallpaper and is shown when the app opens or the profile is switched to. With the slideshow off, "Apply" sets the selected image.
+- Slideshow with configurable file order from local sources. The wallpaper changes when the slideshow timer fires or on "Next Wallpaper" from the tray.
 - Add wallpapers one by one or a folder at a time (no subfolders)
+- **KDE Activities**: name a profile after a KDE Activity (case-sensitive) and its wallpaper follows the active activity. KDE Plasma 6 and Activity support: *Contributed by [FredworkLemmas](https://github.com/FredworkLemmas)*
 - Command-line interface
 - Run a script after wallpaper change: [example script](./example-script/run-after-wp-change.py)
-- Tray applet for slideshow control (native StatusNotifierItem tray on Wayland)
+- Tray applet for slideshow control. On Linux a native StatusNotifierItem tray is used when a `StatusNotifierWatcher` is on the session bus (left-click opens the settings, middle-click advances the wallpaper, right-click shows the menu with the profiles under **Profiles**); otherwise the classic wx tray is used.
 - Hotkey support for easy slideshow control (Only Linux and Windows)
 - Align test tool to help fine tune your settings (Accessible only from GUI)
 
@@ -97,7 +51,7 @@ Supported Linux desktop environments / window managers are:
 - Gnome
 - i3 (needs feh)
 - KDE
-- LXDE & LXQt
+- LXQt (including Lubuntu)
 - Mate
 - Pantheon
 - XFCE
@@ -116,6 +70,8 @@ If you find Superpaper useful please consider supporting the original developer:
 
 
 ## Installation
+
+Superpaper Next requires Python 3.14+.
 
 ### Linux
 
@@ -148,7 +104,7 @@ You can either:
   - First run opens help and wallpaper settings. Disable 'show help at start' to run Superpaper silently in the background.
   - Control Superpaper in the background from the tray menu or with hotkeys.
 - Call it from the [command-line](./docs/cli-usage.md)
-  - Perspectives cannot be configured or used through the CLI currently.
+  - Perspective profiles are created in the GUI and selected with `--perspective`.
 
 ### Where Superpaper keeps its files
 
@@ -174,7 +130,7 @@ If you run into issues and Superpaper closes unexpectedly, you can either:
 ```sh
 superpaper --debug
 #or
-./Superpaper-2.0.2-x86_64.AppImage --debug
+./Superpaper-<version>-x86_64.AppImage --debug
 ```
 Check the logs and come create an issue!
 
