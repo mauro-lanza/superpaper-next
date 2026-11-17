@@ -1,7 +1,7 @@
 # Releasing
 
 How to build and publish Superpaper Next artifacts. Metadata and dependencies
-come from `pyproject.toml` (see the comments there); there is no `setup.py`.
+come from `pyproject.toml` (see the comments there).
 
 ## PyPI (wheel + sdist)
 
@@ -35,7 +35,7 @@ reproducible, host-isolating build under
 ## Windows (exe + installer)
 
 > Not currently published by this fork; see the upstream releases page. The
-> tooling is kept for reference and has not yet been re-tested on Windows.
+> build script has not been run on Windows.
 
 Run from the repository root on Windows:
 

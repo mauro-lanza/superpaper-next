@@ -16,16 +16,16 @@ cd superpaper-next
 uv sync --group dev --extra gui
 ```
 
-Runtime dependencies (Pillow, screeninfo, numpy, wxPython) come from
+Runtime dependencies (Pillow, screeninfo, numpy, system_hotkey310) come from
 `pyproject.toml`; there is no separate requirements file. The `gui` extra pulls
 in wxPython, which installs from PyPI on macOS.
 
 ## Known gaps
 
-- **PyObjC is not declared as a dependency.** `wallpaper_processing.py` imports
+- **PyObjC is not declared as a dependency.** `superpaper/desktop/macos.py` imports
   `AppKit` and `Foundation` unconditionally on darwin, so a plain
   `pip install superpaper` produces a package that fails at import. Install it
-  manually for now:
+  manually:
 
   ```sh
   uv pip install pyobjc

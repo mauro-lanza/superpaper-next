@@ -1,30 +1,28 @@
 # Open Issues Tracker
 
-Cross-reference of open issues from [hhannine/superpaper](https://github.com/hhannine/superpaper/issues) against this fork, reviewed 2026-07-15.
+Cross-reference of open issues from [hhannine/superpaper](https://github.com/hhannine/superpaper/issues) against this fork, reviewed 2026-07-15. The rows for #25, #31, #63, #92, #96, #105, #113, #115, #143 and #156, and the Python floor named in the #162 entry, were re-checked against the code on 2026-11-18.
 
 ## Resolved In This Fork
 
-The reported failures in #140, #154, #158, #163, and #168 are directly addressed in the current source. The AppImage fixes for #164, #169, and #170 shipped in v2.3.2; the builder now compiles the project's Python 3.14 floor on Ubuntu 22.04 so later artifacts retain the same glibc compatibility.
+- #140, #154, #158, #163, #168: addressed in the current source.
+- #164, #169, #170: AppImage launch failures, fixed in v2.3.2 by the host-isolated build in `release-tooling/appimage/`. The builder compiles the Python 3.14 floor on Ubuntu 22.04 to keep its glibc compatibility.
+- #162: the missing `setuptools` failure no longer applies to the packaging; Python 3.13 is outside the support policy below.
+- #135: a missing wallpaper file does not retry forever. Persisted selections are validated as a whole: deleted files fall back to the configured sources, and incomplete per-monitor or per-group selections do not shift images onto the wrong display.
+- #138: slideshow selection is coordinated. Each batch maximizes distinct canonical files across monitors or span groups; duplicates occur only when the configured pools hold too few unique images.
 
-Issue #162's original missing-`setuptools` failure was fixed before the packaging modernization. Python 3.13 itself is now intentionally outside the post-v2.3.2 support policy described below.
-
-Issue #135's infinite retry is fixed. Persisted selections are also validated atomically now: deleted files fall back to configured sources, and incomplete per-monitor/group selections no longer shift images onto the wrong display.
-
-Issue #138 is resolved by coordinated slideshow selection. Each batch maximizes distinct canonical files across monitors or span groups, while allowing duplicates only when the configured pools do not contain enough unique images.
-
-Display detection is now bounded and transactional: transient enumeration failures are retried without corrupting active display state, and slow renders no longer overlap or accumulate slideshow ticks. Explicit Linux custom commands also run once as authoritative overrides.
+Display detection is bounded and transactional: transient enumeration failures are retried without changing the active display state, and a slow render neither overlaps another nor accumulates slideshow ticks. An explicit Linux custom command runs once and overrides desktop detection.
 
 ## Partial
 
 | Issue | Remaining work |
 |-------|----------------|
 | [#58](https://github.com/hhannine/superpaper/issues/58) | Manual pan controls exist, but there is no automatic centering on a selected monitor. |
-| [#63](https://github.com/hhannine/superpaper/issues/63) | Zoom-in and pan exist; zoom-out below cover-fit is intentionally not supported yet. |
-| [#92](https://github.com/hhannine/superpaper/issues/92), [#115](https://github.com/hhannine/superpaper/issues/115) | Rendering remains cover-and-crop. Fit/contain, letterbox, no-upscale, stretch, and tile modes remain. |
-| [#126](https://github.com/hhannine/superpaper/issues/126) | Native SNI is verified on KDE Wayland, not yet on the GNOME setup from the original report. |
+| [#63](https://github.com/hhannine/superpaper/issues/63) | Zoom-in and pan exist; zoom-out below cover-fit is not supported (`render.py` clamps zoom to 1.0). |
+| [#92](https://github.com/hhannine/superpaper/issues/92), [#115](https://github.com/hhannine/superpaper/issues/115) | Rendering is cover-and-crop. Fit/contain, letterbox, no-upscale, stretch, and tile modes are missing. |
+| [#126](https://github.com/hhannine/superpaper/issues/126) | Native SNI is verified on KDE Wayland, not on the GNOME setup from the original report. |
 | [#141](https://github.com/hhannine/superpaper/issues/141) | KDE application and known UI failures were addressed, but the broad report has no automated cross-version Plasma coverage. |
-| [#156](https://github.com/hhannine/superpaper/issues/156) | Outer bezels work in non-perspective rendering; perspective geometry still ignores them. |
-| [#165](https://github.com/hhannine/superpaper/issues/165) | Apply no longer blocks the wx event loop, but the original Windows Save failure was not reproduced. |
+| [#156](https://github.com/hhannine/superpaper/issues/156) | Outer bezels work in non-perspective rendering; perspective geometry ignores them. |
+| [#165](https://github.com/hhannine/superpaper/issues/165) | Apply does not block the wx event loop, but the original Windows Save failure was not reproduced. |
 
 ## Open Bugs And Platform Work
 
@@ -32,7 +30,7 @@ Display detection is now bounded and transactional: transient enumeration failur
 |-------|----------------|
 | [#25](https://github.com/hhannine/superpaper/issues/25) | Detect display hotplug, adapt/reload the profile, and re-render without advancing the slideshow. |
 | [#105](https://github.com/hhannine/superpaper/issues/105) | Identify and implement a current, tested Deepin/DDE wallpaper API. |
-| [#113](https://github.com/hhannine/superpaper/issues/113) | Add macOS dependencies, user-writable paths, packaging, and current multi-display validation. Specifically: PyObjC is imported unconditionally on darwin but is not declared in `pyproject.toml`, and `paths.py` writes config into the installed package directory instead of `~/Library/Application Support` (`SUPERPAPER_CONFIG_HOME`/`SUPERPAPER_CACHE_HOME` override it). |
+| [#113](https://github.com/hhannine/superpaper/issues/113) | Add macOS dependencies, user-writable paths, packaging, and current multi-display validation. PyObjC is imported unconditionally on darwin (`superpaper/desktop/macos.py`) but is not declared in `pyproject.toml`, and `paths.py` keeps config beside the installation instead of in `~/Library/Application Support` (`SUPERPAPER_CONFIG_HOME`/`SUPERPAPER_CACHE_HOME` override it). |
 | [#153](https://github.com/hhannine/superpaper/issues/153) | Use unique macOS crop generations and delayed cleanup to avoid cached/deleted `-b` image URLs. |
 
 ## Open Features And Documentation
@@ -48,4 +46,4 @@ Display detection is now bounded and transactional: transient enumeration failur
 
 ## Compatibility Policy
 
-Python 3.14 is the floor for development after v2.3.2. The v2.3.2 release remains the stable cutoff for older Python environments; the fork does not intend to preserve source compatibility with earlier Python versions.
+Python 3.14 is the floor for development after v2.3.2 (`requires-python` in `pyproject.toml`). The v2.3.2 release is the stable cutoff for older Python environments; source compatibility with earlier Python versions is not preserved.
