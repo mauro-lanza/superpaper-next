@@ -27,6 +27,20 @@ def is_supported_image(filename: str) -> bool:
     return filename.lower().endswith(SUPPORTED_IMAGE_EXTENSIONS)
 
 
+def is_folder(path: str) -> bool:
+    return os.path.isdir(path)
+
+
+def is_file(path: str) -> bool:
+    return os.path.isfile(path)
+
+
+def real_file(path: str) -> str | None:
+    """The path with symlinks resolved, or None if it isn't a file."""
+    resolved = os.path.realpath(path)
+    return resolved if os.path.isfile(resolved) else None
+
+
 def first_image(path: str) -> str | None:
     """The image file itself, or the first supported image of a folder in name order; None if neither."""
     if os.path.isdir(path):

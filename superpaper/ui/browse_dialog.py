@@ -1,8 +1,9 @@
 """Choosing the image files and folders a profile shows, and their icons in source lists."""
 
-import os
-
 import wx  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-import]
+
+from superpaper.render import source_icon_image
+from superpaper.selection import is_folder
 
 
 def source_icon(path, size):
@@ -11,26 +12,16 @@ def source_icon(path, size):
     A source can be unavailable (an unmounted drive) or unreadable; that must not stop
     the editor from listing it.
     """
-    if os.path.isdir(path):
+    if is_folder(path):
         return wx.ArtProvider.GetBitmap(wx.ART_FOLDER, wx.ART_TOOLBAR, wx.Size(*size))
-    image = wx.Image()
-    if os.path.isfile(path):
-        with wx.LogNull():  # an unreadable file gets the icon below, not an error popup
-            image.LoadFile(path, wx.BITMAP_TYPE_ANY)
-    if not image.IsOk():
+    thumbnail = source_icon_image(path, size)
+    if thumbnail is None:
         return wx.ArtProvider.GetBitmap(wx.ART_MISSING_IMAGE, wx.ART_TOOLBAR, wx.Size(*size))
-    width, height = image.GetSize()
-    if width > height:
-        target_w, target_h = size[0], max(1, round(size[0] * height / width))
-        pos = (0, round((size[0] - target_h) / 2))
-    else:
-        target_w, target_h = max(1, round(size[1] * width / height)), size[1]
-        pos = (round((size[1] - target_w) / 2), 0)
-    return (
-        image.Scale(target_w, target_h, quality=wx.IMAGE_QUALITY_BOX_AVERAGE)
-        .Resize(wx.Size(*size), wx.Point(pos))
-        .ConvertToBitmap()
-    )
+    width, height = thumbnail.size
+    image = wx.Image(width, height)
+    image.SetData(thumbnail.tobytes())
+    pos = (round((size[0] - width) / 2), round((size[1] - height) / 2))
+    return image.Resize(wx.Size(*size), wx.Point(pos)).ConvertToBitmap()
 
 
 class BrowsePaths(wx.Dialog):
@@ -213,7 +204,7 @@ class BrowsePaths(wx.Dialog):
 
     def onDefDir(self, event):
         sel_path = self.dir3.GetPath()
-        if os.path.isdir(sel_path):
+        if is_folder(sel_path):
             self.defdir = sel_path
             self._update_settings(browse_default_dir=self.defdir.strip())
         else:
