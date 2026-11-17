@@ -17,7 +17,7 @@ from superpaper.paths import AppPaths
 from superpaper.profile_id import ProfileId
 from superpaper.profile_store import ProfileStore
 from superpaper.profiles import Profile
-from superpaper.settings import Settings
+from superpaper.settings import Settings, read_settings
 
 PATHS = AppPaths(config=Path("/config"), profiles=Path("/config/profiles"), cache=Path("/cache"))
 LAYOUT = SimpleNamespace(name="the detected display layout")
@@ -143,24 +143,30 @@ def test_a_hotkey_for_a_deleted_profile_does_nothing(headless_app_module):
     assert superpaper.session.requests == []
 
 
-def test_the_windows_get_what_they_work_with(headless_app_module, monkeypatch):
+def test_the_windows_get_what_they_work_with(headless_app_module, monkeypatch, tmp_path):
     app = headless_app_module
     opened = []
     monkeypatch.setattr(app, "ConfigFrame", lambda *args, **kwargs: opened.append(("editor", args, kwargs)))
     monkeypatch.setattr(app, "SettingsFrame", lambda *args, **kwargs: opened.append(("settings", args, kwargs)))
     superpaper = application(app)
+    superpaper.settings_path = tmp_path / "general_settings"
 
     superpaper.open_editor()
     superpaper.open_settings()
 
-    assert opened == [
-        (
-            "editor",
-            (PATHS, superpaper.store, superpaper.session),
-            {"refresh_displays": superpaper.refresh_displays, "rebind_hotkey": superpaper.rebind_hotkey},
-        ),
-        ("settings", (PATHS.config / "general_settings",), {"on_saved": superpaper.apply_settings}),
-    ]
+    (_, editor_args, editor_kwargs), settings_window = opened
+    get_settings = editor_args[1]
+    assert editor_args == (PATHS, get_settings, superpaper.store, superpaper.session)
+    assert editor_kwargs == {
+        "update_settings": superpaper.update_settings,
+        "refresh_displays": superpaper.refresh_displays,
+        "rebind_hotkey": superpaper.rebind_hotkey,
+    }
+    assert settings_window == ("settings", (superpaper.settings,), {"save_settings": superpaper.apply_settings})
+    # A setting saved from the settings window after the editor opened is what the editor sees.
+    superpaper.apply_settings(warn_large_img=False)
+    assert get_settings() is superpaper.settings
+    assert get_settings().warn_large_img is False
 
 
 def test_quitting_stops_the_session_before_the_icon_goes(headless_app_module):
@@ -187,7 +193,7 @@ def test_the_help_and_the_configuration_open_at_start_when_they_should(
     app = headless_app_module
     opened = []
     monkeypatch.setattr(app, "ConfigFrame", lambda *args, **kwargs: opened.append("editor"))
-    monkeypatch.setattr(app, "HelpFrame", lambda settings_path: opened.append("help"))
+    monkeypatch.setattr(app, "HelpFrame", lambda get_settings, update_settings: opened.append("help"))
     monkeypatch.setattr(app.wx, "CallAfter", lambda function, *args: opened.append("editor later"))
     monkeypatch.setattr(app.desktop, "setter_problem", lambda set_command: None)
     superpaper = application(app, settings=Settings(show_help=show_help))
@@ -359,20 +365,34 @@ def test_saved_profiles_take_their_hotkeys_along_while_hotkeys_are_on(headless_a
 
 
 @pytest.mark.parametrize(("use_hotkeys", "registered"), [(True, True), (False, False)])
-def test_saved_general_settings_apply_from_now_on(headless_app_module, monkeypatch, use_hotkeys, registered):
+def test_saved_general_settings_apply_from_now_on(headless_app_module, monkeypatch, tmp_path, use_hotkeys, registered):
     app = headless_app_module
     shown = []
     monkeypatch.setattr(app, "show_message_dialog", lambda message, kind: shown.append(message))
     superpaper = application(app)
+    superpaper.settings_path = tmp_path / "general_settings"
     superpaper.hotkeys = Mock()
     saved = Settings(use_hotkeys=use_hotkeys, logging=True, set_command="setter {image}")
 
-    superpaper.apply_settings(saved)
+    superpaper.apply_settings(use_hotkeys=use_hotkeys, logging=True, set_command="setter {image}")
 
     # Hotkeys turned off apply after a restart; nothing new is bound meanwhile.
     assert superpaper.hotkeys.register_general.called is registered
-    assert superpaper.settings is saved
+    assert superpaper.settings == saved
+    assert read_settings(superpaper.settings_path, "linux") == saved
     assert shown == ["Logging is enabled after an application restart."]
+
+
+def test_a_dialog_setting_is_written_and_kept_for_the_next_window(headless_app_module, tmp_path):
+    superpaper = application(headless_app_module, settings=Settings(show_help=True))
+    superpaper.settings_path = tmp_path / "general_settings"
+
+    superpaper.update_settings(browse_default_dir="/pictures")
+    superpaper.update_settings(show_help=False)
+
+    expected = Settings(browse_default_dir="/pictures", show_help=False)
+    assert superpaper.settings == expected
+    assert read_settings(superpaper.settings_path, "linux") == expected
 
 
 def test_hotkeys_are_bound_at_start_when_they_are_on(headless_app_module, monkeypatch):

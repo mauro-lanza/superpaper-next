@@ -1,7 +1,8 @@
 """Creating, editing, deleting and testing perspectives."""
 
+import configparser
+import copy
 import os
-import sys
 
 import wx  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-import]
 
@@ -9,7 +10,6 @@ import superpaper.perspective as persp
 import superpaper.render as render
 from superpaper import profiles
 from superpaper.paths import resource
-from superpaper.settings import read_settings
 from superpaper.ui.help import HelpPopup
 from superpaper.ui.message import draft_shown, show_message_dialog
 
@@ -27,11 +27,11 @@ class PerspectiveConfig(wx.Dialog):
         )
         self.tc_width = 150
         self.frame = parent
-        self.display_sys = parent.display_sys
-        self.persp_dict = self.display_sys.perspective_dict
+        self.display_sys = copy.deepcopy(parent.session.display_system)
+        self._load_choice()
         self.test_image = None
         self.help_bmp = wx.ArtProvider.GetBitmap(wx.ART_QUESTION, wx.ART_BUTTON, wx.Size(20, 20))
-        self.warn_large_img = read_settings(parent.settings_path, sys.platform).warn_large_img
+        self.warn_large_img = parent.settings.warn_large_img
 
         sizer_main = wx.BoxSizer(wx.VERTICAL)
 
@@ -351,8 +351,33 @@ class PerspectiveConfig(wx.Dialog):
         master = self.cb_master.GetValue()
         if master != self.display_sys.use_perspective:
             self.display_sys.use_perspective = master
-            self.display_sys.save_system()
-            self.frame.refresh_displays()
+            self._save_choice()
+
+    def _load_choice(self):
+        """Start from the editor's perspective choice. The geometry the perspectives are
+        converted with is the saved layout's, as the session holds it, never the editor's
+        unsaved band edits."""
+        editor_layout = self.frame.display_sys
+        self.display_sys.use_perspective = editor_layout.use_perspective
+        self.display_sys.default_perspective = editor_layout.default_perspective
+        self.display_sys.perspective_dict = copy.deepcopy(editor_layout.perspective_dict)
+        self.persp_dict = self.display_sys.perspective_dict
+
+    def _save_choice(self):
+        """Save the perspective choice alone, without the editor's unsaved layout; the
+        editor and the session then use it. Returns False, with the dialog back at the
+        editor's choice, if it could not be saved."""
+        try:
+            self.display_sys.save_perspective_choice()
+        except (OSError, configparser.Error, ValueError, KeyError) as error:
+            show_message_dialog(f"The perspective settings could not be saved: {error}", "Error")
+            self._load_choice()
+            self.cb_master.SetValue(self.display_sys.use_perspective)
+            self.update_choiceprofile()
+            return False
+        self.frame.adopt_perspectives(self.display_sys)
+        self.frame.refresh_displays()
+        return True
 
     def onSelect(self, event):
         """Acts once a profile is picked in the dropdown menu."""
@@ -425,11 +450,10 @@ class PerspectiveConfig(wx.Dialog):
                 if not show_message_dialog(msg, "Info", style="YES_NO"):
                     return 0
         self.display_sys.update_perspectives(persp_name, toggle, is_ds_def, viewer_data, swivels, tilts)
-        # Persist the perspective file first, then the display system that names the
-        # default; refresh_displays then loads both as one layout, for the session.
-        self.display_sys.save_perspectives()
-        self.display_sys.save_system()
-        self.frame.refresh_displays()
+        # The .persp file is written first, then the default it is named in; refresh_displays
+        # then loads both as one layout, for the session.
+        if not self._save_choice():
+            return 0
 
         # update dialog profile list
         self.update_choiceprofile()
@@ -445,9 +469,8 @@ class PerspectiveConfig(wx.Dialog):
         if self.display_sys.default_perspective == persp_name:
             self.display_sys.default_perspective = None
         self.persp_dict.pop(persp_name, None)
-        self.display_sys.save_perspectives()
-        self.display_sys.save_system()
-        self.frame.refresh_displays()
+        if not self._save_choice():
+            return
         # update dialog profile list
         self.update_choiceprofile()
         self.onCreateNewProfile(None)

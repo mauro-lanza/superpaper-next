@@ -1,12 +1,8 @@
 """Choosing the image files and folders a profile shows, and their icons in source lists."""
 
 import os
-import sys
-from dataclasses import replace
 
 import wx  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-import]
-
-from superpaper.settings import read_settings, write_settings
 
 
 def source_icon(path, size):
@@ -40,7 +36,7 @@ def source_icon(path, size):
 class BrowsePaths(wx.Dialog):
     """Path picker dialog class."""
 
-    def __init__(self, parent, use_multi_image, defdir, settings_path, num_span_groups=None):
+    def __init__(self, parent, use_multi_image, defdir, update_settings, num_span_groups=None):
         wx.Dialog.__init__(
             self,
             parent,
@@ -69,7 +65,7 @@ class BrowsePaths(wx.Dialog):
         sizer_buttons = wx.BoxSizer(wx.HORIZONTAL)
 
         self.defdir = defdir
-        self.settings_path = settings_path  # where the default directory is remembered
+        self._update_settings = update_settings  # remembers the default directory
         self.dir3 = wx.GenericDirCtrl(
             self,
             -1,
@@ -219,17 +215,13 @@ class BrowsePaths(wx.Dialog):
         sel_path = self.dir3.GetPath()
         if os.path.isdir(sel_path):
             self.defdir = sel_path
-            self._remember_default_dir(self.defdir.strip())
+            self._update_settings(browse_default_dir=self.defdir.strip())
         else:
             pass
 
     def onClrDefDir(self, event):
         self.defdir = ""
-        self._remember_default_dir("")
-
-    def _remember_default_dir(self, directory):
-        settings = read_settings(self.settings_path, sys.platform)
-        write_settings(self.settings_path, replace(settings, browse_default_dir=directory))
+        self._update_settings(browse_default_dir="")
 
     def onCheckboxShowHidden(self, event):
         self.dir3.ShowHidden(self.cb_showhidden.GetValue())

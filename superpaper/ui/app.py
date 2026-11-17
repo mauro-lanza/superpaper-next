@@ -5,6 +5,7 @@ import configparser
 import logging
 import os
 import sys
+from dataclasses import replace
 
 import wx  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-import]
 
@@ -15,7 +16,7 @@ from superpaper.paths import AppPaths
 from superpaper.profile_id import ProfileId, ProfileIdError
 from superpaper.profile_store import ProfileDiagnosticKind, ProfileStore
 from superpaper.session import Session
-from superpaper.settings import SETTINGS_FILE, Settings
+from superpaper.settings import SETTINGS_FILE, Settings, write_settings
 from superpaper.ui.editor import ConfigFrame
 from superpaper.ui.help import HelpFrame
 from superpaper.ui.hotkeys import Hotkeys
@@ -167,7 +168,7 @@ class Superpaper:
         once if wallpapers can't be set here or the displays' sizes aren't known."""
         if self.settings.show_help:
             self.open_editor()
-            HelpFrame(self.settings_path)
+            HelpFrame(lambda: self.settings, self.update_settings)
         elif not self.tray.clickable:
             # KDE Plasma 6 workaround: clicks on the wx tray icon don't work there, so the
             # configuration opens at startup.
@@ -188,8 +189,10 @@ class Superpaper:
         try:
             ConfigFrame(
                 self.paths,
+                lambda: self.settings,
                 self.store,
                 self.session,
+                update_settings=self.update_settings,
                 refresh_displays=self.refresh_displays,
                 rebind_hotkey=self.rebind_hotkey,
             )
@@ -198,7 +201,7 @@ class Superpaper:
 
     def open_settings(self):
         """Open the general settings."""
-        SettingsFrame(self.settings_path, on_saved=self.apply_settings)
+        SettingsFrame(self.settings, save_settings=self.apply_settings)
 
     def start_profile(self, stored):
         """Run the saved profile ``stored`` on the displays as they are now, or show its
@@ -257,10 +260,17 @@ class Superpaper:
         if self.hotkeys is not None:
             self.hotkeys.profile_changed(before, after)
 
-    def apply_settings(self, settings):
-        """The general settings were saved as ``settings``: wallpaper changes and hotkeys
-        use them from now on."""
+    def update_settings(self, **changes):
+        """Save the general settings with ``changes`` made; windows and wallpaper changes
+        use them from now on. The one writer of the settings file while running."""
+        settings = replace(self.settings, **changes)
+        write_settings(self.settings_path, settings)
         self.settings = settings
+        return settings
+
+    def apply_settings(self, **changes):
+        """Save the general settings from the settings window and apply them to the hotkeys."""
+        settings = self.update_settings(**changes)
         # Hotkeys turned on or off apply after a restart.
         if self.hotkeys is not None and settings.use_hotkeys:
             self.hotkeys.register_general(settings)

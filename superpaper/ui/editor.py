@@ -3,12 +3,10 @@ displays and the display settings band."""
 
 import copy
 import os
-import sys
 from operator import itemgetter
 
 import wx  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-import]
 
-import superpaper.displays as displays
 import superpaper.sp_logging as sp_logging
 from superpaper import profiles
 from superpaper.paths import resource
@@ -16,7 +14,6 @@ from superpaper.profile_id import ProfileId, ProfileIdError
 from superpaper.profile_store import validate_managed_profile_id
 from superpaper.profiles import Profile
 from superpaper.selection import Selection, is_supported_image
-from superpaper.settings import SETTINGS_FILE, read_settings
 from superpaper.ui.browse_dialog import BrowsePaths, source_icon
 from superpaper.ui.display_band import DisplayBand
 from superpaper.ui.help import HelpFrame, HelpPopup
@@ -28,11 +25,18 @@ from superpaper.ui.preview import WallpaperPreviewPanel
 class ConfigFrame(wx.Frame):
     """The wallpaper configuration window: see WallpaperSettingsPanel."""
 
-    def __init__(self, paths, store, session, *, refresh_displays, rebind_hotkey):
+    def __init__(self, paths, get_settings, store, session, *, update_settings, refresh_displays, rebind_hotkey):
         wx.Frame.__init__(self, parent=None, title="Superpaper Wallpaper Configuration")
         self.frame_sizer = wx.BoxSizer(wx.VERTICAL)
         config_panel = WallpaperSettingsPanel(
-            self, paths, store, session, refresh_displays=refresh_displays, rebind_hotkey=rebind_hotkey
+            self,
+            paths,
+            get_settings,
+            store,
+            session,
+            update_settings=update_settings,
+            refresh_displays=refresh_displays,
+            rebind_hotkey=rebind_hotkey,
         )
         self.frame_sizer.Add(config_panel, 1, wx.EXPAND)
         self.SetAutoLayout(True)
@@ -49,16 +53,22 @@ class WallpaperSettingsPanel(wx.Panel):
     """The profile editor, with the preview of the displays and the display band.
 
     It edits the saved profiles in ``store`` and tells ``session`` what became of the
-    running one; drafts (Apply, the align tests) are shown by ``session`` too.
-    ``refresh_displays()`` detects the displays again, for the session, and
-    ``rebind_hotkey(before, after)`` moves a saved profile's hotkey along with it.
+    running one; drafts (Apply, the align tests) are shown by ``session`` too. The
+    display settings band and the perspective dialog work on a copy of the session's
+    display layout. ``get_settings()`` returns the general settings as they are now,
+    ``update_settings(**changes)`` saves them, ``refresh_displays()`` detects the
+    displays again, for the session, and ``rebind_hotkey(before, after)`` moves a saved
+    profile's hotkey along with it.
     """
 
-    def __init__(self, parent, paths, store, session, *, refresh_displays, rebind_hotkey):
+    def __init__(
+        self, parent, paths, get_settings, store, session, *, update_settings, refresh_displays, rebind_hotkey
+    ):
         wx.Panel.__init__(self, parent)
         self.frame = parent
         self.paths = paths
-        self.settings_path = paths.config / SETTINGS_FILE
+        self._get_settings = get_settings
+        self.update_settings = update_settings
         self.store = store
         self.session = session
         self.refresh_displays = refresh_displays
@@ -77,7 +87,7 @@ class WallpaperSettingsPanel(wx.Panel):
         # bottom_half: bottom button row
         self.sizer_bottom_buttonrow = wx.BoxSizer(wx.HORIZONTAL)
 
-        self.defdir = read_settings(self.settings_path, sys.platform).browse_default_dir
+        self.defdir = get_settings().browse_default_dir
         # settings GUI properties
         self.tc_width = 160  # standard width for wx.TextCtrl etc elements.
         self.show_advanced_settings = False
@@ -99,7 +109,7 @@ class WallpaperSettingsPanel(wx.Panel):
         self._loading = False
         # This is staged dialog state. Do not publish it until Apply/Save; live
         # field edits must not alter the display system used by background jobs.
-        self.display_sys = displays.DisplaySystem(self.paths.config)
+        self.display_sys = copy.deepcopy(session.display_system)
         # self.wpprev_pnl = WallpaperPreviewPanel(self.frame, self.display_sys)
         self.wpprev_pnl = WallpaperPreviewPanel(self, self.display_sys)
         self.sizer_top_half.Add(self.wpprev_pnl, 1, wx.CENTER | wx.EXPAND, 5)
@@ -1019,6 +1029,17 @@ class WallpaperSettingsPanel(wx.Panel):
             self.read_spangroups(True),
         )
 
+    @property
+    def settings(self):
+        """The general settings as they are now, whichever window saved them."""
+        return self._get_settings()
+
+    def adopt_perspectives(self, saved):
+        """Use the perspective choice of ``saved``, in place: the preview holds this layout."""
+        self.display_sys.use_perspective = saved.use_perspective
+        self.display_sys.default_perspective = saved.default_perspective
+        self.display_sys.perspective_dict = copy.deepcopy(saved.perspective_dict)
+
     def onBrowsePaths(self, event):
         """Opens the pick paths dialog."""
         multiple_image_area = self.use_multi_image or self.use_spangroups()
@@ -1027,7 +1048,7 @@ class WallpaperSettingsPanel(wx.Panel):
             groups = self.read_spangroups()
             if groups is not None:
                 num_groups = len(groups.keys())
-        dlg = BrowsePaths(self, multiple_image_area, self.defdir, self.settings_path, num_groups)
+        dlg = BrowsePaths(self, multiple_image_area, self.defdir, self.update_settings, num_groups)
         res = dlg.ShowModal()
         if res == wx.ID_OK:
             path_list_data = dlg.path_list_data
@@ -1446,7 +1467,7 @@ class WallpaperSettingsPanel(wx.Panel):
 
     def onHelp(self, event):
         """Open help dialog."""
-        HelpFrame(self.settings_path, self)
+        HelpFrame(self._get_settings, self.update_settings, self)
 
     def onHelpHotkey(self, evt):
         """Popup hotkey help."""

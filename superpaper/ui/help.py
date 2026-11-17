@@ -1,23 +1,19 @@
 """Help: the help window, and the help popups of the editor and its dialogs."""
 
-import sys
-from dataclasses import replace
-
 import wx  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-import]
 
 import superpaper.perspective as persp
 import superpaper.render as render
 from superpaper.paths import resource
-from superpaper.settings import read_settings, write_settings
 
 
 class HelpFrame(wx.Frame):
     """Help dialog frame."""
 
-    def __init__(self, settings_path, parent=None):
+    def __init__(self, get_settings, update_settings, parent=None):
         wx.Frame.__init__(self, parent=parent, title="Superpaper Help")
         self.frame_sizer = wx.BoxSizer(wx.VERTICAL)
-        help_panel = HelpPanel(self, settings_path)
+        help_panel = HelpPanel(self, get_settings, update_settings)
         self.frame_sizer.Add(help_panel, 1, wx.EXPAND)
         self.SetAutoLayout(True)
         self.SetSizer(self.frame_sizer)
@@ -31,15 +27,16 @@ class HelpFrame(wx.Frame):
 class HelpPanel(wx.Panel):
     """Help dialog contents."""
 
-    def __init__(self, parent, settings_path):
+    def __init__(self, parent, get_settings, update_settings):
         wx.Panel.__init__(self, parent)
         self.frame = parent
-        self.settings_path = settings_path
+        self._get_settings = get_settings
+        self._update_settings = update_settings
         self.sizer_main = wx.BoxSizer(wx.VERTICAL)
         self.sizer_helpcontent = wx.BoxSizer(wx.VERTICAL)
         self.sizer_buttons = wx.BoxSizer(wx.HORIZONTAL)
 
-        show_help = read_settings(settings_path, sys.platform).show_help
+        show_help = get_settings().show_help
 
         # st_show_at_start = wx.StaticText(self, -1, "Show this help at start")
         self.cb_show_at_start = wx.CheckBox(self, -1, "Show this help at start")
@@ -105,9 +102,8 @@ Tips:
     def onClose(self, event):
         """Closes help dialog. Saves checkbox state as needed."""
         show_help = self.cb_show_at_start.GetValue()
-        settings = read_settings(self.settings_path, sys.platform)
-        if settings.show_help != show_help:
-            write_settings(self.settings_path, replace(settings, show_help=show_help))
+        if self._get_settings().show_help != show_help:
+            self._update_settings(show_help=show_help)
         self.frame.Close(True)
 
 

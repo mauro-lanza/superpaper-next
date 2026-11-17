@@ -1,20 +1,15 @@
 """The general settings window."""
 
-import sys
-from dataclasses import replace
-
 import wx  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-import]
-
-from superpaper.settings import read_settings, write_settings
 
 
 class SettingsFrame(wx.Frame):
     """The general settings window: see SettingsPanel."""
 
-    def __init__(self, settings_path, on_saved):
+    def __init__(self, settings, save_settings):
         wx.Frame.__init__(self, parent=None, title="Superpaper General Settings")
         self.frame_sizer = wx.BoxSizer(wx.VERTICAL)
-        settings_panel = SettingsPanel(self, settings_path, on_saved)
+        settings_panel = SettingsPanel(self, settings, save_settings)
         self.frame_sizer.Add(settings_panel, 1, wx.EXPAND)
         self.SetAutoLayout(True)
         self.SetSizer(self.frame_sizer)
@@ -25,14 +20,13 @@ class SettingsFrame(wx.Frame):
 
 
 class SettingsPanel(wx.Panel):
-    """The general settings saved at ``settings_path``; ``on_saved(settings)`` is called
-    with them once they are saved."""
+    """The general settings window's contents, showing ``settings``; ``save_settings(**changes)``
+    saves the fields as the new settings."""
 
-    def __init__(self, parent, settings_path, on_saved):
+    def __init__(self, parent, settings, save_settings):
         wx.Panel.__init__(self, parent)
         self.frame = parent
-        self.settings_path = settings_path
-        self._on_saved = on_saved
+        self._save_settings = save_settings
         self.sizer_main = wx.BoxSizer(wx.VERTICAL)
         self.sizer_grid_settings = wx.GridSizer(6, 2, 5, 5)
         self.sizer_buttons = wx.BoxSizer(wx.HORIZONTAL)
@@ -66,7 +60,7 @@ class SettingsPanel(wx.Panel):
                 (self.tc_setcmd, 0, wx.ALIGN_LEFT),
             ]
         )
-        self.update_fields()
+        self.update_fields(settings)
         self.button_save = wx.Button(self, label="Save")
         self.button_close = wx.Button(self, label="Close")
         self.button_save.Bind(wx.EVT_BUTTON, self.onSave)
@@ -79,9 +73,8 @@ class SettingsPanel(wx.Panel):
         self.SetSizer(self.sizer_main)
         self.sizer_main.Fit(parent)
 
-    def update_fields(self):
+    def update_fields(self, g_settings):
         """Updates dialog field contents."""
-        g_settings = read_settings(self.settings_path, sys.platform)
         self.cb_logging.SetValue(g_settings.logging)
         self.cb_usehotkeys.SetValue(g_settings.use_hotkeys)
         self.cb_warn_large.SetValue(g_settings.warn_large_img)
@@ -95,11 +88,9 @@ class SettingsPanel(wx.Panel):
 
     def onSave(self, event):
         """Saves settings to file."""
-        settings_path = self.settings_path
         hk_next = self.tc_hk_next.GetLineText(0)
         hk_pause = self.tc_hk_pause.GetLineText(0)
-        settings = replace(
-            read_settings(settings_path, sys.platform),
+        self._save_settings(
             logging=self.cb_logging.GetValue(),
             use_hotkeys=self.cb_usehotkeys.GetValue(),
             warn_large_img=self.cb_warn_large.GetValue(),
@@ -107,8 +98,6 @@ class SettingsPanel(wx.Panel):
             hk_binding_pause=tuple(hk_pause.strip().split("+")) if hk_pause else None,
             set_command=self.tc_setcmd.GetLineText(0).strip(),
         )
-        write_settings(settings_path, settings)
-        self._on_saved(settings)
 
     def onClose(self, event):
         """Closes settings panel."""
