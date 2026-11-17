@@ -82,7 +82,6 @@ class PerspectiveConfig(wx.Dialog):
         # name txt ctrl
         st_name = wx.StaticText(statbox_profs, -1, "Profile name:")
         self.tc_name = wx.TextCtrl(statbox_profs, -1, size=wx.Size(self.tc_width, -1))
-        self.tc_name.SetMaxLength(14)
         # buttons
         self.button_new = wx.Button(statbox_profs, label="New")
         self.button_save = wx.Button(statbox_profs, label="Save")
@@ -494,8 +493,8 @@ class PerspectiveConfig(wx.Dialog):
         # profile is being saved, so simply unchecking "Use perspective
         # corrections" and pressing OK actually sticks.
         self.checkCbmaster()
-        if self.tc_name.GetValue():
-            self.onSave()
+        if self.tc_name.GetValue() and not self.onSave():
+            return
         self.EndModal(wx.ID_OK)
 
     def onCancel(self, event):
@@ -560,7 +559,7 @@ class PerspectiveConfig(wx.Dialog):
                 "Image files (*.jpg;*.jpeg;*.png;*.bmp;*.gif;*.tiff;*.webp)"
                 "|*.jpg;*.jpeg;*.png;*.bmp;*.gif;*.tiff;*.webp"
             ),
-            defaultDir=self.frame.defdir,
+            defaultDir=self.frame.settings.browse_default_dir,
             style=wx.FD_OPEN | wx.FD_FILE_MUST_EXIST,
         ) as file_dialog:
             if file_dialog.ShowModal() == wx.ID_CANCEL:

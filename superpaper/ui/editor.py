@@ -87,7 +87,6 @@ class WallpaperSettingsPanel(wx.Panel):
         # bottom_half: bottom button row
         self.sizer_bottom_buttonrow = wx.BoxSizer(wx.HORIZONTAL)
 
-        self.defdir = get_settings().browse_default_dir
         # settings GUI properties
         self.tc_width = 160  # standard width for wx.TextCtrl etc elements.
         self.show_advanced_settings = False
@@ -208,7 +207,6 @@ class WallpaperSettingsPanel(wx.Panel):
         # name txt ctrl
         st_name = wx.StaticText(self, -1, "Profile name:")
         self.tc_name = wx.TextCtrl(self, -1, size=wx.Size(self.tc_width, -1))
-        self.tc_name.SetMaxLength(14)
         # buttons
         self.button_save = wx.Button(self, label="Save")
         self.button_revert = wx.Button(self, label="Revert")
@@ -1048,12 +1046,11 @@ class WallpaperSettingsPanel(wx.Panel):
             groups = self.read_spangroups()
             if groups is not None:
                 num_groups = len(groups.keys())
-        dlg = BrowsePaths(self, multiple_image_area, self.defdir, self.update_settings, num_groups)
+        dlg = BrowsePaths(self, multiple_image_area, self.settings.browse_default_dir, self.update_settings, num_groups)
         res = dlg.ShowModal()
         if res == wx.ID_OK:
             path_list_data = dlg.path_list_data
             image_list = dlg.il
-            self.defdir = dlg.defdir
             self.populate_lc_browse(path_list_data, image_list)
             dlg.Destroy()
         else:
@@ -1415,6 +1412,7 @@ class WallpaperSettingsPanel(wx.Panel):
         if not os.path.isfile(testimage[0]):
             msg = f"Test image not found in {testimage}."
             show_message_dialog(msg, "Error")
+            return -1
 
         offsets = []
         for off_tc in self.tc_list_offsets:
