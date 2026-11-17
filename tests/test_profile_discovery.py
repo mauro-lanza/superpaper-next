@@ -255,12 +255,13 @@ def test_fifo_profile_is_diagnostic_without_blocking(app_paths):
     assert inventory.diagnostics[0].kind is ProfileDiagnosticKind.NOT_REGULAR_FILE
 
 
-def test_selections_of_profiles_that_are_gone_are_forgotten(app_paths):
+def test_sweep_forgets_selections_of_profiles_that_are_gone(app_paths):
+    (app_paths.profiles / "Work.profile").write_text("name=Work\n", encoding="utf-8")
     selections = app_paths.cache / "selections"
     selections.mkdir()
     for name in ("Work.json", "Gone.json", "notes.txt"):
         (selections / name).write_text("[]", encoding="utf-8")
 
-    profile_store.sweep_selections(app_paths.cache, [ProfileId("Work")])
+    ProfileStore(app_paths).sweep()
 
     assert sorted(path.name for path in selections.iterdir()) == ["Work.json", "notes.txt"]

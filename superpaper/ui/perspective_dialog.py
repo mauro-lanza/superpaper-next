@@ -31,7 +31,7 @@ class PerspectiveConfig(wx.Dialog):
         self.persp_dict = self.display_sys.perspective_dict
         self.test_image = None
         self.help_bmp = wx.ArtProvider.GetBitmap(wx.ART_QUESTION, wx.ART_BUTTON, wx.Size(20, 20))
-        self.warn_large_img = read_settings(parent.parent_tray_obj.settings_path, sys.platform).warn_large_img
+        self.warn_large_img = read_settings(parent.settings_path, sys.platform).warn_large_img
 
         sizer_main = wx.BoxSizer(wx.VERTICAL)
 
@@ -352,7 +352,7 @@ class PerspectiveConfig(wx.Dialog):
         if master != self.display_sys.use_perspective:
             self.display_sys.use_perspective = master
             self.display_sys.save_system()
-            self.frame.parent_tray_obj.refresh_displays()
+            self.frame.refresh_displays()
 
     def onSelect(self, event):
         """Acts once a profile is picked in the dropdown menu."""
@@ -426,10 +426,10 @@ class PerspectiveConfig(wx.Dialog):
                     return 0
         self.display_sys.update_perspectives(persp_name, toggle, is_ds_def, viewer_data, swivels, tilts)
         # Persist the perspective file first, then the display system that names the
-        # default; the tray then reloads both as one layout.
+        # default; refresh_displays then loads both as one layout, for the session.
         self.display_sys.save_perspectives()
         self.display_sys.save_system()
-        self.frame.parent_tray_obj.refresh_displays()
+        self.frame.refresh_displays()
 
         # update dialog profile list
         self.update_choiceprofile()
@@ -447,7 +447,7 @@ class PerspectiveConfig(wx.Dialog):
         self.persp_dict.pop(persp_name, None)
         self.display_sys.save_perspectives()
         self.display_sys.save_system()
-        self.frame.parent_tray_obj.refresh_displays()
+        self.frame.refresh_displays()
         # update dialog profile list
         self.update_choiceprofile()
         self.onCreateNewProfile(None)
@@ -522,12 +522,10 @@ class PerspectiveConfig(wx.Dialog):
             return 0
         perspective = self.choice_profiles.GetString(self.choice_profiles.GetSelection())
 
-        # onSave has asked the tray to reload its layout, which happens before the draft.
+        # The session takes the layout onSave reloaded, then shows the draft.
         profile = profiles.draft(testimage, spanmode="advanced", perspective=perspective, offsets=offsets)
         wx.BeginBusyCursor()
-        self.frame.parent_tray_obj.apply_draft(
-            profile, testimage, on_done=lambda problem: wx.CallAfter(draft_shown, problem)
-        )
+        self.frame.session.apply_draft(profile, testimage, on_done=lambda problem: wx.CallAfter(draft_shown, problem))
         return 1
 
     def onChooseTestImage(self, event):

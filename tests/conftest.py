@@ -79,12 +79,45 @@ def write_profile(path: Path, *, spanmode="single", sources=(), selected=()):
     return path
 
 
-@pytest.fixture
-def headless_tray_module(monkeypatch):
-    """Import tray orchestration against minimal wx/view stubs."""
+def import_headless(monkeypatch, name, stubs):
+    """Import ``superpaper.ui.<name>`` afresh, with ``stubs`` in sys.modules in place of the
+    modules it imports. Returns the module and ``forget()``, which leaves sys.modules and
+    the package as they were."""
+    import importlib
+
+    import superpaper.ui
+
+    full_name = f"superpaper.ui.{name}"
+    previous_module = sys.modules.get(full_name)
+    previous_attribute = getattr(superpaper.ui, name, None)
+    for stub_name, stub in stubs.items():
+        monkeypatch.setitem(sys.modules, stub_name, stub)
+    sys.modules.pop(full_name, None)
+    module = importlib.import_module(full_name)
+
+    def forget():
+        if previous_module is None:
+            sys.modules.pop(full_name, None)
+        else:
+            sys.modules[full_name] = previous_module
+        if previous_attribute is None:
+            if hasattr(superpaper.ui, name):
+                delattr(superpaper.ui, name)
+        else:
+            setattr(superpaper.ui, name, previous_attribute)
+
+    return module, forget
+
+
+def wx_stub():
+    """Just enough of wx for the UI modules' logic: CallAfter runs at once."""
 
     class FakeTaskBarIcon:
-        pass
+        def Bind(self, *args, **kwargs):
+            pass
+
+        def Destroy(self):
+            pass
 
     class FakeApp:
         pass
@@ -95,32 +128,42 @@ def headless_tray_module(monkeypatch):
     wx.CallAfter = lambda function, *args, **kwargs: function(*args, **kwargs)
     wx.adv = wx_adv
     wx_adv.TaskBarIcon = FakeTaskBarIcon
+    for event in ("EVT_TASKBAR_LEFT_DOWN", "EVT_TASKBAR_LEFT_DCLICK", "EVT_TASKBAR_RIGHT_DOWN"):
+        setattr(wx_adv, event, event)
+    return {"wx": wx, "wx.adv": wx_adv}
 
-    editor = ModuleType("superpaper.ui.editor")
-    editor.ConfigFrame = object
-    help_ = ModuleType("superpaper.ui.help")
-    help_.HelpFrame = object
-    settings_dialog = ModuleType("superpaper.ui.settings_dialog")
-    settings_dialog.SettingsFrame = object
-    messages = ModuleType("superpaper.ui.message")
-    messages.show_message_dialog = lambda *args, **kwargs: None
 
-    import superpaper.ui
+def module_stub(name, **attributes):
+    module = ModuleType(name)
+    for attribute, value in attributes.items():
+        setattr(module, attribute, value)
+    return {name: module}
 
-    previous_package_tray = getattr(superpaper.ui, "tray", None)
-    had_package_tray = hasattr(superpaper.ui, "tray")
-    monkeypatch.setitem(sys.modules, "wx", wx)
-    monkeypatch.setitem(sys.modules, "wx.adv", wx_adv)
-    monkeypatch.setitem(sys.modules, "superpaper.ui.editor", editor)
-    monkeypatch.setitem(sys.modules, "superpaper.ui.help", help_)
-    monkeypatch.setitem(sys.modules, "superpaper.ui.settings_dialog", settings_dialog)
-    monkeypatch.setitem(sys.modules, "superpaper.ui.message", messages)
-    monkeypatch.delitem(sys.modules, "superpaper.ui.tray", raising=False)
 
-    import superpaper.ui.tray as tray
-
+@pytest.fixture
+def headless_tray_module(monkeypatch):
+    """Import the tray icon against minimal wx stubs."""
+    stubs = {
+        **wx_stub(),
+        **module_stub("superpaper.ui.message", show_message_dialog=lambda *args, **kwargs: None),
+    }
+    tray, forget = import_headless(monkeypatch, "tray", stubs)
     yield tray
-    if had_package_tray:
-        superpaper.ui.tray = previous_package_tray
-    elif hasattr(superpaper.ui, "tray"):
-        delattr(superpaper.ui, "tray")
+    forget()
+
+
+@pytest.fixture
+def headless_app_module(monkeypatch):
+    """Import the tray application against minimal wx and window stubs."""
+    stubs = {
+        **wx_stub(),
+        **module_stub("superpaper.ui.editor", ConfigFrame=object),
+        **module_stub("superpaper.ui.help", HelpFrame=object),
+        **module_stub("superpaper.ui.settings_dialog", SettingsFrame=object),
+        **module_stub("superpaper.ui.message", show_message_dialog=lambda *args, **kwargs: None),
+        **module_stub("superpaper.ui.hotkeys", Hotkeys=object),
+        **module_stub("superpaper.ui.tray", TaskBarIcon=object),
+    }
+    app, forget = import_headless(monkeypatch, "app", stubs)
+    yield app
+    forget()
