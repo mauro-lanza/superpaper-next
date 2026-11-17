@@ -20,9 +20,11 @@ from PIL import Image
 
 import superpaper.desktop.process as process
 import superpaper.displays as displays
+from superpaper.displays import DisplaySystem
 from superpaper.profile_id import ProfileId
 from superpaper.settings import read_settings
 from tests.conftest import TWO_DISPLAYS
+from tests.gui.snapshots import Snapshots
 
 HERE = Path(__file__).parent
 SETTINGS = (
@@ -275,3 +277,26 @@ def running_work(gui_env, superpaper):
 def editor(gui_env, running_work):
     """The wallpaper configuration's settings panel, opened on the running profile."""
     return gui_env.open_editor(running_work)
+
+
+@pytest.fixture
+def snapshots(request, gui_env):
+    """The golden files of the scenario in the test module (test_scenario_<name>.py)."""
+    snapshots = Snapshots(request.module.__name__.rsplit("test_scenario_", 1)[1])
+    snapshots.replace(str(gui_env.root), "<tmp>")
+    return snapshots
+
+
+@pytest.fixture
+def saved_layout(gui_env):
+    """The layout of the two fixed monitors as a user has saved it: the default positions and
+    one perspective, "wall", that isn't the default."""
+    layout = DisplaySystem(gui_env.paths.config)
+    displays = len(layout.disp_list)
+    viewer_position = (0.0, 0.0, layout.max_ppi() * 1200 / 25.4)
+    layout.update_perspectives(
+        "wall", True, False, (0, viewer_position), [(0, 0.0, 0.0, 0.0)] * displays, [(0.0, 0.0, 0.0)] * displays
+    )
+    layout.save_system()
+    layout.save_perspectives()
+    return layout

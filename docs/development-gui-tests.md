@@ -20,6 +20,22 @@ To keep the windows off your desktop, run under a virtual display:
 xvfb-run -a uv run pytest -m gui
 ```
 
+## Scenario snapshot tests
+
+`tests/gui/test_scenario_*.py` click through the editor, the display band, the perspectives
+dialog and the tray in order, and after each step compare the files that were written
+(`display_systems.dat`, the `.persp` file, profiles, selections, the running-profile pointer)
+with the goldens in `tests/gui/snapshots/<scenario>/<step>/`. Temporary paths and the layout
+key are replaced by `<tmp>` and `<key>`; numbers are compared as written. Each scenario is
+one test, since every step starts from the files the previous one left.
+
+After a deliberate behaviour change, rewrite the goldens and review the diff:
+
+```sh
+SUPERPAPER_UPDATE_SNAPSHOTS=1 uv run pytest -m gui tests/gui/test_scenario_*.py
+git diff tests/gui/snapshots
+```
+
 ## Getting wxPython
 
 wxPython has no PyPI wheel for Linux, and `uv sync --extra gui` builds it from source,
