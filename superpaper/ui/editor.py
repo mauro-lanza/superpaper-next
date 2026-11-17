@@ -16,7 +16,7 @@ from superpaper.profile_id import ProfileId, ProfileIdError
 from superpaper.profile_store import validate_managed_profile_id
 from superpaper.profiles import Profile
 from superpaper.selection import Selection, is_supported_image
-from superpaper.settings import read_settings
+from superpaper.settings import SETTINGS_FILE, read_settings
 from superpaper.ui.browse_dialog import BrowsePaths, source_icon
 from superpaper.ui.display_band import DisplayBand
 from superpaper.ui.help import HelpFrame, HelpPopup
@@ -26,12 +26,14 @@ from superpaper.ui.preview import WallpaperPreviewPanel
 
 
 class ConfigFrame(wx.Frame):
-    """Wallpaper configuration dialog frame base class."""
+    """The wallpaper configuration window: see WallpaperSettingsPanel."""
 
-    def __init__(self, parent_tray_obj):
+    def __init__(self, paths, store, session, *, refresh_displays, rebind_hotkey):
         wx.Frame.__init__(self, parent=None, title="Superpaper Wallpaper Configuration")
         self.frame_sizer = wx.BoxSizer(wx.VERTICAL)
-        config_panel = WallpaperSettingsPanel(self, parent_tray_obj)
+        config_panel = WallpaperSettingsPanel(
+            self, paths, store, session, refresh_displays=refresh_displays, rebind_hotkey=rebind_hotkey
+        )
         self.frame_sizer.Add(config_panel, 1, wx.EXPAND)
         self.SetAutoLayout(True)
         self.SetSizer(self.frame_sizer)
@@ -44,14 +46,25 @@ class ConfigFrame(wx.Frame):
 
 
 class WallpaperSettingsPanel(wx.Panel):
-    """This class defines the wallpaper config dialog UI."""
+    """The profile editor, with the preview of the displays and the display band.
 
-    def __init__(self, parent, parent_tray_obj):
+    It edits the saved profiles in ``store`` and tells ``session`` what became of the
+    running one; drafts (Apply, the align tests) are shown by ``session`` too.
+    ``refresh_displays()`` detects the displays again, for the session, and
+    ``rebind_hotkey(before, after)`` moves a saved profile's hotkey along with it.
+    """
+
+    def __init__(self, parent, paths, store, session, *, refresh_displays, rebind_hotkey):
         wx.Panel.__init__(self, parent)
         self.frame = parent
-        self.parent_tray_obj = parent_tray_obj
-        self.paths = parent_tray_obj.paths
-        # The saved profile open in the editor: its record, the one the tray uses.
+        self.paths = paths
+        self.settings_path = paths.config / SETTINGS_FILE
+        self.store = store
+        self.session = session
+        self.refresh_displays = refresh_displays
+        self._rebind_hotkey = rebind_hotkey
+        # The saved profile open in the editor: the store's record of it, the one the tray
+        # menu offers and the session runs.
         self.loaded_profile = None
         self.sizer_main = wx.BoxSizer(wx.VERTICAL)
         self.sizer_top_half = wx.BoxSizer(wx.HORIZONTAL)  # wallpaper/monitor preview
@@ -64,7 +77,7 @@ class WallpaperSettingsPanel(wx.Panel):
         # bottom_half: bottom button row
         self.sizer_bottom_buttonrow = wx.BoxSizer(wx.HORIZONTAL)
 
-        self.defdir = read_settings(parent_tray_obj.settings_path, sys.platform).browse_default_dir
+        self.defdir = read_settings(self.settings_path, sys.platform).browse_default_dir
         # settings GUI properties
         self.tc_width = 160  # standard width for wx.TextCtrl etc elements.
         self.show_advanced_settings = False
@@ -120,7 +133,7 @@ class WallpaperSettingsPanel(wx.Panel):
             relayout=self.sizer_main.Layout,
             refresh_preview=self.refresh_layout_preview,
             enable_profile_editing=self.toggle_radio_and_profile_choice,
-            on_saved=self.parent_tray_obj.refresh_displays,  # the slideshow uses them from now on
+            on_saved=self.refresh_displays,  # the slideshow uses them from now on
         )
 
         # Add sub-sizers to bottom_half
@@ -155,11 +168,11 @@ class WallpaperSettingsPanel(wx.Panel):
         self.Bind(wx.EVT_TEXT, self._on_field_changed)
         self.Bind(wx.EVT_COMBOBOX, self._on_field_changed)
 
-        if self.parent_tray_obj.active_profile:
-            active_prof_name = self.parent_tray_obj.active_profile.profile.name
-            active_id = self.choice_profiles.FindString(active_prof_name)
+        running = self.session.running
+        if running:
+            active_id = self.choice_profiles.FindString(running.profile.name)
             self.choice_profiles.SetSelection(active_id)
-            self.populate_fields(self.parent_tray_obj.active_profile)
+            self.populate_fields(running)
         else:
             # No active profile: start from a clean, empty new-profile baseline.
             self._set_clean_baseline()
@@ -174,7 +187,7 @@ class WallpaperSettingsPanel(wx.Panel):
     #
     def create_sizer_profiles(self):
         # choice menu
-        self.list_of_profiles = self.parent_tray_obj.list_of_profiles
+        self.list_of_profiles = self.store.profiles
         self.profnames = []
         for prof in self.list_of_profiles:
             self.profnames.append(prof.profile.name)
@@ -597,8 +610,8 @@ class WallpaperSettingsPanel(wx.Panel):
             display_data = self.display_sys.get_disp_list(True)
         else:
             display_data = self.display_sys.get_disp_list(False)
-        # Preview the tray's record when it has one: its selection follows the slideshow.
-        live_profile = self.parent_tray_obj.get_profile_by_name(profile.name) or stored
+        # Preview the store's current record: its selection follows the slideshow.
+        live_profile = self.store.get(stored.profile_id) or stored
         self.wpprev_pnl.preview_wallpaper(
             live_profile.selection.current(),
             self.show_advanced_settings,
@@ -675,7 +688,7 @@ class WallpaperSettingsPanel(wx.Panel):
 
     def update_choiceprofile(self):
         """Reload profile list into the choice box."""
-        self.list_of_profiles = self.parent_tray_obj.list_of_profiles
+        self.list_of_profiles = self.store.profiles
         self.profnames = []
         for prof in self.list_of_profiles:
             self.profnames.append(prof.profile.name)
@@ -1014,7 +1027,7 @@ class WallpaperSettingsPanel(wx.Panel):
             groups = self.read_spangroups()
             if groups is not None:
                 num_groups = len(groups.keys())
-        dlg = BrowsePaths(self, multiple_image_area, self.defdir, self.parent_tray_obj.settings_path, num_groups)
+        dlg = BrowsePaths(self, multiple_image_area, self.defdir, self.settings_path, num_groups)
         res = dlg.ShowModal()
         if res == wx.ID_OK:
             path_list_data = dlg.path_list_data
@@ -1054,14 +1067,30 @@ class WallpaperSettingsPanel(wx.Panel):
         selection = self.choice_profiles.GetSelection()
         name = self.choice_profiles.GetString(selection) if selection != wx.NOT_FOUND else ""
         if name and name != "Create a new profile":
-            self.parent_tray_obj.reload_profiles(event)
-            profile = self.parent_tray_obj.get_profile_by_name(name)
+            self.store.reload()
+            self._carry_on_running()
+            profile = self._saved_profile(name)
             if profile is not None:
-                self.list_of_profiles = self.parent_tray_obj.list_of_profiles
+                self.list_of_profiles = self.store.profiles
                 self.populate_fields(profile)
                 return
         # No saved profile to revert to: reset to an empty new profile.
         self.onCreateNewProfile(None)
+
+    def _saved_profile(self, name):
+        """The saved profile called ``name``, if there is one."""
+        try:
+            return self.store.get(ProfileId.parse(name))
+        except ProfileIdError:
+            return None
+
+    def _carry_on_running(self):
+        """After the store loaded the profiles again, the running profile carries on with
+        its current record, which may hold edits made outside the editor, or stops if its
+        file is gone."""
+        running = self.session.running
+        if running is not None:
+            self.session.update(running.profile_id, self.store.get(running.profile_id))
 
     def onApply(self, event):
         """Render the current edits as a one-off preview without saving.
@@ -1095,7 +1124,7 @@ class WallpaperSettingsPanel(wx.Panel):
         # display settings — bezels, sizes, positions — are reflected. This
         # deliberately does NOT reload the saved layout, which lets the user
         # test system tweaks via Apply before committing them.
-        self.parent_tray_obj.apply_draft(
+        self.session.apply_draft(
             profile,
             images,
             display_system=copy.deepcopy(self.display_sys),
@@ -1245,13 +1274,13 @@ class WallpaperSettingsPanel(wx.Panel):
             self._show_problems(problems)
             del busy
             return None
-        old_hotkey = loaded.profile.hotkey if loaded is not None else None
-        active = self.parent_tray_obj.active_profile
+        active = self.session.running
         saving_active_profile = (
             current_profile_id is not None and active is not None and active.profile_id == current_profile_id
         )
         try:
-            saved_profile = self.parent_tray_obj.store.save(
+            # Saving loads the profiles again: once, here.
+            saved_profile = self.store.save(
                 profile,
                 selected=self._chosen_images(profile),
                 current=loaded,
@@ -1264,14 +1293,15 @@ class WallpaperSettingsPanel(wx.Panel):
             return None
         if current_profile_id is not None:
             # If it runs, it keeps running under its (possibly new) name, and edits such
-            # as the slideshow delay take effect at once. Before the reload below, which
-            # would otherwise find the running profile's old name gone.
-            self.parent_tray_obj.session.update(current_profile_id, saved_profile)
-        self.parent_tray_obj.reload_profiles(event)
+            # as the slideshow delay take effect at once. Before the running profile is
+            # looked up below, which would otherwise find its old name gone.
+            self.session.update(current_profile_id, saved_profile)
+        self._carry_on_running()
         self.update_choiceprofile()
-        self.parent_tray_obj.update_hotkey(profile.name, old_hotkey, profile.hotkey)
+        # Its hotkey follows it, also to a new name.
+        self._rebind_hotkey(loaded, saved_profile)
         self.choice_profiles.SetSelection(self.choice_profiles.FindString(profile.name))
-        # The editor goes on with the saved profile's record, the one the tray uses.
+        # The editor goes on with the store's record of the saved profile.
         self.loaded_profile = saved_profile
         if self.show_advanced_settings:
             display_data = self.display_sys.get_disp_list(True)
@@ -1285,7 +1315,7 @@ class WallpaperSettingsPanel(wx.Panel):
             self.read_spangroups() if self.cb_spangroups.GetValue() else None,
         )
         # Saved state becomes the new clean baseline.
-        self.list_of_profiles = self.parent_tray_obj.list_of_profiles
+        self.list_of_profiles = self.store.profiles
         self._set_clean_baseline()
         del busy
         return saved_profile.path
@@ -1330,11 +1360,7 @@ class WallpaperSettingsPanel(wx.Panel):
         """Deletes the currently selected profile after getting confirmation."""
         selection = self.choice_profiles.GetSelection()
         selected_name = self.choice_profiles.GetString(selection) if selection != wx.NOT_FOUND else ""
-        try:
-            selected_id = ProfileId.parse(selected_name)
-        except ProfileIdError:
-            selected_id = None
-        profile = self.parent_tray_obj.get_profile_by_id(selected_id) if selected_id is not None else None
+        profile = self._saved_profile(selected_name)
         if profile is None:
             msg = "Selected profile is not saved."
             show_message_dialog(msg, "Error")
@@ -1349,13 +1375,13 @@ class WallpaperSettingsPanel(wx.Panel):
         result = dlg.ShowModal()
         if result == wx.ID_YES:
             try:
-                self.parent_tray_obj.store.delete(profile)
+                self.store.delete(profile)
             except (OSError, ValueError) as error:
                 show_message_dialog(str(error), "Error")
                 return
-            # Refresh tray state so the deleted profile disappears from the dropdown, and
-            # if it was running, its slideshow stops.
-            self.parent_tray_obj.reload_profiles(event)
+            # If it was running, its slideshow stops; its hotkey is free for other uses.
+            self.session.update(profile.profile_id, None)
+            self._rebind_hotkey(profile, None)
             self.update_choiceprofile()
             self.onCreateNewProfile(None)
         else:
@@ -1388,9 +1414,9 @@ class WallpaperSettingsPanel(wx.Panel):
 
         wx.BeginBusyCursor()
         # With the saved display settings, detected again before the draft is rendered.
-        self.parent_tray_obj.refresh_displays()
+        self.refresh_displays()
         profile = profiles.draft(testimage, spanmode="advanced", perspective=perspective, offsets=offsets)
-        self.parent_tray_obj.apply_draft(profile, testimage, on_done=lambda problem: wx.CallAfter(draft_shown, problem))
+        self.session.apply_draft(profile, testimage, on_done=lambda problem: wx.CallAfter(draft_shown, problem))
 
     def onPerspectives(self, event):
         """Open perspective configuration dialog."""
@@ -1420,7 +1446,7 @@ class WallpaperSettingsPanel(wx.Panel):
 
     def onHelp(self, event):
         """Open help dialog."""
-        HelpFrame(self.parent_tray_obj.settings_path, self)
+        HelpFrame(self.settings_path, self)
 
     def onHelpHotkey(self, evt):
         """Popup hotkey help."""

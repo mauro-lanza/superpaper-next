@@ -9,12 +9,12 @@ from superpaper.settings import read_settings, write_settings
 
 
 class SettingsFrame(wx.Frame):
-    """Settings dialog frame."""
+    """The general settings window: see SettingsPanel."""
 
-    def __init__(self, parent_tray_obj):
+    def __init__(self, settings_path, on_saved):
         wx.Frame.__init__(self, parent=None, title="Superpaper General Settings")
         self.frame_sizer = wx.BoxSizer(wx.VERTICAL)
-        settings_panel = SettingsPanel(self, parent_tray_obj)
+        settings_panel = SettingsPanel(self, settings_path, on_saved)
         self.frame_sizer.Add(settings_panel, 1, wx.EXPAND)
         self.SetAutoLayout(True)
         self.SetSizer(self.frame_sizer)
@@ -25,12 +25,14 @@ class SettingsFrame(wx.Frame):
 
 
 class SettingsPanel(wx.Panel):
-    """Settings dialog contents."""
+    """The general settings saved at ``settings_path``; ``on_saved(settings)`` is called
+    with them once they are saved."""
 
-    def __init__(self, parent, parent_tray_obj):
+    def __init__(self, parent, settings_path, on_saved):
         wx.Panel.__init__(self, parent)
         self.frame = parent
-        self.parent_tray_obj = parent_tray_obj
+        self.settings_path = settings_path
+        self._on_saved = on_saved
         self.sizer_main = wx.BoxSizer(wx.VERTICAL)
         self.sizer_grid_settings = wx.GridSizer(6, 2, 5, 5)
         self.sizer_buttons = wx.BoxSizer(wx.HORIZONTAL)
@@ -79,7 +81,7 @@ class SettingsPanel(wx.Panel):
 
     def update_fields(self):
         """Updates dialog field contents."""
-        g_settings = read_settings(self.parent_tray_obj.settings_path, sys.platform)
+        g_settings = read_settings(self.settings_path, sys.platform)
         self.cb_logging.SetValue(g_settings.logging)
         self.cb_usehotkeys.SetValue(g_settings.use_hotkeys)
         self.cb_warn_large.SetValue(g_settings.warn_large_img)
@@ -93,7 +95,7 @@ class SettingsPanel(wx.Panel):
 
     def onSave(self, event):
         """Saves settings to file."""
-        settings_path = self.parent_tray_obj.settings_path
+        settings_path = self.settings_path
         hk_next = self.tc_hk_next.GetLineText(0)
         hk_pause = self.tc_hk_pause.GetLineText(0)
         settings = replace(
@@ -106,8 +108,7 @@ class SettingsPanel(wx.Panel):
             set_command=self.tc_setcmd.GetLineText(0).strip(),
         )
         write_settings(settings_path, settings)
-        # after saving file apply in tray object
-        self.parent_tray_obj.read_general_settings()
+        self._on_saved(settings)
 
     def onClose(self, event):
         """Closes settings panel."""

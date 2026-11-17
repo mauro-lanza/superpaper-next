@@ -15,7 +15,7 @@ from enum import Enum, auto
 from functools import partial
 from pathlib import Path
 
-from superpaper import profiles
+from superpaper import profiles, render_cache
 from superpaper.files import write_atomically
 from superpaper.paths import AppPaths
 from superpaper.profile_id import ManagedPathError, ProfileId, ProfileIdError, collision_key, profile_path
@@ -156,6 +156,23 @@ class ProfileStore:
             raise ProfileTransactionError(_DESTINATION_WRITE, ValueError(message))
         return stored
 
+    def sweep(self) -> None:
+        """Forget the renders and selections of profiles whose files are gone, whether or
+        not the files still load. Does nothing if the profiles directory can't be read."""
+        try:
+            stems = [path.stem for path in self.paths.profiles.iterdir() if path.suffix == ".profile"]
+        except OSError as error:
+            logger.warning("Could not list the profiles in %s: %s", self.paths.profiles, error)
+            return
+        keep = []
+        for stem in stems:
+            try:
+                keep.append(ProfileId.parse(stem))
+            except ProfileIdError:
+                continue
+        render_cache.sweep(self.paths.cache, keep)
+        _sweep_selections(self.paths.cache, keep)
+
     def delete(self, stored: StoredProfile) -> None:
         """Delete a profile and forget what it showed, unless its file changed after it was
         loaded (ManagedPathError)."""
@@ -247,23 +264,6 @@ def delete_malformed(diagnostic: ProfileDiscoveryDiagnostic) -> bool:
     return True
 
 
-def stored_profile_ids(paths: AppPaths) -> list[ProfileId] | None:
-    """The ids of the profile files in the profiles directory, whether or not they load;
-    None if the directory can't be read."""
-    try:
-        stems = [path.stem for path in paths.profiles.iterdir() if path.suffix == ".profile"]
-    except OSError as error:
-        logger.warning("Could not list the profiles in %s: %s", paths.profiles, error)
-        return None
-    profile_ids = []
-    for stem in stems:
-        try:
-            profile_ids.append(ProfileId.parse(stem))
-        except ProfileIdError:
-            continue
-    return profile_ids
-
-
 def validate_managed_profile_id(
     profiles_dir: Path, name: object, current_profile_id: ProfileId | None = None
 ) -> ProfileId:
@@ -326,7 +326,7 @@ def _selection_path(cache_dir: Path, profile_id: ProfileId) -> Path:
     return cache_dir / "selections" / f"{profile_id.value}.json"
 
 
-def sweep_selections(cache_dir: Path, keep: Iterable[ProfileId]) -> None:
+def _sweep_selections(cache_dir: Path, keep: Iterable[ProfileId]) -> None:
     """Forget what profiles that no longer exist showed: profiles deleted or renamed
     outside Superpaper. Other files are left alone."""
     names = {_selection_path(cache_dir, profile_id).name for profile_id in keep}
