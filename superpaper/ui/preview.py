@@ -9,7 +9,6 @@ from PIL import ImageEnhance
 import superpaper.sp_logging as sp_logging
 from superpaper.paths import resource
 from superpaper.render import SourceImageError, open_preview_image, resize_to_fill
-from superpaper.ui.help import HelpPopup
 from superpaper.ui.positions_dialog import DisplayPositionEntry
 
 
@@ -24,10 +23,25 @@ class WallpaperPreviewPanel(wx.Panel):
     exists that matches the given resolutions, offsets and sizes.
     """
 
-    def __init__(self, parent, display_sys, image_list=None, use_ppi_px=False, use_multi_image=False):
+    def __init__(
+        self,
+        parent,
+        display_sys,
+        *,
+        set_profile_controls_enabled,
+        toggle_bezel_buttons,
+        mark_dirty,
+        show_help,
+        image_list=None,
+        use_ppi_px=False,
+        use_multi_image=False,
+    ):
         self.preview_size = (1080, 400)
         wx.Panel.__init__(self, parent, size=wx.Size(*self.preview_size))
-        self.frame = parent
+        self._set_profile_controls_enabled = set_profile_controls_enabled
+        self._toggle_bezel_buttons = toggle_bezel_buttons
+        self._mark_dirty = mark_dirty
+        self._show_help = show_help
 
         # Buttons
         self.config_mode = False
@@ -574,8 +588,8 @@ class WallpaperPreviewPanel(wx.Panel):
     def onConfigure(self, evt):
         """Start diplay position config mode."""
         self.old_ppinorm_offs = self.display_sys.get_ppinorm_offsets()  # back up the offsets
-        self.frame.toggle_radio_and_profile_choice(False)
-        self.frame.display_band.toggle_bezel_buttons(False, False)
+        self._set_profile_controls_enabled(False)
+        self._toggle_bezel_buttons(False, False)
         self.config_mode = True
         self.toggle_buttons(False, True)
         self.show_staticbmps(False)
@@ -605,10 +619,10 @@ class WallpaperPreviewPanel(wx.Panel):
             # self.show_staticbmps(True)
         self.draggable_shapes = []  # Destroys DragShapes
         self.positions_dragged = False
-        self.frame.toggle_radio_and_profile_choice(True)
-        self.frame.display_band.toggle_bezel_buttons(False, True)
+        self._set_profile_controls_enabled(True)
+        self._toggle_bezel_buttons(False, True)
         self.Refresh()
-        self.frame.display_band.update_dirty()
+        self._mark_dirty()
 
     def onReset(self, evt):
         """Reset Display preview positions to the initial guess."""
@@ -646,8 +660,8 @@ class WallpaperPreviewPanel(wx.Panel):
         self.refresh_preview()
         self.full_refresh_preview(True, True, False)
         # self.show_staticbmps(True)
-        self.frame.toggle_radio_and_profile_choice(True)
-        self.frame.display_band.toggle_bezel_buttons(False, True)
+        self._set_profile_controls_enabled(True)
+        self._toggle_bezel_buttons(False, True)
         self.positions_dragged = False
         self.Refresh()
 
@@ -660,18 +674,7 @@ class WallpaperPreviewPanel(wx.Panel):
             "as accurately as possible represent the actual\n"
             "positions of you displays on your desk."
         )
-        use_per = self.display_sys.use_perspective
-        persp_sel = self.frame.ch_persp.GetSelection()
-        if persp_sel != wx.NOT_FOUND:
-            persname = self.frame.ch_persp.GetString(persp_sel)
-        else:
-            persname = "default"
-        pop = HelpPopup(self, text, show_image_quality=True, use_perspective=use_per, persp_name=persname)
-        btn = evt.GetEventObject()
-        pos = btn.ClientToScreen((0, 0))
-        sz = btn.GetSize()
-        pop.Position(pos, wx.Size(0, sz[1]))
-        pop.Popup()
+        self._show_help(text, evt.GetEventObject())
 
     def show_staticbmps(self, show):
         """Show/Hide StaticBitmaps."""

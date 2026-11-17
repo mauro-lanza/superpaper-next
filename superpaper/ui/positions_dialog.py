@@ -11,14 +11,13 @@ class DisplayPositionEntry(wx.Frame):
     """Display position fine control dialog."""
 
     def __init__(self, parent, dragged_positions=False):
-        wx.Frame.__init__(self, parent.frame, -1, "Enter display positions")
+        wx.Frame.__init__(self, parent.GetParent(), -1, "Enter display positions")
         self.ToggleWindowStyle(wx.STAY_ON_TOP)
         self.SetIcon(wx.Icon(str(resource("superpaper.png")), wx.BITMAP_TYPE_PNG))
         self.Bind(wx.EVT_CLOSE, self.OnClose)
 
         self.tc_width = 100
         self.parent = parent
-        self.frame = parent  # help dialog looks for this name
         self.parent.button_save.Disable()
         self.parent.button_cancel.Disable()
         self.display_sys = parent.display_sys
@@ -212,7 +211,7 @@ class DisplayPositionEntry(wx.Frame):
         self.parent.display_data = self.display_sys.get_disp_list(True)
         self.parent.refresh_preview(use_ppi_px=True, force_refresh=True)
         self.parent.create_shapes()
-        self.parent.frame.Refresh()
+        self.parent.GetParent().Refresh()
 
         self.populate_fields()
         return True
@@ -238,7 +237,7 @@ class DisplayPositionEntry(wx.Frame):
         self.parent.display_data = self.display_sys.get_disp_list(True)
         self.parent.refresh_preview(use_ppi_px=True, force_refresh=True)
         self.parent.create_shapes()
-        self.parent.frame.Refresh()
+        self.parent.GetParent().Refresh()
         # close dialog
         self.parent.button_save.Enable()
         self.parent.button_cancel.Enable()
@@ -262,11 +261,7 @@ class DisplayPositionEntry(wx.Frame):
             "top-most edge are at 0. Right, Bottom edge positions\n"
             "include bezel sizes."
         )
-        pop = HelpPopup(
-            self,
-            text,
-            show_image_quality=False,
-        )
+        pop = HelpPopup(self, text)
         btn = evt.GetEventObject()
         pos = btn.ClientToScreen((0, 0))
         sz = btn.GetSize()

@@ -15,7 +15,7 @@ from superpaper.profiles import Profile
 from superpaper.selection import Selection, first_image, is_file, is_folder
 from superpaper.ui.browse_dialog import BrowsePaths, source_icon
 from superpaper.ui.display_band import DisplayBand
-from superpaper.ui.help import HelpFrame, HelpPopup
+from superpaper.ui.help import HelpFrame, HelpPopup, ImageQualityHelpPopup
 from superpaper.ui.message import draft_shown, show_message_dialog
 from superpaper.ui.perspective_dialog import PerspectiveConfig
 from superpaper.ui.preview import WallpaperPreviewPanel
@@ -108,8 +108,17 @@ class WallpaperSettingsPanel(wx.Panel):
         # This is staged dialog state. Do not publish it until Apply/Save; live
         # field edits must not alter the display system used by background jobs.
         self.display_sys = copy.deepcopy(session.display_system)
-        # self.wpprev_pnl = WallpaperPreviewPanel(self.frame, self.display_sys)
-        self.wpprev_pnl = WallpaperPreviewPanel(self, self.display_sys)
+        self.wpprev_pnl = WallpaperPreviewPanel(
+            self,
+            self.display_sys,
+            set_profile_controls_enabled=self.toggle_radio_and_profile_choice,
+            # the band is created after the preview, so its methods are looked up when called
+            toggle_bezel_buttons=lambda bezel_mode, enable_config_butt: self.display_band.toggle_bezel_buttons(
+                bezel_mode, enable_config_butt
+            ),
+            mark_dirty=lambda: self.display_band.update_dirty(),
+            show_help=self.show_preview_help,
+        )
         self.sizer_top_half.Add(self.wpprev_pnl, 1, wx.CENTER | wx.EXPAND, 5)
         # self.sizer_top_half.SetMinSize((400,200))
         # self.sizer_top_half.SetMinSize()
@@ -1458,6 +1467,22 @@ class WallpaperSettingsPanel(wx.Panel):
     def onHelp(self, event):
         """Open help dialog."""
         HelpFrame(self._get_settings, self.update_settings, self)
+
+    def show_preview_help(self, text, button):
+        """Popup the preview's help below button."""
+        persp_sel = self.ch_persp.GetSelection()
+        persname = self.ch_persp.GetString(persp_sel) if persp_sel != wx.NOT_FOUND else "default"
+        pop = ImageQualityHelpPopup(
+            self.wpprev_pnl,
+            text,
+            editor=self,
+            use_perspective=self.display_sys.use_perspective,
+            persp_name=persname,
+        )
+        pos = button.ClientToScreen((0, 0))
+        sz = button.GetSize()
+        pop.Position(pos, wx.Size(0, sz[1]))
+        pop.Popup()
 
     def onHelpHotkey(self, evt):
         """Popup hotkey help."""
