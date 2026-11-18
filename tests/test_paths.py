@@ -1,7 +1,7 @@
 """Where Superpaper's files live.
 
 The expected directories were recorded by running the import-time resolution that
-``resolve_paths`` replaced (superpaper/sp_paths.py) for each of these environments.
+``resolve_paths`` replaced (superpaper/paths.py) for each of these environments.
 """
 
 import os

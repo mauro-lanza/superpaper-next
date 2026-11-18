@@ -965,7 +965,7 @@ class WallpaperSettingsPanel(wx.Panel):
     def add_to_imagelist(self, path):
         return self.image_list.Add(source_icon(path, self.tsize))
 
-    def populate_lc_browse(self, pathslist, imglist):
+    def populate_lc_browse(self, pathslist):
         for path_item in pathslist:
             self.append_to_listctrl(path_item)
         self._update_dirty_state()
@@ -1015,9 +1015,7 @@ class WallpaperSettingsPanel(wx.Panel):
         )
         res = dlg.ShowModal()
         if res == wx.ID_OK:
-            path_list_data = dlg.path_list_data
-            image_list = dlg.il
-            self.populate_lc_browse(path_list_data, image_list)
+            self.populate_lc_browse(dlg.path_list_data)
             dlg.Destroy()
         else:
             pass

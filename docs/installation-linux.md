@@ -33,7 +33,7 @@ You may use a manually created venv.
 
 ### Step 2: Install Superpaper Next
 
-The upstream `superpaper` package on PyPI is still version 2.2.1 and does not
+The upstream `superpaper` package on PyPI is still version 2.2.1 (as of November 2026) and does not
 contain this fork's changes. Install this fork directly from GitHub; it needs
 Python 3.14+:
 
