@@ -1,12 +1,3 @@
-# Project metadata + tooling configuration for superpaper-next.
-#
-# pyproject.toml is the single source of truth for packaging metadata and
-# runtime dependencies (PEP 621 [project] table). setup.py has been removed;
-# the build and AppImage tooling all consume the metadata below. The
-# platform-specific runtime sets are expressed as dependency markers + extras
-# (see [project.optional-dependencies]) so a plain `pip install .` resolves the
-# right packages per OS, replacing the old requirements_*.txt files.
-
 [build-system]
 requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
@@ -31,9 +22,7 @@ classifiers = [
     "Programming Language :: Python :: 3.14",
     "Topic :: Utilities",
 ]
-# Cross-platform runtime core. These ship wheels (no system build deps), so
-# they install cleanly via `pip install superpaper`. X11 helpers are gated to
-# Linux and pywin32 to Windows via environment markers.
+# xcffib and xpybutil: system_hotkey imports them on Linux but does not declare them.
 dependencies = [
     "Pillow>=12.2.0",
     "screeninfo>=0.8.1",
@@ -81,8 +70,7 @@ superpaper = [
     "resources/example_profiles/example_multi.profile",
 ]
 
-# Desktop-entry + icon installation (formerly setup.py data_files). The scalable
-# SVG is valid at any requested size; the PNG goes in its real 96x96 bucket.
+# The scalable SVG is valid at any size; the PNG goes in its real 96x96 bucket.
 [tool.setuptools.data-files]
 "share/applications" = ["superpaper/resources/superpaper.desktop"]
 "share/icons/hicolor/scalable/apps" = ["superpaper/resources/superpaper.svg"]
@@ -123,15 +111,12 @@ extend-exclude = [
     "dist",
     "releases",
     "release-tooling",
-    "example-script",
+    "docs/examples",
     ".venv",
     "superpaper.egg-info",
 ]
 
 [tool.ruff.lint]
-# Gradual/pragmatic starting set. Mostly auto-fixable rules so the first pass
-# can be applied without a wall of manual fixes. Tighten over time by adding
-# rule groups such as "PTH" (pathlib), "RET" (returns), "ARG", "N" (naming).
 select = [
     "E",    # pycodestyle errors
     "F",    # pyflakes

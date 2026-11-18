@@ -1,11 +1,11 @@
-# Open Issues Tracker
+# Upstream Issues
 
-Cross-reference of open issues from [hhannine/superpaper](https://github.com/hhannine/superpaper/issues) against this fork, reviewed 2026-07-15. The rows for #25, #31, #63, #92, #96, #105, #113, #115, #143 and #156, and the Python floor named in the #162 entry, were re-checked against the code on 2026-11-18.
+Status of open issues from [hhannine/superpaper](https://github.com/hhannine/superpaper/issues) in this fork.
 
 ## Resolved In This Fork
 
 - #140, #154, #158, #163, #168: addressed in the current source.
-- #164, #169, #170: AppImage launch failures, fixed in v2.3.2 by the host-isolated build in `release-tooling/appimage/`. The builder compiles the Python 3.14 floor on Ubuntu 22.04 to keep its glibc compatibility.
+- #164, #169, #170: AppImage launch failures, fixed by the host-isolated build in `release-tooling/appimage/`. The builder compiles the Python 3.14 floor on Ubuntu 22.04 to keep its glibc compatibility.
 - #162: the missing `setuptools` failure no longer applies to the packaging; Python 3.13 is outside the support policy below.
 - #135: a missing wallpaper file does not retry forever. Persisted selections are validated as a whole: deleted files fall back to the configured sources, and incomplete per-monitor or per-group selections do not shift images onto the wrong display.
 - #138: slideshow selection is coordinated. Each batch maximizes distinct canonical files across monitors or span groups; duplicates occur only when the configured pools hold too few unique images.
