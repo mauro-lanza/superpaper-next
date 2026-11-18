@@ -198,20 +198,30 @@ class Superpaper:
         if self.hotkeys is not None:
             self.hotkeys.profile_changed(before, after)
 
-    def update_settings(self, settings: Settings) -> None:
+    def update_settings(self, settings: Settings) -> bool:
         """Save ``settings`` as the general settings; windows and wallpaper changes use them
-        from now on. The one writer of the settings file while running."""
-        write_settings(self.settings_path, settings)
+        from now on. If they can't be written the user is told and nothing changes; returns
+        whether they were saved. The one writer of the settings file while running."""
+        try:
+            write_settings(self.settings_path, settings)
+        except OSError as error:
+            logger.exception("Could not save the settings")
+            self._shell.notify(f"The settings could not be saved: {error}", "Error")
+            return False
         self.settings = settings
+        return True
 
-    def apply_settings(self, settings: Settings) -> None:
-        """Save the general settings from the settings window and apply them to the hotkeys."""
-        self.update_settings(settings)
+    def apply_settings(self, settings: Settings) -> bool:
+        """Save the general settings from the settings window and apply them to the hotkeys;
+        returns whether they were saved."""
+        if not self.update_settings(settings):
+            return False
         # Hotkeys turned on or off apply after a restart.
         if self.hotkeys is not None and settings.use_hotkeys:
             self.hotkeys.register_general(settings)
         if settings.logging:
             self._shell.notify("Logging is enabled after an application restart.", "Info")
+        return True
 
     def quit(self) -> None:
         """Stop the session, take the tray icon away and close the application."""

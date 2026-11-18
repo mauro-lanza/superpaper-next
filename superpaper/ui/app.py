@@ -9,6 +9,7 @@ import sys
 import wx  # ty:ignore[unresolved-import]
 
 from superpaper.controller import Shell, Superpaper
+from superpaper.geometry.display_detection import DisplayDetectionError
 from superpaper.paths import AppPaths
 from superpaper.profiles.profile_id import ProfileId, ProfileIdError
 from superpaper.settings import Settings
@@ -66,15 +67,22 @@ class App(wx.App):
         self.SetTopWindow(frame)
         try:
             self.superpaper = start_superpaper(frame, self._paths, self._settings, self._startup_profile)
+        except DisplayDetectionError as error:
+            return _fail_startup(f"No displays could be detected: {error}")
         except (ValueError, configparser.Error) as error:
-            message = f"The saved display layout could not be read: {error}"
-            logger.exception(message)
-            show_message_dialog(message, "Error")
-            return False
+            return _fail_startup(f"The saved display layout could not be read: {error}")
+        except OSError as error:
+            return _fail_startup(f"Superpaper's files could not be read or written: {error}")
         return True
 
     def InitLocale(self):
         """Override with nothing (or impliment local if actually needed)"""
+
+
+def _fail_startup(message: str) -> bool:
+    logger.exception(message)
+    show_message_dialog(message, "Error")
+    return False
 
 
 def start_superpaper(

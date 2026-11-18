@@ -7,7 +7,7 @@ from typing import assert_never
 
 import wx  # ty:ignore[unresolved-import]
 
-from superpaper.geometry import canvas, display_store
+from superpaper.geometry import canvas, layout_edit
 from superpaper.geometry.displays import Layout
 from superpaper.geometry.perspective import Default, Disabled, choice_label, parse_choice
 from superpaper.paths import resource
@@ -166,7 +166,7 @@ class WallpaperSettingsPanel(wx.Panel):
             relayout=self.sizer_main.Layout,
             refresh_preview=self.refresh_layout_preview,
             enable_profile_editing=self.toggle_radio_and_profile_choice,
-            save_layout=lambda layout: display_store.save_layout(paths.config, layout),
+            save_layout=lambda layout: layout_edit.save_display_settings(paths.config, layout),
             on_saved=self.refresh_displays,  # the slideshow uses them from now on
         )
 
@@ -1055,7 +1055,8 @@ class WallpaperSettingsPanel(wx.Panel):
         name = self.choice_profiles.GetString(selection) if selection != wx.NOT_FOUND else ""
         profile = form.revert_profile(name, store=self.store, session=self.session)
         if profile is not None:
-            self.list_of_profiles = self.store.profiles
+            self.update_choiceprofile()
+            self.choice_profiles.SetSelection(self.choice_profiles.FindString(profile.profile.name))
             self.populate_fields(profile)
             return
         # No saved profile to revert to: reset to an empty new profile.
@@ -1200,21 +1201,19 @@ class WallpaperSettingsPanel(wx.Panel):
         dlg.ShowModal()
         dlg.Destroy()
         # Update perspective profile choices
-        open_item = self.choice_profiles.GetSelection()
-        if self.choice_profiles.GetString(open_item) in ("", NEW_PROFILE_LABEL):
-            old_persp_str = choice_label(Default())
-        else:
-            old_persp_str = choice_label(self.list_of_profiles[open_item].profile.perspective)
+        current_label = choice_label(self._selected_perspective())
         persp_choices = self._perspective_labels()
         self.ch_persp.SetItems(persp_choices)
-        if old_persp_str in persp_choices:
-            self.ch_persp.SetSelection(self.ch_persp.FindString(old_persp_str))
+        if current_label in persp_choices:
+            self.ch_persp.SetSelection(self.ch_persp.FindString(current_label))
         else:
-            # The profile referenced a perspective that no longer exists; fall
+            # The form had picked a perspective that no longer exists; fall
             # back to default and surface it as an unsaved change rather than
             # silently writing to disk (Save is the only thing that persists).
             self.ch_persp.SetSelection(0)
-            self._update_dirty_state()
+        # SetItems clears the selection and fires text events that judge the form
+        # while it has none, so the restored one is judged here.
+        self._update_dirty_state()
 
     def onHelp(self, event):
         """Open help dialog."""
