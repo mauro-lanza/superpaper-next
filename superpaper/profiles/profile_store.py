@@ -171,7 +171,7 @@ class ProfileStore:
                 keep.append(ProfileId.parse(stem))
             except ProfileIdError:
                 continue
-        render_cache.sweep(self.paths.cache, keep)
+        render_cache.sweep(self.paths.cache, [profile_id.value for profile_id in keep])
         _sweep_selections(self.paths.cache, keep)
 
     def delete(self, stored: StoredProfile) -> None:
@@ -313,9 +313,8 @@ def read_active_profile_id(cache_dir: Path) -> ProfileId | None:
         return None
 
 
-def write_active_profile(cache_dir: Path, profile: ProfileId | str) -> None:
+def write_active_profile(cache_dir: Path, profile_id: ProfileId) -> None:
     """Remember which profile is running, for the next start."""
-    profile_id = profile if isinstance(profile, ProfileId) else ProfileId.parse(profile)
     write_atomically(_active_pointer_path(cache_dir), profile_id.value.encode("utf-8"))
 
 

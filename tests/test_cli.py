@@ -308,7 +308,7 @@ def test_a_wallpaper_that_cant_be_shown_exits_with_an_error(monkeypatch, tmp_pat
 def test_advanced_cli_arguments_are_preserved(monkeypatch, tmp_path, app_paths, spanned):
     from superpaper import cli
     from superpaper.geometry.perspective import Named
-    from superpaper.profiles.profile_file import Profile
+    from superpaper.profiles.profile_file import OffsetsCorrection, Profile
 
     image = tmp_path / "wallpaper.png"
     image.touch()
@@ -346,7 +346,7 @@ def test_advanced_cli_arguments_are_preserved(monkeypatch, tmp_path, app_paths, 
         slideshow=False,
         sources=((str(image),),),
         perspective=Named("desk"),
-        corrections=(("offsets", ((1, 2),)),),
+        corrections=(OffsetsCorrection(((1, 2),)),),
     )
     # The layout that knows the perspective is the one the wallpaper is rendered for.
     assert captured["render"] == (draft, app_paths, layout, "setter {image}")

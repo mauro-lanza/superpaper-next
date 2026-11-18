@@ -4,6 +4,7 @@ import os
 
 import wx  # ty:ignore[unresolved-import]
 
+from superpaper.files import SaveFailed
 from superpaper.geometry import perspective_form
 from superpaper.geometry.perspective import Named
 from superpaper.paths import resource
@@ -12,6 +13,7 @@ from superpaper.profiles.profile_id import NEW_PROFILE_LABEL
 from superpaper.profiles.selection import real_file
 from superpaper.ui.help import show_help_popup
 from superpaper.ui.message import draft_shown, show_message_dialog
+from superpaper.user_input import Problems
 
 
 class PerspectiveConfig(wx.Dialog):
@@ -368,10 +370,10 @@ class PerspectiveConfig(wx.Dialog):
                 return 0
             result = save(confirmed=True)
         match result:
-            case perspective_form.Problems():
-                show_message_dialog(result.message)
+            case Problems():
+                show_message_dialog(result.messages[0])
                 return 0
-            case perspective_form.SaveFailed():
+            case SaveFailed():
                 self._show_save_failure(result)
                 return 0
             case perspective_form.Saved():

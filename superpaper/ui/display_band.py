@@ -20,7 +20,7 @@ class DisplayBand(wx.CollapsiblePane):
     rest: ``relayout()`` lays the editor out again, ``refresh_preview()`` shows the staged
     layout in the preview, ``enable_profile_editing(enable)`` locks the profile settings
     while bezels are being set, ``save_layout(layout)`` writes a layout to disk and returns
-    a layout_edit.SaveFailed or None, and
+    a SaveFailed or None, and
     ``on_saved()`` is called once the layout is saved.
     """
 
@@ -166,7 +166,7 @@ class DisplayBand(wx.CollapsiblePane):
         """Enable Save and Revert while there are unsaved changes, and only then."""
         if self._reverting or self._clean is None:
             return
-        dirty = layout_edit.has_unsaved_changes(self.staged.layout, self._clean)
+        dirty = self.staged.layout.settings() != self._clean
         if dirty != self.button_system_save.IsEnabled():
             self.button_system_save.Enable(dirty)
             self.button_system_revert.Enable(dirty)
@@ -224,7 +224,7 @@ class DisplayBand(wx.CollapsiblePane):
             self._on_diagonal_changed(None)
         else:
             # Back to auto-detected sizes (staged only), with the displays arranged afresh.
-            self.staged.layout = layout_edit.with_detected_sizes_arranged(self.staged.layout)
+            self.staged.layout = self.staged.layout.with_detected_sizes().with_initial_offsets()
             self._show_diagonals()
             self._refresh_preview()
             self.update_dirty()

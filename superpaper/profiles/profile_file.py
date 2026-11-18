@@ -12,23 +12,47 @@ import math
 import os
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Literal, get_args
+from typing import Literal, assert_never, get_args
 
 from superpaper.geometry.perspective import Default, Disabled, PerspectiveChoice, choice_label, parse_choice
-from superpaper.profiles.selection import is_supported_image
+from superpaper.profiles.selection import SORT_MODES, SortMode, is_supported_image
 from superpaper.settings import format_hotkey, parse_hotkey
+from superpaper.user_input import Offset
 
 logger = logging.getLogger(__name__)
 
 SpanMode = Literal["single", "advanced", "multi"]
 SPAN_MODES: tuple[SpanMode, ...] = get_args(SpanMode)
-SORT_MODES = ("shuffle", "alphabetical", "date_seeded_shuffle")
 MIN_DELAY = 20
 """The shortest slideshow delay, in seconds: rendering a wallpaper takes a while."""
 
 
 class ProfileFormatError(ValueError):
     """A profile file has a setting Superpaper can't use."""
+
+
+@dataclass(frozen=True, slots=True)
+class OffsetsCorrection:
+    """An offsets= line: each display's position offset in pixels."""
+
+    offsets: tuple[Offset, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class PpiCorrection:
+    """A ppi= line: each display's pixel density."""
+
+    ppi: tuple[int, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class DiagonalCorrection:
+    """A diagonal_inches= line: each display's diagonal, from which densities follow."""
+
+    inches: tuple[float, ...]
+
+
+Correction = OffsetsCorrection | PpiCorrection | DiagonalCorrection
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,7 +77,7 @@ class Profile:
     slideshow: bool = True
     delay: float = 600.0
     """Seconds between slideshow images."""
-    sortmode: str = "shuffle"
+    sortmode: SortMode = "shuffle"
     sources: tuple[tuple[str, ...], ...] = ()
     """For each display (multi) or span group, the image files and folders to show."""
     hotkey: tuple[str, ...] | None = None
@@ -61,7 +85,7 @@ class Profile:
     zoom: float = 1.0
     pan: tuple[float, float] = (0.0, 0.0)
     """Where the image sits when it overflows the desktop: -1 to 1 for each axis."""
-    corrections: tuple[tuple[str, tuple], ...] = ()
+    corrections: tuple[Correction, ...] = ()
     """The offsets=, ppi= and diagonal_inches= lines of profiles from before display
     layouts existed, in file order. What they mean depends on the displays present, so
     display_corrections works it out for a layout."""
@@ -71,9 +95,9 @@ class Profile:
     """A selected= line written by an older version: the images it showed last."""
 
     @property
-    def offsets(self) -> tuple[tuple[int, int], ...]:
+    def offsets(self) -> tuple[Offset, ...]:
         """Each display's position offset in pixels, as an offsets= line gives it."""
-        return next((values for key, values in reversed(self.corrections) if key == "offsets"), ())
+        return next((c.offsets for c in reversed(self.corrections) if isinstance(c, OffsetsCorrection)), ())
 
     @property
     def selection_size(self) -> int:
@@ -97,22 +121,25 @@ class Profile:
         ppimode = False
         ppi_array = count * [100]
         offsets = count * [(0, 0)]
-        for key, values in self.corrections:
-            if key == "offsets":
-                ppimode = True
-                offsets = list(values) + (count - len(values)) * [(0, 0)]
-            elif key == "ppi":
-                ppimode = True
-                ppi_array = list(values)
-            elif len(values) < count:
-                logger.info(
-                    "%s display diagonals for %s displays: falling back to no PPI correction.", len(values), count
-                )
-                ppimode = False
-                ppi_array = count * [100]
-            else:
-                ppimode = True
-                ppi_array = [math.sqrt(res[0] ** 2 + res[1] ** 2) / inch for inch, res in zip(values, resolutions)]
+        for correction in self.corrections:
+            match correction:
+                case OffsetsCorrection(values):
+                    ppimode = True
+                    offsets = list(values) + (count - len(values)) * [(0, 0)]
+                case PpiCorrection(values):
+                    ppimode = True
+                    ppi_array = list(values)
+                case DiagonalCorrection(inches) if len(inches) < count:
+                    logger.info(
+                        "%s display diagonals for %s displays: falling back to no PPI correction.", len(inches), count
+                    )
+                    ppimode = False
+                    ppi_array = count * [100]
+                case DiagonalCorrection(inches):
+                    ppimode = True
+                    ppi_array = [math.sqrt(res[0] ** 2 + res[1] ** 2) / inch for inch, res in zip(inches, resolutions)]
+                case _:
+                    assert_never(correction)
         if ppimode and self.bezels:
             offsets = _shift_by_bezels(offsets, ppi_array, self.bezels, count)
         logger.info("Corrections of '%s': PPIs %s, offsets %s", self.name, ppi_array, offsets)
@@ -130,13 +157,13 @@ def parse(text: str) -> Profile:
     spangroups: tuple[tuple[int, ...], ...] | None = None
     slideshow = True
     delay = 600.0
-    sortmode = "shuffle"
+    sortmode: SortMode = "shuffle"
     sources = []
     hotkey = None
     perspective: PerspectiveChoice = Default()
     zoom = 1.0
     pan = (0.0, 0.0)
-    corrections = []
+    corrections: list[Correction] = []
     bezels = []
     selected = None
     for line in text.splitlines():
@@ -164,17 +191,18 @@ def parse(text: str) -> Profile:
         elif key == "delay":
             delay = _numbers(key, value, float)[0]
         elif key == "sortmode":
-            if value.lower() in SORT_MODES:
-                sortmode = value.lower()
-            else:
+            chosen = next((mode for mode in SORT_MODES if mode == value.lower()), None)
+            if chosen is None:
                 logger.info("Unknown sort mode '%s' in profile '%s'.", value, name)
+            else:
+                sortmode = chosen
         elif key == "offsets":
             # x1,y1;x2,y2;... in pixels, from the leftmost display.
-            corrections.append((key, tuple(_parse_offset(pair) for pair in value.split(";"))))
+            corrections.append(OffsetsCorrection(tuple(_parse_offset(pair) for pair in value.split(";"))))
         elif key == "bezels":
             bezels += _numbers(key, value, float)
         elif key == "ppi":
-            corrections.append((key, tuple(_numbers(key, value, int))))
+            corrections.append(PpiCorrection(tuple(_numbers(key, value, int))))
         elif key == "diagonal_inches":
             inches = _numbers(key, value, float)
             # Densities are pixels per inch of diagonal, so a diagonal of 0 makes the
@@ -182,7 +210,7 @@ def parse(text: str) -> Profile:
             if 0 in inches:
                 message = "A display diagonal of 0 inches."
                 raise ProfileFormatError(message)
-            corrections.append((key, tuple(inches)))
+            corrections.append(DiagonalCorrection(tuple(inches)))
         elif key == "hotkey":
             hotkey = parse_hotkey(value)
         elif key == "perspective":
@@ -232,11 +260,16 @@ def serialize(profile: Profile) -> str:
     if profile.slideshow:
         lines.append(f"delay={profile.delay}")
         lines.append(f"sortmode={profile.sortmode}")
-    for key, values in profile.corrections:
-        if key == "offsets":
-            lines.append("offsets=" + ";".join(f"{x},{y}" for x, y in values))
-        else:
-            lines.append(f"{key}=" + ";".join(map(str, values)))
+    for correction in profile.corrections:
+        match correction:
+            case OffsetsCorrection(offsets):
+                lines.append("offsets=" + ";".join(f"{x},{y}" for x, y in offsets))
+            case PpiCorrection(ppi):
+                lines.append("ppi=" + ";".join(map(str, ppi)))
+            case DiagonalCorrection(inches):
+                lines.append("diagonal_inches=" + ";".join(map(str, inches)))
+            case _:
+                assert_never(correction)
     if profile.bezels:
         lines.append("bezels=" + ";".join(map(str, profile.bezels)))
     if profile.hotkey:
@@ -264,7 +297,7 @@ def draft(
     Advanced spanning uses ``offsets``, each display's (x, y) in pixels, and applies the
     ``perspective`` chosen; without one, none is applied.
     """
-    corrections = (("offsets", tuple(offsets)),) if offsets and spanmode == "advanced" else ()
+    corrections = (OffsetsCorrection(tuple(offsets)),) if offsets and spanmode == "advanced" else ()
     return Profile(
         name="cli",
         spanmode=spanmode,

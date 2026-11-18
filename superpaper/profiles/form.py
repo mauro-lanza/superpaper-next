@@ -2,12 +2,12 @@
 
 A ProfileForm holds what the editor's fields show: text where the user types, numbers where
 they drag, choices where they pick. A UI reads its fields into one, shows one in its
-fields, and calls the functions here to turn it into a Profile, to tell whether it changed,
-and to save, delete, revert or apply what it describes.
+fields, and calls the functions here to turn it into a Profile and to tell whether it
+changed. Saving, deleting, reverting and showing what it describes is superpaper.profile_actions.
 """
 
 import logging
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from operator import itemgetter
 from typing import assert_never
@@ -16,21 +16,23 @@ from superpaper.geometry.canvas import DisplayArea
 from superpaper.geometry.displays import Layout
 from superpaper.geometry.perspective import Default, PerspectiveChoice
 from superpaper.profiles import profile_file
-from superpaper.profiles.profile_file import SORT_MODES, Profile, SpanMode
-from superpaper.profiles.profile_id import NEW_PROFILE_LABEL, ProfileId, ProfileIdError
-from superpaper.profiles.profile_store import ProfileStore, StoredProfile, validate_managed_profile_id
-from superpaper.profiles.selection import Selection, is_file
-from superpaper.session import Session
+from superpaper.profiles.profile_file import Correction, OffsetsCorrection, Profile, SpanMode
+from superpaper.profiles.profile_store import StoredProfile
+from superpaper.profiles.selection import Selection, SortMode, is_file
 from superpaper.settings import format_hotkey, parse_hotkey
-from superpaper.user_input import Offset, OffsetError, parse_offsets
+from superpaper.user_input import Offset, OffsetError, Problems, parse_offsets
 
 logger = logging.getLogger(__name__)
 
-SORT_LABELS = ("Shuffle", "Alphabetical", "Date seeded shuffle")
-"""The slideshow orders as the user picks them: SORT_MODES, spelled out."""
+SORT_LABELS: dict[SortMode, str] = {
+    "shuffle": "Shuffle",
+    "alphabetical": "Alphabetical",
+    "date_seeded_shuffle": "Date seeded shuffle",
+}
+"""The slideshow orders as the user picks them."""
+_SORT_MODE_OF_LABEL = {label: mode for mode, label in SORT_LABELS.items()}
 
 SpanGroups = tuple[tuple[int, ...], ...]
-RebindHotkey = Callable[[StoredProfile | None, StoredProfile | None], None]
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,7 +44,7 @@ class ProfileForm:
     slideshow: bool
     delay_minutes: str
     sort_label: str | None
-    """One of SORT_LABELS, or None while the dropdown has no choice."""
+    """One of the SORT_LABELS, or None while the dropdown has no choice."""
     hotkey_enabled: bool
     hotkey: str
     offsets_applied: bool
@@ -58,18 +60,6 @@ class ProfileForm:
     """Whether each source is listed for a display or span group, or all are for one image."""
     sources: tuple[tuple[str, str], ...]
     """The source list's rows: the display or group as listed ("" if not per target) and the path."""
-
-
-@dataclass(frozen=True, slots=True)
-class Problems:
-    """What keeps a form's profile from being saved, applied or deleted, for the user to fix."""
-
-    messages: tuple[str, ...]
-
-
-@dataclass(frozen=True, slots=True)
-class Saved:
-    stored: StoredProfile
 
 
 @dataclass(frozen=True, slots=True)
@@ -168,13 +158,12 @@ def form_from(profile: Profile, layout: Layout) -> ProfileForm:
         rows = tuple((str(target), path) for target, paths in enumerate(profile.sources) for path in paths)
     else:
         rows = tuple(("", path) for paths in profile.sources for path in paths)
-    sort_label = SORT_LABELS[SORT_MODES.index(profile.sortmode)] if profile.sortmode in SORT_MODES else None
     return ProfileForm(
         name=profile.name,
         span_mode=span_mode,
         slideshow=profile.slideshow,
         delay_minutes=str(profile.delay / 60) if profile.slideshow else "",
-        sort_label=sort_label if profile.slideshow else None,
+        sort_label=SORT_LABELS[profile.sortmode] if profile.slideshow else None,
         hotkey_enabled=bool(profile.hotkey),
         hotkey=format_hotkey(profile.hotkey),
         offsets_applied=bool(profile.offsets),
@@ -198,7 +187,7 @@ def parse_form(form: ProfileForm) -> tuple[Profile, list[str]]:
     every field edit."""
     problems = []
     delay = 600.0
-    sortmode = "shuffle"
+    sortmode: SortMode = "shuffle"
     if form.slideshow:
         if not form.delay_minutes.strip():
             problems.append("When using slideshow you need to enter a delay.")
@@ -208,18 +197,18 @@ def parse_form(form: ProfileForm) -> tuple[Profile, list[str]]:
             except ValueError:
                 problems.append(f"The slideshow delay must be a number of minutes, not '{form.delay_minutes}'.")
         if form.sort_label is not None:
-            sortmode = form.sort_label.lower().replace(" ", "_")
+            sortmode = _SORT_MODE_OF_LABEL[form.sort_label]
     hotkey = parse_hotkey(form.hotkey) if form.hotkey_enabled else None
 
     # manual offsets; an empty field means no offset
-    corrections = ()
+    corrections: tuple[Correction, ...] = ()
     if form.offsets_applied:
         try:
             offsets = parse_offsets(form.offsets)
         except OffsetError as error:
             problems.append(str(error))
             offsets = len(form.offsets) * ((0, 0),)
-        corrections = (("offsets", offsets),)
+        corrections = (OffsetsCorrection(offsets),)
 
     # Zoom/pan only applies to a single fixed image; a slideshow always renders at defaults.
     if form.slideshow:
@@ -279,96 +268,6 @@ def chosen_images(profile: Profile, focused_path: str | None, loaded: StoredProf
     return None
 
 
-def preview_images(store: ProfileStore, stored: StoredProfile) -> list[str]:
-    """The images ``stored`` shows now, as the store's current record has them: its
-    selection follows the slideshow."""
-    return (store.get(stored.profile_id) or stored).selection.current()
-
-
-def saved_profile(store: ProfileStore, name: str) -> StoredProfile | None:
-    """The saved profile called ``name``, if there is one."""
-    try:
-        return store.get(ProfileId.parse(name))
-    except ProfileIdError:
-        return None
-
-
-def carry_on_running(store: ProfileStore, session: Session) -> None:
-    """After the store loaded the profiles again, the running profile carries on with its
-    current record, which may hold edits made outside the editor, or stops if its file is gone."""
-    running = session.running
-    if running is not None:
-        session.update(running.profile_id, store.get(running.profile_id))
-
-
-def save_profile(
-    form: ProfileForm,
-    *,
-    focused_path: str | None,
-    loaded: StoredProfile | None,
-    store: ProfileStore,
-    session: Session,
-    rebind_hotkey: RebindHotkey,
-) -> Saved | Problems:
-    """Save the profile ``form`` describes, over ``loaded`` or as a new one, if it is valid."""
-    profile, problems = parse_form(form)
-    logger.info("Saving profile: %s", profile)
-    current_profile_id = loaded.profile_id if loaded is not None else None
-    if profile.name.strip():
-        try:
-            validate_managed_profile_id(store.paths.profiles, profile.name, current_profile_id)
-        except (OSError, ProfileIdError, ValueError) as error:
-            problems.insert(0, str(error))
-    problems += profile_file.validate(profile)
-    if problems:
-        logger.info("The profile was not saved: %s", problems)
-        return Problems(tuple(problems))
-    try:
-        # Saving loads the profiles again: once, here.
-        stored = store.save(
-            profile,
-            selected=chosen_images(profile, focused_path, loaded),
-            current=loaded,
-            update_active=session.renames_running(current_profile_id, profile.name),
-        )
-    except OSError as error:
-        logger.warning("Could not save profile: %s", error)
-        return Problems((str(error),))
-    if current_profile_id is not None:
-        # If it runs, it keeps running under its (possibly new) name, and edits such as the
-        # slideshow delay take effect at once. Before the running profile is looked up
-        # below, which would otherwise find its old name gone.
-        session.update(current_profile_id, stored)
-    carry_on_running(store, session)
-    # Its hotkey follows it, also to a new name.
-    rebind_hotkey(loaded, stored)
-    return Saved(stored)
-
-
-def revert_profile(name: str, *, store: ProfileStore, session: Session) -> StoredProfile | None:
-    """Load the saved profile called ``name`` again from disk, with any changes made to its
-    file outside the editor; None if there is no such saved profile to revert to."""
-    if not name or name == NEW_PROFILE_LABEL:
-        return None
-    store.reload()
-    carry_on_running(store, session)
-    return saved_profile(store, name)
-
-
-def delete_profile(
-    stored: StoredProfile, *, store: ProfileStore, session: Session, rebind_hotkey: RebindHotkey
-) -> Problems | None:
-    """Delete the saved profile ``stored``; what went wrong, or None."""
-    try:
-        store.delete(stored)
-    except (OSError, ValueError) as error:
-        return Problems((str(error),))
-    # If it was running, its slideshow stops; its hotkey is free for other uses.
-    session.update(stored.profile_id, None)
-    rebind_hotkey(stored, None)
-    return None
-
-
 def prepare_draft(form: ProfileForm, focused_path: str | None, loaded: StoredProfile | None) -> Draft | Problems:
     """What showing ``form``'s profile without saving it takes, if it is valid."""
     profile, problems = parse_form(form)
@@ -381,31 +280,3 @@ def prepare_draft(form: ProfileForm, focused_path: str | None, loaded: StoredPro
     images = Selection(profile.sources, profile.sortmode, profile.selection_size, images=chosen).current()
     logger.info("Apply preview (unsaved): %s", profile.name)
     return Draft(profile, images, chosen)
-
-
-def show_draft(
-    draft: Draft,
-    *,
-    loaded: StoredProfile | None,
-    layout: Layout,
-    session: Session,
-    post: Callable[[Callable[[], None]], None],
-    on_shown: Callable[[str | None], None],
-) -> None:
-    """Render ``draft`` for ``layout``, the editor's staged one so that unsaved display
-    settings are reflected; the stored profile and the running one are left untouched.
-
-    ``on_shown(problem)`` runs through ``post`` (the UI thread) once it has been shown.
-    """
-
-    def applied(problem: str | None) -> None:
-        # The applied image becomes the current selection so reopening the dialog (or a
-        # later render) shows the same wallpaper instead of reverting to the previously
-        # saved one (#158).
-        if problem is None and draft.chosen and loaded is not None:
-            loaded.selection.pin(draft.chosen)
-        on_shown(problem)
-
-    session.apply_draft(
-        draft.profile, draft.images, layout=layout, on_done=lambda problem: post(lambda: applied(problem))
-    )

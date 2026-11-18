@@ -4,7 +4,6 @@ import os
 
 from PIL import Image
 
-from superpaper.profiles.profile_id import ProfileId
 from superpaper.rendering import render_cache
 from tests.conftest import monitor
 
@@ -13,7 +12,7 @@ TINY_DISPLAYS = [monitor(0, 0, 2, 2, 10, 10), monitor(3, 1, 2, 2, 10, 10)]
 
 
 def profile_slot(cache, name):
-    return render_cache.slot(cache, ProfileId(name))
+    return render_cache.slot(cache, name)
 
 
 def names(directory):
@@ -59,7 +58,7 @@ def test_windows_renders_are_jpeg(tmp_path):
 
 
 def test_drafts_are_kept_apart_from_the_profiles(tmp_path):
-    saved = render_cache.save(render_cache.slot(tmp_path, None), Image.new("RGB", (5, 3)))
+    saved = render_cache.save(render_cache.draft_slot(tmp_path), Image.new("RGB", (5, 3)))
 
     assert saved == tmp_path / "preview" / "draft-a.png"
     assert names(tmp_path) == ["preview"]
@@ -118,7 +117,7 @@ def test_the_sweep_removes_only_renders_of_profiles_that_are_gone(tmp_path):
     gone = ["main_2-a.png", "main-b-crop-1.png", "cli-b.png", "cli-b-crop-0.png"]
     touch(tmp_path, *kept, *gone, "selections/main2.json", "preview/draft-a.png")
 
-    render_cache.sweep(tmp_path, [ProfileId("main2")])
+    render_cache.sweep(tmp_path, ["main2"])
 
     assert names(tmp_path) == sorted([*kept, "preview", "selections"])
     assert names(tmp_path / "preview") == ["draft-a.png"]

@@ -323,7 +323,12 @@ def show(
     if image is None:
         return _skipped(f"No complete wallpaper selection is available for profile '{profile.name}'.")
     try:
-        output = render_cache.save(render_cache.slot(paths.cache, profile_id), image)
+        slot = (
+            render_cache.draft_slot(paths.cache)
+            if profile_id is None
+            else render_cache.slot(paths.cache, profile_id.value)
+        )
+        output = render_cache.save(slot, image)
     except OSError as error:
         return _skipped(f"The wallpaper could not be saved: {error}")
     result = set_wallpaper(output, files, layout=layout, paths=paths, set_command=set_command, running=running)
@@ -403,11 +408,11 @@ def show_again(stored: StoredProfile, paths: AppPaths, *, layout: Layout, set_co
     editor's Apply, an align test or the command line. Returns False if the profile has
     no render to show, so that it can be rendered.
     """
-    rendered = render_cache.latest(render_cache.slot(paths.cache, stored.profile_id))
+    rendered = render_cache.latest(render_cache.slot(paths.cache, stored.profile_id.value))
     if rendered is None:
         logger.info("Profile '%s' has no earlier render to show.", stored.profile.name)
         return False
-    draft = render_cache.latest(render_cache.slot(paths.cache, None))
+    draft = render_cache.latest(render_cache.draft_slot(paths.cache))
     if draft is not None and draft.modified > rendered.modified:
         rendered = draft
     image = str(rendered.image)
@@ -458,7 +463,7 @@ def _cached_pieces(cache_dir: Path, profile_name: str) -> list[str]:
         profile_id = ProfileId.parse(profile_name)
     except ProfileIdError:  # an activity name no profile can have
         return []
-    rendered = render_cache.latest(render_cache.slot(cache_dir, profile_id))
+    rendered = render_cache.latest(render_cache.slot(cache_dir, profile_id.value))
     return [str(piece) for piece in rendered.pieces] if rendered else []
 
 

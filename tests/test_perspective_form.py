@@ -5,19 +5,19 @@ from types import SimpleNamespace
 
 import pytest
 
+from superpaper.files import SaveFailed
 from superpaper.geometry import canvas, display_detection, display_store
 from superpaper.geometry.perspective import Perspective, Swivel, SwivelAxis, Tilt
 from superpaper.geometry.perspective_form import (
     NeedsConfirm,
     PerspectiveForm,
-    Problems,
     Saved,
-    SaveFailed,
     blank_form,
     form_from,
     save_choice,
     save_perspective,
 )
+from superpaper.user_input import Problems
 
 MONITORS = [
     SimpleNamespace(x=0, y=0, width=1920, height=1080, width_mm=527, height_mm=296, name="A"),
@@ -75,7 +75,7 @@ def test_a_valid_form_is_saved_into_the_layout_and_its_file(layout, tmp_path):
 
 
 def test_a_form_without_a_name_is_a_problem_and_saves_nothing(layout, tmp_path):
-    assert save(layout, tmp_path, form(name="")) == Problems("Profile name is required.")
+    assert save(layout, tmp_path, form(name="")) == Problems(("Profile name is required.",))
     assert not list(tmp_path.iterdir())
 
 
@@ -83,7 +83,7 @@ def test_a_new_perspective_cannot_take_a_reserved_name(layout, tmp_path):
     result = save(layout, tmp_path, form(name="Default"))
 
     assert isinstance(result, Problems)
-    assert "reserved" in result.message
+    assert "reserved" in result.messages[0]
 
 
 @pytest.mark.parametrize(
@@ -98,7 +98,7 @@ def test_fields_that_are_not_numbers_are_a_problem(layout, tmp_path, changes, me
     result = save(layout, tmp_path, form(**changes))
 
     assert isinstance(result, Problems)
-    assert message in result.message
+    assert message in result.messages[0]
 
 
 def test_a_large_intermediate_image_needs_confirming_before_anything_is_saved(layout, tmp_path, monkeypatch):

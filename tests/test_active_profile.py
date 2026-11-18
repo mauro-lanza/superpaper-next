@@ -27,7 +27,7 @@ def running(app_paths):
 def test_active_profile_round_trip(app_paths, tmp_path):
     cache = prepare_profile(app_paths, tmp_path)
 
-    profile_store.write_active_profile(app_paths.cache, "test")
+    profile_store.write_active_profile(app_paths.cache, ProfileId("test"))
 
     assert (cache / "running_profile").read_text(encoding="utf-8") == "test"
     assert running(app_paths).profile.name == "test"
@@ -103,7 +103,7 @@ def test_invalid_active_profile_write_does_not_touch_pointer(app_paths, tmp_path
     pointer.write_text("test", encoding="utf-8")
 
     with pytest.raises(ProfileIdError):
-        profile_store.write_active_profile(app_paths.cache, "../other")
+        profile_store.write_active_profile(app_paths.cache, ProfileId("../other"))
 
     assert pointer.read_text(encoding="utf-8") == "test"
 
@@ -121,7 +121,7 @@ def test_active_profile_write_never_replaces_a_directory(app_paths, tmp_path):
     (cache / "running_profile").mkdir()
 
     with pytest.raises(OSError):
-        profile_store.write_active_profile(app_paths.cache, "test")
+        profile_store.write_active_profile(app_paths.cache, ProfileId("test"))
 
     assert (cache / "running_profile").is_dir()
 

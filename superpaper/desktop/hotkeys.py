@@ -6,17 +6,36 @@ GUI's main loop with ``call_soon`` before it runs.
 
 import logging
 from collections.abc import Callable, Iterable
-from typing import Any
+from typing import Any, Protocol
 
 from superpaper.desktop.linux import running_kde
 from superpaper.profiles.profile_id import ProfileId
-from superpaper.profiles.profile_store import StoredProfile
 from superpaper.settings import Settings, format_hotkey
 
 logger = logging.getLogger(__name__)
 
 NEXT_WALLPAPER = "next wallpaper"
 PAUSE = "pause"
+
+
+class HotkeySetting(Protocol):
+    """The part of a saved profile that a hotkey binds: its name and keys."""
+
+    @property
+    def name(self) -> str: ...
+
+    @property
+    def hotkey(self) -> tuple[str, ...] | None: ...
+
+
+class HotkeyProfile(Protocol):
+    """A saved profile as hotkeys see it: its identity and its settings."""
+
+    @property
+    def profile_id(self) -> ProfileId: ...
+
+    @property
+    def profile(self) -> HotkeySetting: ...
 
 
 class Hotkeys:
@@ -67,14 +86,14 @@ class Hotkeys:
             if bound is not None:
                 self._release(self._general, bound)
 
-    def register_profiles(self, profiles: Iterable[StoredProfile]) -> None:
+    def register_profiles(self, profiles: Iterable[HotkeyProfile]) -> None:
         """Bind each of the saved ``profiles``' own hotkey."""
         for stored in profiles:
             keys = stored.profile.hotkey
             if keys is not None:
                 self._bind_profile(stored, keys)
 
-    def profile_changed(self, before: StoredProfile | None, after: StoredProfile | None) -> None:
+    def profile_changed(self, before: HotkeyProfile | None, after: HotkeyProfile | None) -> None:
         """Rebind a profile's hotkey once the profile was saved, renamed or deleted:
         ``before`` is its record as it was (None for a new profile), ``after`` as it is
         now (None once deleted)."""
@@ -91,7 +110,7 @@ class Hotkeys:
         if after is not None and after.profile.hotkey is not None:
             self._bind_profile(after, after.profile.hotkey)
 
-    def _bind_profile(self, stored: StoredProfile, keys: tuple[str, ...]) -> None:
+    def _bind_profile(self, stored: HotkeyProfile, keys: tuple[str, ...]) -> None:
         owner = self._owners.get(keys)
         if owner == stored.profile_id:
             return

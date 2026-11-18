@@ -6,8 +6,16 @@ says which one, so that nothing is saved or shown from it.
 
 import math
 from collections.abc import Sequence
+from dataclasses import dataclass
 
 Offset = tuple[int, int]
+
+
+@dataclass(frozen=True, slots=True)
+class Problems:
+    """What keeps input from being saved, shown or deleted, for the user to fix."""
+
+    messages: tuple[str, ...]
 
 
 class OffsetError(ValueError):

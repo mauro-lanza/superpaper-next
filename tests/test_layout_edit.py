@@ -4,8 +4,10 @@ from types import SimpleNamespace
 
 import pytest
 
+from superpaper.files import SaveFailed
 from superpaper.geometry import display_detection, display_store, layout_edit
 from superpaper.geometry.layout_edit import ConfiguringBezels, ConfiguringPositions, Idle
+from superpaper.user_input import Problems
 
 MONITORS = [
     SimpleNamespace(x=0, y=0, width=1920, height=1080, width_mm=527, height_mm=296, name="A"),
@@ -100,10 +102,10 @@ def test_bezels_cannot_be_ended_unless_setting_them(layout, state):
 def test_changes_are_unsaved_only_when_the_settings_differ_from_the_saved_ones(layout):
     saved = layout.settings()
 
-    assert not layout_edit.has_unsaved_changes(layout, saved)
-    assert layout_edit.has_unsaved_changes(layout.with_diagonals([20.0, 20.0]), saved)
-    assert layout_edit.has_unsaved_changes(layout.with_offsets([(0, 0), (1, 1)]), saved)
-    assert layout_edit.has_unsaved_changes(layout.with_bezels([(1.0, 0.0), (0.0, 0.0)]), saved)
+    assert layout.settings() == saved
+    assert layout.with_diagonals([20.0, 20.0]).settings() != saved
+    assert layout.with_offsets([(0, 0), (1, 1)]).settings() != saved
+    assert layout.with_bezels([(1.0, 0.0), (0.0, 0.0)]).settings() != saved
 
 
 def test_changing_something_and_back_is_not_a_change(layout):
@@ -111,7 +113,7 @@ def test_changing_something_and_back_is_not_a_change(layout):
 
     changed_back = layout.with_diagonals([20.0, 20.0]).with_detected_sizes()
 
-    assert not layout_edit.has_unsaved_changes(changed_back, saved)
+    assert changed_back.settings() == saved
 
 
 def test_valid_entered_diagonals_are_applied(layout):
@@ -129,7 +131,7 @@ def test_invalid_entered_diagonals_change_nothing(layout, texts):
 def test_returning_to_detected_sizes_arranges_the_displays_afresh(layout):
     manual = layout.with_diagonals([20.0, 20.0]).with_offsets([(0, 500), (7, 0)])
 
-    back = layout_edit.with_detected_sizes_arranged(manual)
+    back = manual.with_detected_sizes().with_initial_offsets()
 
     assert back == layout.with_offsets(back.ppi_norm_offsets)
     assert back.user_diagonal_inches is None
@@ -140,20 +142,25 @@ def test_reverting_restores_the_saved_settings(layout):
     saved = layout.settings()
     edited = layout.with_diagonals([20.0, 20.0]).with_bezels([(3.0, 0.0), (0.0, 0.0)])
 
-    assert layout_edit.has_unsaved_changes(edited, saved)
-    assert not layout_edit.has_unsaved_changes(edited.with_settings(saved), saved)
+    assert edited.settings() != saved
+    assert edited.with_settings(saved).settings() == saved
 
 
 def test_valid_entered_bezels_are_applied(layout):
-    result = layout_edit.with_entered_bezels(layout, [(2.0, 0.0), (0.0, 1.5)])
+    result = layout_edit.with_entered_bezels(layout, [("2.0", "0.0"), ("0.0", "1.5")])
 
     assert result == layout.with_bezels([(2.0, 0.0), (0.0, 1.5)])
 
 
-def test_invalid_entered_bezels_are_reported_by_display_and_side(layout):
-    result = layout_edit.with_entered_bezels(layout, [(None, 0.0), (1.0, None)])
+def test_invalid_entered_bezels_are_reported_with_the_text_entered(layout):
+    result = layout_edit.with_entered_bezels(layout, [("x", "0.0"), ("1.0", "-1")])
 
-    assert result == [(0, 0), (1, 1)]
+    assert result == Problems(
+        (
+            "Bezel thickness must be a non-negative number, 'x' was entered.",
+            "Bezel thickness must be a non-negative number, '-1' was entered.",
+        )
+    )
 
 
 def test_cancelling_the_position_entry_restores_the_offsets_it_opened_with(layout):
@@ -176,5 +183,5 @@ def test_display_settings_that_cant_be_written_come_back_as_a_failure(layout, tm
 
     failure = layout_edit.save_display_settings(not_a_directory, layout)
 
-    assert isinstance(failure, layout_edit.SaveFailed)
+    assert isinstance(failure, SaveFailed)
     assert failure.message.startswith("The display settings could not be saved: ")
