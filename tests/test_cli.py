@@ -311,6 +311,28 @@ def test_setimages_dispatches_one_shot_render(monkeypatch, tmp_path, app_paths, 
     assert spanned == [""]
 
 
+@pytest.mark.parametrize(
+    ("extra_arguments", "expected"),
+    [([], "saved {image}"), (["--command", "given {image}"], "given {image}")],
+)
+def test_setimages_uses_the_saved_set_command_unless_one_is_given(
+    monkeypatch, tmp_path, app_paths, spanned, extra_arguments, expected
+):
+    from superpaper import cli
+
+    image = tmp_path / "wallpaper.png"
+    image.touch()
+    (app_paths.config / "general_settings").write_text("set_command=saved {image}\n", encoding="utf-8")
+    shown = []
+    monkeypatch.setattr(cli, "detect_layout", lambda config_dir: SimpleNamespace(size_hint=lambda: ""))
+    monkeypatch.setattr(cli.desktop, "setter_problem", lambda set_command: "")
+    monkeypatch.setattr(cli, "show", lambda *args, set_command, **kwargs: shown.append(set_command))
+
+    assert cli.run(["--setimages", str(image), *extra_arguments], app_paths) == 0
+    assert shown == [expected]
+    assert spanned == [expected]
+
+
 def test_a_wallpaper_that_cant_be_shown_exits_with_an_error(monkeypatch, tmp_path, app_paths):
     from superpaper import cli
 
