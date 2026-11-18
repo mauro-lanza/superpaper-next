@@ -3,8 +3,8 @@ to every profile, with their own Save and Revert."""
 
 import wx  # ty:ignore[unresolved-import]
 
+from superpaper.geometry import layout_edit
 from superpaper.ui.help import show_help_popup
-from superpaper.user_input import parse_diagonals
 
 
 class DisplayBand(wx.CollapsiblePane):
@@ -164,7 +164,7 @@ class DisplayBand(wx.CollapsiblePane):
         """Enable Save and Revert while there are unsaved changes, and only then."""
         if self._reverting or self._clean is None:
             return
-        dirty = self.staged.layout.settings() != self._clean
+        dirty = layout_edit.has_unsaved_changes(self.staged.layout, self._clean)
         if dirty != self.button_system_save.IsEnabled():
             self.button_system_save.Enable(dirty)
             self.button_system_revert.Enable(dirty)
@@ -176,10 +176,12 @@ class DisplayBand(wx.CollapsiblePane):
         handler (display sizes are system-wide, not part of a profile).
         """
         if not self._reverting and self.cb_diaginch.GetValue():
-            inches = parse_diagonals([tc.GetValue() for tc in self.tc_list_diaginch])
+            layout = layout_edit.with_entered_diagonals(
+                self.staged.layout, [tc.GetValue() for tc in self.tc_list_diaginch]
+            )
             # Mid-edit / invalid entry: don't apply, wait for valid input.
-            if inches is not None:
-                self.staged.layout = self.staged.layout.with_diagonals(inches)
+            if layout is not None:
+                self.staged.layout = layout
                 self._refresh_preview()
         self.update_dirty()
 
@@ -217,7 +219,7 @@ class DisplayBand(wx.CollapsiblePane):
             self._on_diagonal_changed(None)
         else:
             # Back to auto-detected sizes (staged only), with the displays arranged afresh.
-            self.staged.layout = self.staged.layout.with_detected_sizes().with_initial_offsets()
+            self.staged.layout = layout_edit.with_detected_sizes_arranged(self.staged.layout)
             self._show_diagonals()
             self._refresh_preview()
             self.update_dirty()

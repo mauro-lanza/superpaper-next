@@ -2,7 +2,7 @@
 
 import wx  # ty:ignore[unresolved-import]
 
-from superpaper.geometry import positions
+from superpaper.geometry import layout_edit, positions
 from superpaper.paths import resource
 from superpaper.ui.help import show_help_popup
 from superpaper.ui.message import show_message_dialog
@@ -25,7 +25,7 @@ class DisplayPositionEntry(wx.Frame):
         self.staged = preview.staged
         if dragged_positions:
             self.staged.layout = self.layout_editor.dragged_layout(self.staged.layout)  # use dragged offsets first
-        self.old_ppinorm_offs = self.staged.layout.ppi_norm_offsets  # back up the offsets
+        self.opened_with = layout_edit.start_positions(layout_edit.Idle(), self.staged.layout)  # back up the offsets
 
         self.help_bmp = wx.ArtProvider.GetBitmap(wx.ART_QUESTION, wx.ART_BUTTON, wx.Size(20, 20))
 
@@ -218,7 +218,7 @@ class DisplayPositionEntry(wx.Frame):
     def onCancel(self, event):
         """Closes display position config, throwing away unsaved contents."""
         # Restore old offsets
-        self.staged.layout = self.staged.layout.with_offsets(self.old_ppinorm_offs)
+        _, self.staged.layout = layout_edit.cancel_positions(self.opened_with, self.staged.layout)
         # redraw preview with restored data
         self.preview.display_data = self.staged.layout.ppi_norm_areas()
         self.preview.refresh_preview(use_ppi_px=True)
