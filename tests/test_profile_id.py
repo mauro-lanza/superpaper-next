@@ -79,9 +79,9 @@ NON_PORTABLE_NAMES = [
     ("LPT9", "reserved by Windows"),
     ("LPT1 .foo", "reserved by Windows"),
     ("COM¹.log", "reserved by Windows"),
-    ("a" * 201, "cannot exceed"),
-    ("é" * 101, "cannot exceed"),
-    ("😀" * 51, "cannot exceed"),
+    ("a" * 51, "cannot exceed 50 characters"),
+    ("é" * 51, "cannot exceed 50 characters"),
+    ("😀" * 51, "cannot exceed 50 characters"),
 ]
 
 
@@ -100,8 +100,8 @@ def test_existing_non_portable_names_still_identify_profiles(name, _message):
 @pytest.mark.parametrize(
     "name",
     [
-        "a" * 200,
-        "é" * 100,
+        "a" * 50,
+        "é" * 50,
         "😀" * 50,
     ],
 )

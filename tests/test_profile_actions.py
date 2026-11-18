@@ -85,9 +85,9 @@ def test_an_invalid_form_is_not_saved_and_says_why(store, session, app_paths):
 
 
 def test_a_name_that_cant_be_used_comes_first_among_the_problems(store, session, images):
-    result = save(store, session, blank(name="m" * 201, sources=(("", str(images)),)))
+    result = save(store, session, blank(name="m" * 51, sources=(("", str(images)),)))
     assert isinstance(result, Problems)
-    assert "200" in result.messages[0]
+    assert "50" in result.messages[0]
 
 
 def test_saving_over_a_loaded_profile_updates_the_session_and_follows_a_rename(store, session, images):
