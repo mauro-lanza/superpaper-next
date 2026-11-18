@@ -53,7 +53,6 @@ class WallpaperPreviewPanel(wx.Panel):
         self.layout_editor.create_buttons(use_ppi_px=False)
 
         # Colour definitions
-        self.clr_prw_mntr = wx.Colour(0, 0, 0, alpha=wx.ALPHA_OPAQUE)
         self.clr_prw_bkg = wx.Colour(30, 30, 30, alpha=wx.ALPHA_OPAQUE)
         self.SetBackgroundColour(self.clr_prw_bkg)
 
@@ -177,8 +176,8 @@ class WallpaperPreviewPanel(wx.Panel):
             text = str(diagonal) + '"'
             dc.SetTextForeground(font_clr)
             dc.SetFont(font)
-            bmp_w, bmp_h = img_sz
-            text_w, text_h = dc.GetTextExtent(text)
+            bmp_w, _ = img_sz
+            text_w, _ = dc.GetTextExtent(text)
             pos_w = bmp_w - text_w - 5
             pos_h = 5
             dc.DrawText(text, pos_w, pos_h)

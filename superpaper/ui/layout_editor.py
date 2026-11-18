@@ -582,11 +582,6 @@ class LayoutEditor:
                 self.tc_bez.SetValue("0.0")
             self.Hide()
 
-        def bezel_value(self):
-            """Return the entered bezel thickness as a float."""
-            bez = self.tc_bez.GetValue()
-            return float(bez)
-
         def set_bezel_value(self, val):
             """Write val to TextCtrl."""
             self.tc_bez.SetValue(str(val))

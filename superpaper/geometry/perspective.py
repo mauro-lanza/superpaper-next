@@ -285,7 +285,7 @@ class _XYPlaneRectangle:
     def get_corners(self) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """Return rect corners as top left, top right, bot left, bot right."""
         width, height = self.size
-        cent_x, cent_y, cent_z, cent_w = self.center
+        cent_x, cent_y, cent_z, _ = self.center
         corners = (
             np.array([cent_x - width / 2, cent_y + height / 2, cent_z, 1]),
             np.array([cent_x + width / 2, cent_y + height / 2, cent_z, 1]),
