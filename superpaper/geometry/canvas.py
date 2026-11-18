@@ -146,6 +146,21 @@ def place_displays_with_bezels(
     return placed
 
 
+def initial_shape_positions(areas: Sequence[DisplayArea], panel_size: Sequence[float]) -> list[PixelPoint]:
+    """Where the draggable displays sit in the panel when ``areas`` are placed afresh."""
+    _, canvas_pos, scale = fit_to_panel(desktop_extent_with_bezels(areas), panel_size)
+    return [display.position for display in place_displays_with_bezels(areas, canvas_pos, scale)]
+
+
+def dragged_offsets(
+    shape_positions: Sequence[PixelPoint], areas: Sequence[DisplayArea], preview_canvas_width: float
+) -> list[Point]:
+    """The offsets of displays dragged to ``shape_positions`` on a preview canvas
+    ``preview_canvas_width`` wide: scaled up to the true canvas of ``areas``, anchored at (0, 0)."""
+    scaling = desktop_extent(areas)[0] / preview_canvas_width
+    return [(x * scaling, y * scaling) for x, y in translate_to_origin(shape_positions)]
+
+
 def group_canvas(
     sizes_positions: Sequence[tuple[PixelPoint, PixelPoint]], major_canvas_pos: PixelPoint
 ) -> tuple[PixelPoint, PixelPoint]:

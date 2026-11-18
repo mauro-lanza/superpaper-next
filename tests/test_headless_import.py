@@ -31,6 +31,8 @@ HEADLESS_MODULES = (
     "superpaper.geometry.display_store",
     "superpaper.geometry.displays",
     "superpaper.geometry.perspective",
+    "superpaper.geometry.perspective_form",
+    "superpaper.geometry.positions",
     "superpaper.paths",
     "superpaper.profiles",
     "superpaper.profiles.form",

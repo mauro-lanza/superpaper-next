@@ -8,7 +8,7 @@ from superpaper.geometry import canvas
 from superpaper.paths import resource
 from superpaper.ui.message import show_message_dialog
 from superpaper.ui.positions_dialog import DisplayPositionEntry
-from superpaper.user_input import parse_float
+from superpaper.user_input import parse_bezel
 
 logger = logging.getLogger(__name__)
 
@@ -146,12 +146,10 @@ class LayoutEditor:
     def onReset(self, evt):
         """Reset Display preview positions to the initial guess."""
         display_data = self.preview.staged.layout.with_initial_offsets().ppi_norm_areas()
-        dtop_canvas_px = canvas.desktop_extent_with_bezels(display_data)
-        _, dtop_canvas_pos, scaling_fac = canvas.fit_to_panel(dtop_canvas_px, self.preview.GetSize())
-        placed = canvas.place_displays_with_bezels(display_data, dtop_canvas_pos, scaling_fac)
+        positions = canvas.initial_shape_positions(display_data, self.preview.GetSize())
         # Move display preview draggable_shapes
-        for shp, display in zip(self.draggable_shapes, placed):
-            shp.pos = display.position
+        for shp, position in zip(self.draggable_shapes, positions):
+            shp.pos = position
         self.positions_dragged = True
         self.preview.Refresh()
 
@@ -199,12 +197,12 @@ class LayoutEditor:
     def dragged_layout(self, layout):
         """``layout`` with the displays where the shapes were dragged: their positions on
         the preview, scaled up to the true canvas and anchored at (0, 0)."""
-        # DragShape sizes and positions need to be scaled up by true_canvas_old_w/preview_canv_w
+        # DragShape positions are on the preview and need scaling up to the true canvas
         prev_canv_w = self.preview.st_bmp_canvas.GetSize()[0]
-        true_canv_w = canvas.desktop_extent(layout.ppi_norm_areas())[0]
-        scaling = true_canv_w / prev_canv_w
-        offsets = canvas.translate_to_origin([shape.pos for shape in self.draggable_shapes])
-        return layout.with_offsets([(off[0] * scaling, off[1] * scaling) for off in offsets])
+        offsets = canvas.dragged_offsets(
+            [shape.pos for shape in self.draggable_shapes], layout.ppi_norm_areas(), prev_canv_w
+        )
+        return layout.with_offsets(offsets)
 
     #
     # DragImage methods
@@ -595,5 +593,4 @@ class LayoutEditor:
 
         def test_bezel_value(self):
             """The entered bezel thickness, or None unless it is a non-negative number."""
-            value = parse_float(self.tc_bez.GetValue())
-            return value if value is not None and value >= 0 else None
+            return parse_bezel(self.tc_bez.GetValue())

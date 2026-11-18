@@ -42,6 +42,16 @@ class Display:
 
 
 @dataclass(frozen=True, slots=True)
+class DisplaySettings:
+    """The display-wide settings of a Layout that the user edits and saves as a unit."""
+
+    bezels_mm: tuple[Point, ...]
+    offsets: tuple[Point, ...]
+    use_user_diagonals: bool
+    diagonal_inches: tuple[float, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class Layout:
     """The displays with what the user set for them.
 
@@ -240,6 +250,26 @@ class Layout:
     def with_detected_sizes(self) -> Layout:
         """The layout with the detected display sizes; positions are kept."""
         return replace(self, user_diagonal_inches=None)
+
+    def settings(self) -> DisplaySettings:
+        """What the display settings band edits, rounded as it shows them, to compare or restore."""
+        return DisplaySettings(
+            bezels_mm=tuple((round(bezel[0], 2), round(bezel[1], 2)) for bezel in self.bezels_in_mm()),
+            offsets=self.ppi_norm_offsets,
+            use_user_diagonals=self.uses_user_diagonals,
+            diagonal_inches=tuple(round(diagonal, 2) for diagonal in self.diagonal_inches()),
+        )
+
+    def with_settings(self, settings: DisplaySettings) -> Layout:
+        """The layout with ``settings`` restored."""
+        layout = self.with_bezels(settings.bezels_mm)
+        layout = (
+            layout.with_diagonals(settings.diagonal_inches)
+            if settings.use_user_diagonals
+            else layout.with_detected_sizes()
+        )
+        # Positions are restored last: the bezel update above may rearrange the displays.
+        return layout.with_offsets(settings.offsets)
 
     def with_use_perspective(self, use_perspective: bool) -> Layout:
         return replace(self, use_perspective=use_perspective)

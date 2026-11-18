@@ -4,7 +4,7 @@ to every profile, with their own Save and Revert."""
 import wx  # ty:ignore[unresolved-import]
 
 from superpaper.ui.help import show_help_popup
-from superpaper.user_input import parse_float
+from superpaper.user_input import parse_diagonals
 
 
 class DisplayBand(wx.CollapsiblePane):
@@ -140,25 +140,9 @@ class DisplayBand(wx.CollapsiblePane):
     #
     # Change tracking
     #
-    def _snapshot(self):
-        """Capture the display-wide settings as a comparable structure."""
-        layout = self.staged.layout
-        return {
-            "bezels": tuple((round(b[0], 2), round(b[1], 2)) for b in layout.bezels_in_mm()),
-            "offsets": tuple((o[0], o[1]) for o in layout.ppi_norm_offsets),
-            "use_user_diags": layout.uses_user_diagonals,
-            "diags": tuple(round(diagonal, 2) for diagonal in layout.diagonal_inches()),
-        }
-
-    def _restore(self, snap):
-        """Restore the staged layout to a previously captured snapshot."""
-        layout = self.staged.layout.with_bezels([tuple(b) for b in snap["bezels"]])
-        if snap["use_user_diags"]:
-            layout = layout.with_diagonals(list(snap["diags"]))
-        else:
-            layout = layout.with_detected_sizes()
-        # Positions are restored last: the bezel update above may rearrange the displays.
-        self.staged.layout = layout.with_offsets([tuple(o) for o in snap["offsets"]])
+    def _restore(self, settings):
+        """Restore the staged layout to previously captured settings."""
+        self.staged.layout = self.staged.layout.with_settings(settings)
         self._refresh_preview()
 
     def _show_diagonals(self):
@@ -172,7 +156,7 @@ class DisplayBand(wx.CollapsiblePane):
 
     def set_baseline(self):
         """Record the current display-wide settings as the saved, clean baseline."""
-        self._clean = self._snapshot()
+        self._clean = self.staged.layout.settings()
         self.button_system_save.Enable(False)
         self.button_system_revert.Enable(False)
 
@@ -180,7 +164,7 @@ class DisplayBand(wx.CollapsiblePane):
         """Enable Save and Revert while there are unsaved changes, and only then."""
         if self._reverting or self._clean is None:
             return
-        dirty = self._snapshot() != self._clean
+        dirty = self.staged.layout.settings() != self._clean
         if dirty != self.button_system_save.IsEnabled():
             self.button_system_save.Enable(dirty)
             self.button_system_revert.Enable(dirty)
@@ -192,10 +176,9 @@ class DisplayBand(wx.CollapsiblePane):
         handler (display sizes are system-wide, not part of a profile).
         """
         if not self._reverting and self.cb_diaginch.GetValue():
-            entered = [parse_float(tc.GetValue()) for tc in self.tc_list_diaginch]
-            inches = [inch for inch in entered if inch is not None and inch > 0]
+            inches = parse_diagonals([tc.GetValue() for tc in self.tc_list_diaginch])
             # Mid-edit / invalid entry: don't apply, wait for valid input.
-            if inches and len(inches) == len(entered):
+            if inches is not None:
                 self.staged.layout = self.staged.layout.with_diagonals(inches)
                 self._refresh_preview()
         self.update_dirty()
