@@ -2,6 +2,7 @@
 displays and the display settings band."""
 
 import logging
+from dataclasses import replace
 from typing import assert_never
 
 import wx  # ty:ignore[unresolved-import]
@@ -70,7 +71,7 @@ class WallpaperSettingsPanel(wx.Panel):
     running one; drafts (Apply, the align tests) are shown by ``session`` too. The
     display settings band and the perspective dialog work on a staged display layout,
     which starts as the session's. ``get_settings()`` returns the general settings as they are now,
-    ``update_settings(**changes)`` saves them, ``refresh_displays()`` detects the
+    ``update_settings(settings)`` saves them, ``refresh_displays()`` detects the
     displays again, for the session, and ``rebind_hotkey(before, after)`` moves a saved
     profile's hotkey along with it.
     """
@@ -1009,7 +1010,11 @@ class WallpaperSettingsPanel(wx.Panel):
         """Opens the pick paths dialog."""
         num_groups = len(self.read_spangroups()) if self.use_spangroups() else None
         dlg = BrowsePaths(
-            self, self.has_sources_per_target(), self.settings.browse_default_dir, self.update_settings, num_groups
+            self,
+            self.has_sources_per_target(),
+            self.settings.browse_default_dir,
+            lambda path: self.update_settings(replace(self.settings, browse_default_dir=path)),
+            num_groups,
         )
         res = dlg.ShowModal()
         if res == wx.ID_OK:

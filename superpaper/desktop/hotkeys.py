@@ -5,10 +5,13 @@ GUI's main loop with ``call_soon`` before it runs.
 """
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
+from typing import Any
 
 from superpaper.desktop.linux import running_kde
-from superpaper.settings import format_hotkey
+from superpaper.profiles.profile_id import ProfileId
+from superpaper.profiles.profile_store import StoredProfile
+from superpaper.settings import Settings, format_hotkey
 
 logger = logging.getLogger(__name__)
 
@@ -28,12 +31,12 @@ class Hotkeys:
     def __init__(
         self,
         *,
-        next_wallpaper,
-        pause,
-        start_profile,
+        next_wallpaper: Callable[[], None],
+        pause: Callable[[], None],
+        start_profile: Callable[[ProfileId], None],
         call_soon: Callable[[Callable[[], None]], None],
         report: Callable[[str], None],
-    ):
+    ) -> None:
         from system_hotkey import SystemHotkey  # ty:ignore[unresolved-import]
 
         self._call_soon = call_soon
@@ -43,9 +46,9 @@ class Hotkeys:
         self._general = SystemHotkey(check_queue_interval=0.05)
         self._profiles = SystemHotkey(consumer=self._on_profile_hotkey, check_queue_interval=0.05)
         # Key combination -> NEXT_WALLPAPER, PAUSE or the ProfileId it starts.
-        self._owners = {}
+        self._owners: dict[tuple[str, ...], str | ProfileId] = {}
 
-    def register_general(self, settings):
+    def register_general(self, settings: Settings) -> None:
         """Bind the next-wallpaper and pause hotkeys of ``settings``. A changed one
         replaces the keys it had; one that isn't set is left unbound."""
         for action, keys in ((NEXT_WALLPAPER, settings.hk_binding_next), (PAUSE, settings.hk_binding_pause)):
@@ -64,13 +67,14 @@ class Hotkeys:
             if bound is not None:
                 self._release(self._general, bound)
 
-    def register_profiles(self, profiles):
+    def register_profiles(self, profiles: Iterable[StoredProfile]) -> None:
         """Bind each of the saved ``profiles``' own hotkey."""
         for stored in profiles:
-            if stored.profile.hotkey is not None:
-                self._bind_profile(stored)
+            keys = stored.profile.hotkey
+            if keys is not None:
+                self._bind_profile(stored, keys)
 
-    def profile_changed(self, before, after):
+    def profile_changed(self, before: StoredProfile | None, after: StoredProfile | None) -> None:
         """Rebind a profile's hotkey once the profile was saved, renamed or deleted:
         ``before`` is its record as it was (None for a new profile), ``after`` as it is
         now (None once deleted)."""
@@ -85,10 +89,9 @@ class Hotkeys:
         ):
             self._release(self._profiles, before.profile.hotkey)
         if after is not None and after.profile.hotkey is not None:
-            self._bind_profile(after)
+            self._bind_profile(after, after.profile.hotkey)
 
-    def _bind_profile(self, stored):
-        keys = stored.profile.hotkey
+    def _bind_profile(self, stored: StoredProfile, keys: tuple[str, ...]) -> None:
         owner = self._owners.get(keys)
         if owner == stored.profile_id:
             return
@@ -104,7 +107,7 @@ class Hotkeys:
             return
         self._owners[keys] = stored.profile_id
 
-    def _release(self, hotkeys, keys):
+    def _release(self, hotkeys: Any, keys: tuple[str, ...]) -> None:
         del self._owners[keys]
         try:
             hotkeys.unregister(keys)
@@ -117,17 +120,17 @@ class Hotkeys:
         profile_id = bound_args[0][0]
         self._call_soon(lambda: self._start_profile(profile_id))
 
-    def _report_taken(self, keys, wanted_for):
+    def _report_taken(self, keys: tuple[str, ...], wanted_for: str) -> None:
         self._report(
             f"Could not register hotkey: '{format_hotkey(keys)}' for {wanted_for}.\nIt is already registered for another action."
         )
 
-    def _report_refused(self, keys):
+    def _report_refused(self, keys: tuple[str, ...]) -> None:
         self._report(
             f"Error: could not register hotkey {format_hotkey(keys)}. Check that it is formatted properly and valid keys."
         )
 
-    def _report(self, message):
+    def _report(self, message: str) -> None:
         logger.warning("%s", message)
         # Hotkey errors have only been logged on KDE Plasma since per-activity wallpapers
         # came in; elsewhere they are shown too.

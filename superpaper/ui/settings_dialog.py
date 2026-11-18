@@ -1,5 +1,7 @@
 """The general settings window."""
 
+from dataclasses import replace
+
 import wx  # ty:ignore[unresolved-import]
 
 from superpaper.settings import format_hotkey, parse_hotkey
@@ -8,10 +10,10 @@ from superpaper.settings import format_hotkey, parse_hotkey
 class SettingsFrame(wx.Frame):
     """The general settings window: see SettingsPanel."""
 
-    def __init__(self, settings, save_settings):
+    def __init__(self, get_settings, save_settings):
         wx.Frame.__init__(self, parent=None, title="Superpaper General Settings")
         self.frame_sizer = wx.BoxSizer(wx.VERTICAL)
-        settings_panel = SettingsPanel(self, settings, save_settings)
+        settings_panel = SettingsPanel(self, get_settings, save_settings)
         self.frame_sizer.Add(settings_panel, 1, wx.EXPAND)
         self.SetAutoLayout(True)
         self.SetSizer(self.frame_sizer)
@@ -22,12 +24,13 @@ class SettingsFrame(wx.Frame):
 
 
 class SettingsPanel(wx.Panel):
-    """The general settings window's contents, showing ``settings``; ``save_settings(**changes)``
+    """The general settings window's contents, showing ``get_settings()``; ``save_settings(settings)``
     saves the fields as the new settings."""
 
-    def __init__(self, parent, settings, save_settings):
+    def __init__(self, parent, get_settings, save_settings):
         wx.Panel.__init__(self, parent)
         self.frame = parent
+        self._get_settings = get_settings
         self._save_settings = save_settings
         self.sizer_main = wx.BoxSizer(wx.VERTICAL)
         self.sizer_grid_settings = wx.GridSizer(6, 2, 5, 5)
@@ -62,7 +65,7 @@ class SettingsPanel(wx.Panel):
                 (self.tc_setcmd, 0, wx.ALIGN_LEFT),
             ]
         )
-        self.update_fields(settings)
+        self.update_fields(get_settings())
         self.button_save = wx.Button(self, label="Save")
         self.button_close = wx.Button(self, label="Close")
         self.button_save.Bind(wx.EVT_BUTTON, self.onSave)
@@ -87,12 +90,15 @@ class SettingsPanel(wx.Panel):
     def onSave(self, event):
         """Saves settings to file."""
         self._save_settings(
-            logging=self.cb_logging.GetValue(),
-            use_hotkeys=self.cb_usehotkeys.GetValue(),
-            warn_large_img=self.cb_warn_large.GetValue(),
-            hk_binding_next=parse_hotkey(self.tc_hk_next.GetLineText(0)),
-            hk_binding_pause=parse_hotkey(self.tc_hk_pause.GetLineText(0)),
-            set_command=self.tc_setcmd.GetLineText(0).strip(),
+            replace(
+                self._get_settings(),
+                logging=self.cb_logging.GetValue(),
+                use_hotkeys=self.cb_usehotkeys.GetValue(),
+                warn_large_img=self.cb_warn_large.GetValue(),
+                hk_binding_next=parse_hotkey(self.tc_hk_next.GetLineText(0)),
+                hk_binding_pause=parse_hotkey(self.tc_hk_pause.GetLineText(0)),
+                set_command=self.tc_setcmd.GetLineText(0).strip(),
+            )
         )
 
     def onClose(self, event):

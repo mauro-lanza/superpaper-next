@@ -115,7 +115,7 @@ def _open_editor(app: Superpaper) -> None:
 
 
 def _open_settings(app: Superpaper) -> None:
-    SettingsFrame(app.settings, save_settings=app.apply_settings)
+    SettingsFrame(lambda: app.settings, save_settings=app.apply_settings)
 
 
 def _open_help(app: Superpaper) -> None:

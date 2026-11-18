@@ -91,11 +91,11 @@ class TaskBarIcon(wx.adv.TaskBarIcon):
             self.set_icon(str(resource("superpaper.png")))
 
     @property
-    def clickable(self):
+    def clickable(self) -> bool:
         """Whether the icon can be clicked: the wx one can't be on KDE Plasma 6."""
         return self._sni_tray is not None or not running_kde()
 
-    def remove(self):
+    def remove(self) -> None:
         """Take the icon away, as Superpaper quits."""
         if self._sni_tray is not None:
             try:

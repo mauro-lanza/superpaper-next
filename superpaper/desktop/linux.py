@@ -6,7 +6,7 @@ import os
 import shutil
 from typing import Literal, assert_never
 
-from superpaper.desktop import kde
+import superpaper.desktop.kde as kde
 from superpaper.desktop.process import QUICK, Result, run
 from superpaper.desktop.wallpaper import Pieces, Wallpaper
 

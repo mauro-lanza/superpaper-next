@@ -5,8 +5,8 @@ are the UI's; they come in as a ``Shell``."""
 import configparser
 import logging
 from collections.abc import Callable
-from dataclasses import dataclass, replace
-from typing import Any
+from dataclasses import dataclass
+from typing import Protocol
 
 import superpaper.desktop as desktop
 import superpaper.geometry.display_detection as display_detection
@@ -14,18 +14,26 @@ from superpaper.desktop.hotkeys import Hotkeys
 from superpaper.paths import AppPaths
 from superpaper.profiles import profile_store
 from superpaper.profiles.profile_id import ProfileId
-from superpaper.profiles.profile_store import ProfileDiagnosticKind, ProfileStore
+from superpaper.profiles.profile_store import ProfileDiagnosticKind, ProfileStore, StoredProfile
 from superpaper.session import Session
 from superpaper.settings import SETTINGS_FILE, Settings, write_settings
 
 logger = logging.getLogger(__name__)
 
 
+class Tray(Protocol):
+    """The tray icon the UI makes."""
+
+    @property
+    def clickable(self) -> bool: ...
+
+    def remove(self) -> None: ...
+
+
 @dataclass(frozen=True, slots=True)
 class Shell:
     """What the UI does for Superpaper. The ``open_*`` and ``make_tray`` actions are given
-    the running Superpaper to build their windows and icon from; ``make_tray`` returns an
-    icon with a ``clickable`` flag and a ``remove()``."""
+    the running Superpaper to build their windows and icon from."""
 
     notify: Callable[[str, str], None]  # message, title
     confirm: Callable[[str], bool]
@@ -33,7 +41,7 @@ class Shell:
     open_editor: Callable[[Superpaper], None]
     open_settings: Callable[[Superpaper], None]
     open_help: Callable[[Superpaper], None]
-    make_tray: Callable[[Superpaper], Any]
+    make_tray: Callable[[Superpaper], Tray]
     close: Callable[[], None]
 
 
@@ -60,7 +68,7 @@ class Superpaper:
         self.tray = shell.make_tray(self)
         self._show_at_start()
 
-    def _run_at_startup(self, startup_profile):
+    def _run_at_startup(self, startup_profile: ProfileId | None) -> None:
         """Run the profile asked for on the command line, or carry on with the one that ran
         when Superpaper last exited."""
         if startup_profile:
@@ -79,7 +87,7 @@ class Superpaper:
         else:
             self.session.restore(previous)
 
-    def _start_hotkeys(self):
+    def _start_hotkeys(self) -> Hotkeys | None:
         """The system-wide hotkeys, bound; None while they are off or unavailable. Hotkeys
         turned on or off in the settings apply after a restart."""
         if not self.settings.use_hotkeys:
@@ -101,7 +109,7 @@ class Superpaper:
         hotkeys.register_profiles(self.store.profiles)
         return hotkeys
 
-    def _show_at_start(self):
+    def _show_at_start(self) -> None:
         """Open the help and the configuration if they are to be shown at start, and say
         once if wallpapers can't be set here or the displays' sizes aren't known."""
         if self.settings.show_help:
@@ -122,24 +130,24 @@ class Superpaper:
             logger.warning("%s", size_hint)
             self._shell.call_soon(lambda: self._shell.notify(size_hint, "Info"))
 
-    def open_editor(self):
+    def open_editor(self) -> None:
         """Open the wallpaper configuration."""
         try:
             self._shell.open_editor(self)
         except Exception as error:
             logger.error("configure_wallpapers error: %s", error, exc_info=True)
 
-    def open_settings(self):
+    def open_settings(self) -> None:
         """Open the general settings."""
         self._shell.open_settings(self)
 
-    def start_profile(self, stored):
+    def start_profile(self, stored: StoredProfile) -> None:
         """Run the saved profile ``stored`` on the displays as they are now, or show its
         next image if it runs already."""
         self.refresh_displays()
         self.session.activate(stored)
 
-    def start_profile_by_id(self, profile_id):
+    def start_profile_by_id(self, profile_id: ProfileId) -> None:
         """Start the profile currently loaded under ``profile_id``, if it still exists."""
         stored = self.store.get(profile_id)
         if stored is None:
@@ -147,7 +155,7 @@ class Superpaper:
             return
         self.start_profile(stored)
 
-    def reload_profiles(self):
+    def reload_profiles(self) -> None:
         """Load the profiles directory again, asking about profiles that can't be loaded."""
         self._load_profiles()
         # The running profile carries on with its current record, whose file may have
@@ -156,7 +164,7 @@ class Superpaper:
         if running is not None:
             self.session.update(running.profile_id, self.store.get(running.profile_id))
 
-    def _load_profiles(self):
+    def _load_profiles(self) -> None:
         """Read the profiles directory again, offering to delete profiles that can't be loaded."""
         for diagnostic in self.store.reload():
             if diagnostic.kind is not ProfileDiagnosticKind.MALFORMED_CONTENT:
@@ -170,7 +178,7 @@ class Superpaper:
             if self._shell.confirm(message):
                 profile_store.delete_malformed(diagnostic)
 
-    def refresh_displays(self):
+    def refresh_displays(self) -> None:
         """Detect the displays again and load their saved layout; later wallpaper changes
         use it. If detection fails, the previous layout stays in use.
 
@@ -184,30 +192,28 @@ class Superpaper:
             return
         self.session.use_displays(layout)
 
-    def rebind_hotkey(self, before, after):
+    def rebind_hotkey(self, before: StoredProfile | None, after: StoredProfile | None) -> None:
         """Rebind a profile's hotkey once it was saved, renamed or deleted: see
         Hotkeys.profile_changed."""
         if self.hotkeys is not None:
             self.hotkeys.profile_changed(before, after)
 
-    def update_settings(self, **changes):
-        """Save the general settings with ``changes`` made; windows and wallpaper changes
-        use them from now on. The one writer of the settings file while running."""
-        settings = replace(self.settings, **changes)
+    def update_settings(self, settings: Settings) -> None:
+        """Save ``settings`` as the general settings; windows and wallpaper changes use them
+        from now on. The one writer of the settings file while running."""
         write_settings(self.settings_path, settings)
         self.settings = settings
-        return settings
 
-    def apply_settings(self, **changes):
+    def apply_settings(self, settings: Settings) -> None:
         """Save the general settings from the settings window and apply them to the hotkeys."""
-        settings = self.update_settings(**changes)
+        self.update_settings(settings)
         # Hotkeys turned on or off apply after a restart.
         if self.hotkeys is not None and settings.use_hotkeys:
             self.hotkeys.register_general(settings)
         if settings.logging:
             self._shell.notify("Logging is enabled after an application restart.", "Info")
 
-    def quit(self):
+    def quit(self) -> None:
         """Stop the session, take the tray icon away and close the application."""
         self.session.shutdown()
         self.tray.remove()
