@@ -2,6 +2,8 @@
 
 import wx  # ty:ignore[unresolved-import]
 
+from superpaper.settings import format_hotkey, parse_hotkey
+
 
 class SettingsFrame(wx.Frame):
     """The general settings window: see SettingsPanel."""
@@ -78,24 +80,18 @@ class SettingsPanel(wx.Panel):
         self.cb_logging.SetValue(g_settings.logging)
         self.cb_usehotkeys.SetValue(g_settings.use_hotkeys)
         self.cb_warn_large.SetValue(g_settings.warn_large_img)
-        self.tc_hk_next.ChangeValue(self.show_hkbinding(g_settings.hk_binding_next))
-        self.tc_hk_pause.ChangeValue(self.show_hkbinding(g_settings.hk_binding_pause))
+        self.tc_hk_next.ChangeValue(format_hotkey(g_settings.hk_binding_next))
+        self.tc_hk_pause.ChangeValue(format_hotkey(g_settings.hk_binding_pause))
         self.tc_setcmd.ChangeValue(g_settings.set_command)
-
-    def show_hkbinding(self, hktuple):
-        """Formats hotkey tuple as a readable string."""
-        return "+".join(hktuple) if hktuple else ""
 
     def onSave(self, event):
         """Saves settings to file."""
-        hk_next = self.tc_hk_next.GetLineText(0)
-        hk_pause = self.tc_hk_pause.GetLineText(0)
         self._save_settings(
             logging=self.cb_logging.GetValue(),
             use_hotkeys=self.cb_usehotkeys.GetValue(),
             warn_large_img=self.cb_warn_large.GetValue(),
-            hk_binding_next=tuple(hk_next.strip().split("+")) if hk_next else None,
-            hk_binding_pause=tuple(hk_pause.strip().split("+")) if hk_pause else None,
+            hk_binding_next=parse_hotkey(self.tc_hk_next.GetLineText(0)),
+            hk_binding_pause=parse_hotkey(self.tc_hk_pause.GetLineText(0)),
             set_command=self.tc_setcmd.GetLineText(0).strip(),
         )
 

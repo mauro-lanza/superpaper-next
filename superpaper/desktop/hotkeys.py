@@ -8,6 +8,7 @@ import logging
 from collections.abc import Callable
 
 from superpaper.desktop.linux import running_kde
+from superpaper.settings import format_hotkey
 
 logger = logging.getLogger(__name__)
 
@@ -108,7 +109,7 @@ class Hotkeys:
         try:
             hotkeys.unregister(keys)
         except Exception as error:
-            logger.warning("Could not unregister hotkey %s: %s", "+".join(keys), error)
+            logger.warning("Could not unregister hotkey %s: %s", format_hotkey(keys), error)
 
     def _on_profile_hotkey(self, event, hotkey, bound_args):
         """system_hotkey's consumer: start the profile bound to ``hotkey``. Called on its
@@ -118,12 +119,12 @@ class Hotkeys:
 
     def _report_taken(self, keys, wanted_for):
         self._report(
-            f"Could not register hotkey: '{'+'.join(keys)}' for {wanted_for}.\nIt is already registered for another action."
+            f"Could not register hotkey: '{format_hotkey(keys)}' for {wanted_for}.\nIt is already registered for another action."
         )
 
     def _report_refused(self, keys):
         self._report(
-            f"Error: could not register hotkey {'+'.join(keys)}. Check that it is formatted properly and valid keys."
+            f"Error: could not register hotkey {format_hotkey(keys)}. Check that it is formatted properly and valid keys."
         )
 
     def _report(self, message):

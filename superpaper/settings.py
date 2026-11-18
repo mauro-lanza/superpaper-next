@@ -27,6 +27,17 @@ class Settings:
     warn_large_img: bool = True
 
 
+def parse_hotkey(text: str) -> tuple[str, ...] | None:
+    """The keys of a ``key+key`` hotkey text, or None if it is blank."""
+    text = text.strip()
+    return tuple(text.split("+")) if text else None
+
+
+def format_hotkey(keys: tuple[str, ...] | None) -> str:
+    """The ``key+key`` text of a hotkey; empty if there is none."""
+    return "+".join(keys or ())
+
+
 def first_run_settings(platform: str) -> Settings:
     """The settings a new installation starts with. Hotkeys are off by default on macOS."""
     return Settings(
@@ -52,9 +63,9 @@ def read_settings(path: Path, platform: str) -> Settings:
             case "use hotkeys":
                 settings = replace(settings, use_hotkeys=value.lower() == "true")
             case "next wallpaper hotkey":
-                settings = replace(settings, hk_binding_next=tuple(value.split("+")) if value else None)
+                settings = replace(settings, hk_binding_next=parse_hotkey(value))
             case "pause wallpaper hotkey":
-                settings = replace(settings, hk_binding_pause=tuple(value.split("+")) if value else None)
+                settings = replace(settings, hk_binding_pause=parse_hotkey(value))
             case "set_command":
                 settings = replace(settings, set_command=value)
             case "browse_default_dir":
@@ -75,9 +86,9 @@ def write_settings(path: Path, settings: Settings) -> None:
         f"use hotkeys={_flag(settings.use_hotkeys)}",
     ]
     if settings.hk_binding_next:
-        lines.append("next wallpaper hotkey=" + "+".join(settings.hk_binding_next))
+        lines.append("next wallpaper hotkey=" + format_hotkey(settings.hk_binding_next))
     if settings.hk_binding_pause:
-        lines.append("pause wallpaper hotkey=" + "+".join(settings.hk_binding_pause))
+        lines.append("pause wallpaper hotkey=" + format_hotkey(settings.hk_binding_pause))
     lines += [
         f"show_help_at_start={_flag(settings.show_help)}",
         f"set_command={settings.set_command}",

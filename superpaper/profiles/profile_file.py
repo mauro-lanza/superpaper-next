@@ -16,6 +16,7 @@ from typing import Literal, get_args
 
 from superpaper.geometry.perspective import Default, Disabled, PerspectiveChoice, choice_label, parse_choice
 from superpaper.profiles.selection import is_supported_image
+from superpaper.settings import format_hotkey, parse_hotkey
 
 logger = logging.getLogger(__name__)
 
@@ -183,7 +184,7 @@ def parse(text: str) -> Profile:
                 raise ProfileFormatError(message)
             corrections.append((key, tuple(inches)))
         elif key == "hotkey":
-            hotkey = tuple(value.split("+")) if value else None
+            hotkey = parse_hotkey(value)
         elif key == "perspective":
             perspective = parse_choice(value)
         elif key == "zoom":
@@ -239,7 +240,7 @@ def serialize(profile: Profile) -> str:
     if profile.bezels:
         lines.append("bezels=" + ";".join(map(str, profile.bezels)))
     if profile.hotkey:
-        lines.append("hotkey=" + "+".join(profile.hotkey))
+        lines.append("hotkey=" + format_hotkey(profile.hotkey))
     lines.append(f"perspective={choice_label(profile.perspective)}")
     if profile.zoom != 1.0:
         lines.append(f"zoom={profile.zoom}")
