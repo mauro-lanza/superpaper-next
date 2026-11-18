@@ -2,11 +2,10 @@
 
 import wx  # ty:ignore[unresolved-import]
 
-from superpaper.geometry import canvas
+from superpaper.geometry import positions
 from superpaper.paths import resource
 from superpaper.ui.help import show_help_popup
 from superpaper.ui.message import show_message_dialog
-from superpaper.user_input import parse_float
 
 
 class DisplayPositionEntry(wx.Frame):
@@ -187,27 +186,12 @@ class DisplayPositionEntry(wx.Frame):
 
     def update_offsets_and_redraw(self):
         """Collect display postitions and redraw preview."""
-        max_ppi = self.staged.layout.max_ppi()
-        if self.cb_use_px.GetValue():
-            unit_mult = 1
-        else:
-            unit_mult = max_ppi / 25.4  # convert ppi to px/mm
-        offs = []
-        for row in self.grid_rows:
-            new_off = []
-            for tc in row[-2:]:
-                tc_val = tc.GetValue()
-                value = parse_float(tc_val)
-                if value is None:
-                    if tc_val:
-                        msg = f"Entered value '{tc_val}' is not valid."
-                    else:
-                        msg = "Please enter a position for every display. Some value is empty."
-                    show_message_dialog(msg)
-                    return False
-                new_off.append(value * unit_mult)
-            offs.append((new_off[0], new_off[1]))
-        offs = canvas.translate_to_origin(offs)
+        fields = [(row[-2].GetValue(), row[-1].GetValue()) for row in self.grid_rows]
+        try:
+            offs = positions.parse_new_offsets(fields, self.staged.layout.max_ppi(), use_px=self.cb_use_px.GetValue())
+        except ValueError as error:
+            show_message_dialog(str(error))
+            return False
 
         self.staged.layout = self.staged.layout.with_offsets(offs)
         self.preview.display_data = self.staged.layout.ppi_norm_areas()
@@ -268,33 +252,21 @@ class DisplayPositionEntry(wx.Frame):
     def populate_fields(self):
         """Populate config fields from the staged layout's offsets."""
         layout = self.staged.layout
-        max_ppi = layout.max_ppi()
-        if self.cb_use_px.GetValue():
-            unit_mult = 1
-        else:
-            unit_mult = 1 / (max_ppi / 25.4)  # convert ppi to px/mm
-        crops = layout.ppi_norm_crops(len(layout.displays) * [(0, 0)])
-        bezels = layout.ppi_norm_bezels()
-        for row, ltrb, bez in zip(self.grid_rows, crops, bezels):
-            row[0].SetLabel(str(self.grid_rows.index(row)))
-            row[1].SetValue(str(ltrb[0] * unit_mult))
-            row[2].SetValue(str(ltrb[1] * unit_mult))
-            row[3].SetValue(str((ltrb[2] + bez[0]) * unit_mult))
-            row[4].SetValue(str((ltrb[3] + bez[1]) * unit_mult))
-            row[5].SetValue(str(ltrb[0] * unit_mult))
-            row[6].SetValue(str(ltrb[1] * unit_mult))
+        edges = positions.edges_in_unit(layout, use_px=self.cb_use_px.GetValue())
+        for index, (row, (left, top, right, bottom)) in enumerate(zip(self.grid_rows, edges)):
+            row[0].SetLabel(str(index))
+            row[1].SetValue(str(left))
+            row[2].SetValue(str(top))
+            row[3].SetValue(str(right))
+            row[4].SetValue(str(bottom))
+            row[5].SetValue(str(left))
+            row[6].SetValue(str(top))
 
     def convert_units(self, use_px):
         """Convert table data between px and mm in place."""
         max_ppi = self.staged.layout.max_ppi()
-        if use_px:
-            # convert from mm to px
-            unit_mult = max_ppi / 25.4
-        else:
-            # convert from px to mm
-            unit_mult = 1 / (max_ppi / 25.4)
         for row in self.grid_rows:
             for tc in row[1:]:
                 curval = tc.GetValue()
                 if curval:
-                    tc.SetValue(str(unit_mult * float(curval)))
+                    tc.SetValue(positions.convert_unit(curval, max_ppi, to_px=use_px))

@@ -2,7 +2,6 @@
 displays and the display settings band."""
 
 import logging
-from operator import itemgetter
 from typing import assert_never
 
 import wx  # ty:ignore[unresolved-import]
@@ -11,11 +10,10 @@ from superpaper.geometry import canvas, display_store
 from superpaper.geometry.displays import Layout
 from superpaper.geometry.perspective import Default, Disabled, choice_label, parse_choice
 from superpaper.paths import resource
-from superpaper.profiles import profile_file
-from superpaper.profiles.profile_file import SPAN_MODES, Profile, SpanMode
-from superpaper.profiles.profile_id import NEW_PROFILE_LABEL, ProfileId, ProfileIdError
-from superpaper.profiles.profile_store import validate_managed_profile_id
-from superpaper.profiles.selection import Selection, first_image, is_file, is_folder
+from superpaper.profiles import form, profile_file
+from superpaper.profiles.profile_file import SPAN_MODES, SpanMode
+from superpaper.profiles.profile_id import NEW_PROFILE_LABEL
+from superpaper.profiles.selection import first_image, is_file
 from superpaper.ui.browse_dialog import BrowsePaths, source_icon
 from superpaper.ui.display_band import DisplayBand
 from superpaper.ui.help import HelpFrame, image_quality_advice, show_help_popup
@@ -274,7 +272,7 @@ class WallpaperSettingsPanel(wx.Panel):
             statbox_parent_sshow,
             -1,
             name="SortChoice",
-            choices=["Shuffle", "Alphabetical", "Date seeded shuffle"],
+            choices=list(form.SORT_LABELS),
             style=wx.CB_READONLY,
         )
         self.st_sshow_delay = wx.StaticText(statbox_parent_sshow, -1, "Delay (minutes):")
@@ -527,96 +525,16 @@ class WallpaperSettingsPanel(wx.Panel):
         self._loading = True
         profile = stored.profile
         self.loaded_profile = stored
-        self.tc_name.ChangeValue(profile.name)
-
-        corrections = profile.display_corrections(self.staged.layout.resolutions())
-        # An old profile that corrects positions without saying advanced, is shown as advanced.
-        legacy_advanced = profile.spanmode == "single" and bool(
-            corrections.ppimode or profile.bezels or profile.offsets
-        )
-        self.span_mode = "advanced" if legacy_advanced else profile.spanmode
-        self.radiobox_spanmode.SetSelection(SPAN_MODES.index(self.span_mode))
-
-        if profile.slideshow:
-            self.cb_slideshow.SetValue(True)
-            wx.PostEvent(self.cb_slideshow, wx.CommandEvent(commandEventType=wx.EVT_CHECKBOX.typeId))
-            self.tc_sshow_delay.ChangeValue(str(profile.delay / 60))
-            if profile.sortmode == "shuffle":
-                self.ch_sshow_sort.SetSelection(0)
-            elif profile.sortmode == "alphabetical":
-                self.ch_sshow_sort.SetSelection(1)
-            elif profile.sortmode == "date_seeded_shuffle":
-                self.ch_sshow_sort.SetSelection(2)
-            else:
-                self.ch_sshow_sort.SetSelection(wx.NOT_FOUND)
-        else:
-            self.cb_slideshow.SetValue(False)
-            wx.PostEvent(self.cb_slideshow, wx.CommandEvent(commandEventType=wx.EVT_CHECKBOX.typeId))
-            self.tc_sshow_delay.Clear()
-            self.ch_sshow_sort.SetSelection(wx.NOT_FOUND)
-
-        if profile.hotkey:
-            self.cb_hotkey.SetValue(True)
-            self.tc_hotkey_bind.ChangeValue(self.show_hkbinding(profile.hotkey))
-        else:
-            self.cb_hotkey.SetValue(False)
-            self.tc_hotkey_bind.Clear()
-        wx.PostEvent(self.cb_hotkey, wx.CommandEvent(commandEventType=wx.EVT_CHECKBOX.typeId))
-
-        # Advanced settings
-        self.show_adv_setting_sizer(self.span_mode == "advanced")
-        # profile.inches: not stored in profile anymore
-        # profile.bezels: not stored in profile anymore
-        if profile.offsets:
-            self.cb_offsets.SetValue(True)
-            # A profile may give fewer offsets than there are displays; the rest are 0,0.
-            offsets = list(profile.offsets) + len(self.tc_list_offsets) * [(0, 0)]
-            for tc, off in zip(self.tc_list_offsets, offsets):
-                offstr = f"{off[0]},{off[1]}"
-                tc.SetValue(offstr)
-        else:
-            self.cb_offsets.SetValue(False)
-        wx.PostEvent(self.cb_offsets, wx.CommandEvent(commandEventType=wx.EVT_CHECKBOX.typeId))
-        persp_label = choice_label(profile.perspective)
-        if persp_label:
-            self.ch_persp.SetSelection(self.ch_persp.FindString(persp_label, False))
-        else:
-            self.ch_persp.SetSelection(0)
-        if profile.spangroups:
-            self.cb_spangroups.SetValue(True)
-            for display, ch in enumerate(self.ch_list_spangroups):
-                group = next((number for number, members in enumerate(profile.spangroups) if display in members), None)
-                if group is not None:
-                    ch.SetSelection(group)
-            self.toggle_spangroup_widgets(True)
-        else:
-            self.cb_spangroups.SetValue(False)
-            self.toggle_spangroup_widgets(False)
-            for ch in self.ch_list_spangroups:
-                ch.SetSelection(0)
-
-        # Paths displays: get number to show from profile.
-        self.paths_array_to_listctrl(profile.sources)
-
-        # Image scaling & position
-        zoom_pct = round(profile.zoom * 100)
-        offx_pct = round(profile.pan[0] * 100)
-        offy_pct = round(profile.pan[1] * 100)
-        self.sld_zoom.SetValue(zoom_pct)
-        self.sld_offx.SetValue(offx_pct)
-        self.sld_offy.SetValue(offy_pct)
-        self.st_zoom_val.SetLabel(f"{zoom_pct}%")
-        self.st_offx_val.SetLabel(str(offx_pct))
-        self.st_offy_val.SetLabel(str(offy_pct))
+        shown = form.form_from(profile, self.staged.layout)
+        self._write_form(shown)
         self.wpprev_pnl.zoom = profile.zoom
         self.wpprev_pnl.offset = profile.pan
 
         # Update wallpaper preview from selected profile
         display_data = self._display_areas()
         # Preview the store's current record: its selection follows the slideshow.
-        live_profile = self.store.get(stored.profile_id) or stored
         self.wpprev_pnl.preview_wallpaper(
-            live_profile.selection.current(),
+            form.preview_images(self.store, stored),
             self.span_mode,
             display_data,
             self.preview_spangroups(),
@@ -624,43 +542,112 @@ class WallpaperSettingsPanel(wx.Panel):
         self.wpprev_pnl.layout_editor.toggle_buttons(show_config=self.span_mode == "advanced", in_config=False)
 
         # Loaded data is the new clean baseline. Slideshow normalization in
-        # _collect_profile means the later (posted) checkbox events produce
+        # parse_form means the later (posted) checkbox events produce
         # the same serialization, so this stays clean without a deferred call.
         self._loading = False
         self._set_clean_baseline()
 
-    def paths_array_to_listctrl(self, paths_array):
+    def _write_form(self, shown: form.ProfileForm):
+        """Show ``shown`` in the fields."""
+        self.tc_name.ChangeValue(shown.name)
+
+        self.span_mode = shown.span_mode
+        self.radiobox_spanmode.SetSelection(SPAN_MODES.index(self.span_mode))
+
+        if shown.slideshow:
+            self.cb_slideshow.SetValue(True)
+            wx.PostEvent(self.cb_slideshow, wx.CommandEvent(commandEventType=wx.EVT_CHECKBOX.typeId))
+            self.tc_sshow_delay.ChangeValue(shown.delay_minutes)
+            if shown.sort_label is None:
+                self.ch_sshow_sort.SetSelection(wx.NOT_FOUND)
+            else:
+                self.ch_sshow_sort.SetSelection(form.SORT_LABELS.index(shown.sort_label))
+        else:
+            self.cb_slideshow.SetValue(False)
+            wx.PostEvent(self.cb_slideshow, wx.CommandEvent(commandEventType=wx.EVT_CHECKBOX.typeId))
+            self.tc_sshow_delay.Clear()
+            self.ch_sshow_sort.SetSelection(wx.NOT_FOUND)
+
+        if shown.hotkey_enabled:
+            self.cb_hotkey.SetValue(True)
+            self.tc_hotkey_bind.ChangeValue(shown.hotkey)
+        else:
+            self.cb_hotkey.SetValue(False)
+            self.tc_hotkey_bind.Clear()
+        wx.PostEvent(self.cb_hotkey, wx.CommandEvent(commandEventType=wx.EVT_CHECKBOX.typeId))
+
+        # Advanced settings
+        self.show_adv_setting_sizer(self.span_mode == "advanced")
+        self.cb_offsets.SetValue(shown.offsets_applied)
+        for tc, offstr in zip(self.tc_list_offsets, shown.offsets):
+            tc.SetValue(offstr)
+        wx.PostEvent(self.cb_offsets, wx.CommandEvent(commandEventType=wx.EVT_CHECKBOX.typeId))
+        persp_label = choice_label(shown.perspective)
+        if persp_label:
+            self.ch_persp.SetSelection(self.ch_persp.FindString(persp_label, False))
+        else:
+            self.ch_persp.SetSelection(0)
+        self.cb_spangroups.SetValue(shown.spangroups_enabled)
+        self.toggle_spangroup_widgets(shown.spangroups_enabled)
+        for ch, group in zip(self.ch_list_spangroups, shown.spangroup_choices):
+            ch.SetSelection(group)
+
+        # Paths displays: get number to show from profile.
+        self.sources_to_listctrl(shown.sources)
+
+        # Image scaling & position
+        zoom_pct = shown.zoom_pct
+        offx_pct, offy_pct = shown.pan_pct
+        self.sld_zoom.SetValue(zoom_pct)
+        self.sld_offx.SetValue(offx_pct)
+        self.sld_offy.SetValue(offy_pct)
+        self.st_zoom_val.SetLabel(f"{zoom_pct}%")
+        self.st_offx_val.SetLabel(str(offx_pct))
+        self.st_offy_val.SetLabel(str(offy_pct))
+
+    def sources_to_listctrl(self, rows):
+        """Show the source ``rows`` of a form: (display or group, path)."""
         multi_img = self.has_sources_per_target()
         self.refresh_path_listctrl(multi_img)
-        if multi_img:
-            for plist, idx in zip(paths_array, range(len(paths_array))):
-                for pth in plist:
-                    self.append_to_listctrl([str(idx), pth])
-        else:
-            for plist in paths_array:
-                for pth in plist:
-                    self.append_to_listctrl([pth])
-
-    def show_hkbinding(self, hktuple):
-        """Format a hotkey tuple into a '+' separated string."""
-        if hktuple:
-            hkstring = "+".join(hktuple)
-            return hkstring
-        else:
-            return ""
+        for target, path in rows:
+            self.append_to_listctrl([target, path] if multi_img else [path])
 
     #
     # Helper methods
     #
     def _current_serial(self):
-        """Serialize the current field state for change comparison.
+        """The fingerprint of the current field state, for change comparison."""
+        return form.fingerprint(self._read_form())
 
-        Mirrors exactly what Save would write to disk (minus the background
-        selection), so dirtiness tracks real persisted differences. Fields that can't
-        be read yet (typing in progress) count through their problems, which quote them.
-        """
-        profile, problems = self._collect_profile()
-        return profile_file.serialize(profile) + "\n".join(problems)
+    def _read_form(self) -> form.ProfileForm:
+        """What the fields hold now."""
+        sort_sel = self.ch_sshow_sort.GetSelection()
+        columns = self.path_listctrl.GetColumnCount()
+        rows = tuple(
+            (self.path_listctrl.GetItemText(idx, 0), self.path_listctrl.GetItemText(idx, 1))
+            if columns == 2
+            else ("", self.path_listctrl.GetItemText(idx, 0))
+            for idx in range(self.path_listctrl.GetItemCount())
+        )
+        return form.ProfileForm(
+            name=self.tc_name.GetLineText(0),
+            span_mode=self.span_mode,
+            slideshow=self.cb_slideshow.GetValue(),
+            delay_minutes=self.tc_sshow_delay.GetLineText(0),
+            # GetString(-1) raises in wx, so only read the dropdown when a sort order is chosen.
+            sort_label=self.ch_sshow_sort.GetString(sort_sel) if sort_sel != wx.NOT_FOUND else None,
+            hotkey_enabled=self.cb_hotkey.GetValue(),
+            hotkey=self.tc_hotkey_bind.GetLineText(0),
+            offsets_applied=self.cb_offsets.GetValue(),
+            offsets=tuple(self._offset_fields()),
+            spangroups_enabled=self.cb_spangroups.GetValue(),
+            spangroup_choices=self._spangroup_choices(),
+            perspective=self._selected_perspective(),
+            zoom_pct=self.sld_zoom.GetValue(),
+            pan_pct=(self.sld_offx.GetValue(), self.sld_offy.GetValue()),
+            per_target_sources=columns != 1,
+            sources=rows,
+        )
 
     def _set_clean_baseline(self):
         """Record the current field state as the saved/clean baseline."""
@@ -683,15 +670,8 @@ class WallpaperSettingsPanel(wx.Panel):
         self._update_dirty_state()
 
     def _display_areas(self):
-        """The displays as the preview shows them: density-normalised in advanced mode,
-        as they are on the desktop otherwise."""
-        match self.span_mode:
-            case "advanced":
-                return self.staged.layout.ppi_norm_areas()
-            case "single" | "multi":
-                return self.staged.layout.real_areas()
-            case _:
-                assert_never(self.span_mode)
+        """The displays as the preview shows them."""
+        return form.display_areas(self.staged.layout, self.span_mode)
 
     def _perspective_labels(self):
         """The choices of the perspective dropdown: the default, each saved perspective, and none."""
@@ -708,7 +688,7 @@ class WallpaperSettingsPanel(wx.Panel):
         """The offsets typed in the fields, applied or not. Tells the user and returns None
         if a field can't be read."""
         try:
-            return parse_offsets([tc.GetLineText(0) for tc in self.tc_list_offsets])
+            return parse_offsets(self._offset_fields())
         except OffsetError as error:
             show_message_dialog(str(error), "Error")
             return None
@@ -716,9 +696,14 @@ class WallpaperSettingsPanel(wx.Panel):
     def _applied_offsets(self) -> tuple[Offset, ...] | None:
         """The manual offsets of the displays: none (0,0) unless they are applied. Fields
         are only read when applied; None as for _typed_offsets."""
-        if not self.cb_offsets.GetValue():
-            return len(self.staged.layout.displays) * ((0, 0),)
-        return self._typed_offsets()
+        try:
+            return form.applied_offsets(self.cb_offsets.GetValue(), self._offset_fields())
+        except OffsetError as error:
+            show_message_dialog(str(error), "Error")
+            return None
+
+    def _offset_fields(self):
+        return [tc.GetLineText(0) for tc in self.tc_list_offsets]
 
     def refresh_layout_preview(self):
         """Show the staged display layout in the preview: after the display band changed
@@ -841,24 +826,22 @@ class WallpaperSettingsPanel(wx.Panel):
 
     def read_spangroups(self) -> tuple[tuple[int, ...], ...]:
         """The groups of displays the user has chosen, in the order the groups first appear."""
-        groups: dict[int, list[int]] = {}
-        for display, ch in enumerate(self.ch_list_spangroups):
-            groups.setdefault(ch.GetSelection(), []).append(display)
-        return tuple(tuple(members) for members in groups.values())
+        return form.spangroups_of(self._spangroup_choices())
+
+    def _spangroup_choices(self):
+        return tuple(ch.GetSelection() for ch in self.ch_list_spangroups)
 
     def preview_spangroups(self) -> tuple[tuple[int, ...], ...] | None:
         """The span groups for the preview: none unless there are at least two."""
-        groups = self.read_spangroups()
-        return groups if len(groups) >= 2 else None
+        return form.preview_spangroups(self._spangroup_choices())
 
     def use_spangroups(self):
         """Check UI if spangroups are in use."""
-        cb_state = self.cb_spangroups.GetValue()
-        return cb_state and self.span_mode == "advanced"
+        return form.uses_spangroups(self.span_mode, self.cb_spangroups.GetValue())
 
     def has_sources_per_target(self):
         """Whether the sources are listed for each display or span group."""
-        return self.span_mode == "multi" or self.use_spangroups()
+        return form.sources_per_target(self.span_mode, self.cb_spangroups.GetValue())
 
     def toggle_spangroup_widgets(self, enable):
         sizer = self.sizer_setting_spangroups
@@ -1065,31 +1048,13 @@ class WallpaperSettingsPanel(wx.Panel):
         changes made to its file outside the editor."""
         selection = self.choice_profiles.GetSelection()
         name = self.choice_profiles.GetString(selection) if selection != wx.NOT_FOUND else ""
-        if name and name != NEW_PROFILE_LABEL:
-            self.store.reload()
-            self._carry_on_running()
-            profile = self._saved_profile(name)
-            if profile is not None:
-                self.list_of_profiles = self.store.profiles
-                self.populate_fields(profile)
-                return
+        profile = form.revert_profile(name, store=self.store, session=self.session)
+        if profile is not None:
+            self.list_of_profiles = self.store.profiles
+            self.populate_fields(profile)
+            return
         # No saved profile to revert to: reset to an empty new profile.
         self.onCreateNewProfile(None)
-
-    def _saved_profile(self, name):
-        """The saved profile called ``name``, if there is one."""
-        try:
-            return self.store.get(ProfileId.parse(name))
-        except ProfileIdError:
-            return None
-
-    def _carry_on_running(self):
-        """After the store loaded the profiles again, the running profile carries on with
-        its current record, which may hold edits made outside the editor, or stops if its
-        file is gone."""
-        running = self.session.running
-        if running is not None:
-            self.session.update(running.profile_id, self.store.get(running.profile_id))
 
     def onApply(self, event):
         """Render the current edits as a one-off preview without saving.
@@ -1098,151 +1063,33 @@ class WallpaperSettingsPanel(wx.Panel):
         but the stored ``.profile`` on disk and the daemon's active/running
         profile are left untouched. Use Save to persist the changes.
         """
-        profile, problems = self._collect_profile()
-        problems += profile_file.validate(profile)
-        if problems:
-            self._show_problems(problems)
-            logger.info("onApply: validation failed, nothing applied.")
+        draft = form.prepare_draft(self._read_form(), self._focused_path(), self.loaded_profile)
+        if isinstance(draft, form.Problems):
+            self._show_problems(draft)
             return
-        chosen = self._chosen_images(profile)
-        # The chosen images, or else the first ones of the edited sources.
-        images = Selection(profile.sources, profile.sortmode, profile.selection_size, images=chosen).current()
-        logger.info("onApply preview (unsaved): %s", profile.name)
-        loaded = self.loaded_profile
-
-        def applied(problem):
-            # The applied image becomes the current selection so reopening the
-            # dialog (or a later render) shows the same wallpaper instead of
-            # reverting to the previously saved one (#158).
-            if problem is None and chosen and loaded is not None:
-                loaded.selection.pin(chosen)
-            draft_shown(problem)
-
         wx.BeginBusyCursor()
-        # Render with the staged layout so unsaved display settings — bezels, sizes,
-        # positions — are reflected. This deliberately does NOT reload the saved layout,
-        # which lets the user test system tweaks via Apply before committing them. The
-        # layout is a value, so the worker thread renders exactly what is staged now.
-        self.session.apply_draft(
-            profile,
-            images,
+        # The staged layout, so unsaved display settings — bezels, sizes, positions — are
+        # reflected; it is a value, so the worker thread renders exactly what is staged now.
+        form.show_draft(
+            draft,
+            loaded=self.loaded_profile,
             layout=self.staged.layout,
-            on_done=lambda problem: wx.CallAfter(applied, problem),
+            session=self.session,
+            post=wx.CallAfter,
+            on_shown=draft_shown,
         )
 
-    def _show_problems(self, problems):
+    def _show_problems(self, problems: form.Problems):
         """Tell the user what keeps the profile from being saved or applied."""
-        show_message_dialog("\n\n".join(problems), "Error")
+        show_message_dialog("\n\n".join(problems.messages), "Error")
 
-    def _get_selected_wallpaper_path(self):
-        """Get the file path of the currently selected item in the wallpaper list."""
+    def _focused_path(self):
+        """The path of the focused item of the wallpaper list, if any."""
         item_idx = self.path_listctrl.GetFocusedItem()
         if item_idx == -1:
             return None
         columns = self.path_listctrl.GetColumnCount()
-        if columns == 2:
-            path = self.path_listctrl.GetItemText(item_idx, 1)
-        else:
-            path = self.path_listctrl.GetItemText(item_idx, 0)
-        if is_folder(path):
-            return None
-        return path
-
-    def _chosen_images(self, profile: Profile):
-        """The images chosen to show, for one image spanned (single or advanced): the one
-        focused in the source list, or else what the profile open in the dialog shows.
-
-        That profile is the one loaded, by its original name, so a rename in progress
-        keeps the selection (#158). None for one image per display, which a slideshow or
-        the first images of the sources provide.
-        """
-        if profile.spanmode == "multi":
-            return None
-        selected_file = self._get_selected_wallpaper_path()
-        if selected_file and is_file(selected_file):
-            return [selected_file]
-        if self.loaded_profile is not None:
-            return self.loaded_profile.selection.images
-        return None
-
-    def _collect_profile(self) -> tuple[Profile, list[str]]:
-        """The profile the dialog's fields describe, with what keeps fields from being
-        read, such as a delay that isn't a number. Never raises on partial input, so it
-        is safe to call on every field edit."""
-        problems = []
-        slideshow = self.cb_slideshow.GetValue()
-        delay = 600.0
-        sortmode = "shuffle"
-        if slideshow:
-            delay_text = self.tc_sshow_delay.GetLineText(0)
-            if not delay_text.strip():
-                problems.append("When using slideshow you need to enter a delay.")
-            else:
-                try:
-                    delay = 60 * float(delay_text)  # minutes here, seconds in the file
-                except ValueError:
-                    problems.append(f"The slideshow delay must be a number of minutes, not '{delay_text}'.")
-            # The sort dropdown may have no selection yet (-1); GetString(-1)
-            # raises in wx, so only read it when a sort order is chosen.
-            sort_sel = self.ch_sshow_sort.GetSelection()
-            if sort_sel != wx.NOT_FOUND:
-                sortmode = self.ch_sshow_sort.GetString(sort_sel).lower().replace(" ", "_")
-        hotkey = None
-        if self.cb_hotkey.GetValue():
-            hotkey_text = self.tc_hotkey_bind.GetLineText(0).strip()
-            hotkey = tuple(hotkey_text.split("+")) if hotkey_text else None
-
-        spanmode = self.span_mode
-
-        # manual offsets; an empty field means no offset
-        corrections = ()
-        if self.cb_offsets.GetValue():
-            try:
-                offsets = parse_offsets([tc.GetLineText(0) for tc in self.tc_list_offsets])
-            except OffsetError as error:
-                problems.append(str(error))
-                offsets = len(self.tc_list_offsets) * ((0, 0),)
-            corrections = (("offsets", offsets),)
-        perspective = self._selected_perspective()
-
-        # image scaling & position. Zoom/pan only applies to a single fixed
-        # image; a slideshow always renders at defaults regardless of slider state.
-        if slideshow:
-            zoom, pan = 1.0, (0.0, 0.0)
-        else:
-            zoom = self.sld_zoom.GetValue() / 100.0
-            pan = (self.sld_offx.GetValue() / 100.0, self.sld_offy.GetValue() / 100.0)
-
-        spangroups = self.read_spangroups() if self.cb_spangroups.GetValue() else None
-
-        # The sources, from the source list: one field, or one per display.
-        rows = []
-        columns = self.path_listctrl.GetColumnCount()
-        for idx in range(self.path_listctrl.GetItemCount()):
-            rows.append([self.path_listctrl.GetItemText(idx, col) for col in range(columns)])
-        if columns == 1:
-            sources = (tuple(path for row in rows for path in row),)
-        else:
-            by_display: dict[str, list[str]] = {}
-            for disp_id, path_item in sorted(rows, key=itemgetter(0)):
-                by_display.setdefault(disp_id, []).append(path_item)
-            sources = tuple(tuple(paths) for paths in by_display.values())
-
-        profile = Profile(
-            name=self.tc_name.GetLineText(0),
-            spanmode=spanmode,
-            spangroups=spangroups,
-            slideshow=slideshow,
-            delay=delay,
-            sortmode=sortmode,
-            sources=sources,
-            hotkey=hotkey,
-            perspective=perspective,
-            zoom=zoom,
-            pan=pan,
-            corrections=corrections,
-        )
-        return profile, problems
+        return self.path_listctrl.GetItemText(item_idx, 1 if columns == 2 else 0)
 
     def onSave(self, event):
         """Saves the profile the fields describe, if it is valid; returns its path."""
@@ -1250,45 +1097,24 @@ class WallpaperSettingsPanel(wx.Panel):
             return self._save_profile()
 
     def _save_profile(self):
-        profile, problems = self._collect_profile()
-        logger.info("Saving profile: %s", profile)
-        loaded = self.loaded_profile
-        current_profile_id = loaded.profile_id if loaded is not None else None
-        if profile.name.strip():
-            try:
-                validate_managed_profile_id(self.paths.profiles, profile.name, current_profile_id)
-            except (OSError, ProfileIdError, ValueError) as error:
-                problems.insert(0, str(error))
-        problems += profile_file.validate(profile)
-        if problems:
-            logger.info("The profile was not saved: %s", problems)
-            self._show_problems(problems)
+        current = self._read_form()
+        result = form.save_profile(
+            current,
+            focused_path=self._focused_path(),
+            loaded=self.loaded_profile,
+            store=self.store,
+            session=self.session,
+            rebind_hotkey=self._rebind_hotkey,
+        )
+        if isinstance(result, form.Problems):
+            self._show_problems(result)
             return None
-        try:
-            # Saving loads the profiles again: once, here.
-            saved_profile = self.store.save(
-                profile,
-                selected=self._chosen_images(profile),
-                current=loaded,
-                update_active=self.session.renames_running(current_profile_id, profile.name),
-            )
-        except OSError as error:
-            logger.warning("Could not save profile: %s", error)
-            show_message_dialog(str(error), "Error")
-            return None
-        if current_profile_id is not None:
-            # If it runs, it keeps running under its (possibly new) name, and edits such
-            # as the slideshow delay take effect at once. Before the running profile is
-            # looked up below, which would otherwise find its old name gone.
-            self.session.update(current_profile_id, saved_profile)
-        self._carry_on_running()
+        saved_profile = result.stored
         self.update_choiceprofile()
-        # Its hotkey follows it, also to a new name.
-        self._rebind_hotkey(loaded, saved_profile)
-        self.choice_profiles.SetSelection(self.choice_profiles.FindString(profile.name))
+        self.choice_profiles.SetSelection(self.choice_profiles.FindString(current.name))
         # The editor goes on with the store's record of the saved profile.
         self.loaded_profile = saved_profile
-        spangroups = self.read_spangroups() if self.cb_spangroups.GetValue() else None
+        spangroups = form.applied_spangroups(current)
         self.wpprev_pnl.preview_wallpaper(
             saved_profile.selection.current(), self.span_mode, self._display_areas(), spangroups
         )
@@ -1307,22 +1133,8 @@ class WallpaperSettingsPanel(wx.Panel):
 
         self.refresh_path_listctrl(False, migrate_paths=False)
 
-        self.radiobox_spanmode.SetSelection(0)
+        self._write_form(form.blank_form(self.staged.layout))
         self.onSpanRadio(None)
-
-        self.cb_slideshow.SetValue(False)
-        self.tc_sshow_delay.ChangeValue("")
-        self.ch_sshow_sort.SetSelection(wx.NOT_FOUND)
-        self.onCheckboxSlideshow(None)
-
-        self.cb_offsets.SetValue(False)
-        for tc in self.tc_list_offsets:
-            tc.SetValue("0,0")
-        self.onCheckboxOffsets(None)
-
-        self.cb_hotkey.SetValue(False)
-        self.tc_hotkey_bind.ChangeValue("")
-        self.onCheckboxHotkey(None)
 
         # refresh wallpaper preview back to black previews
         self.wpprev_pnl.draw_displays()
@@ -1337,7 +1149,7 @@ class WallpaperSettingsPanel(wx.Panel):
         """Deletes the currently selected profile after getting confirmation."""
         selection = self.choice_profiles.GetSelection()
         selected_name = self.choice_profiles.GetString(selection) if selection != wx.NOT_FOUND else ""
-        profile = self._saved_profile(selected_name)
+        profile = form.saved_profile(self.store, selected_name)
         if profile is None:
             show_message_dialog("Selected profile is not saved.", "Error")
             return
@@ -1345,14 +1157,12 @@ class WallpaperSettingsPanel(wx.Panel):
             f"Do you want to delete profile: {selected_name}?", "Confirm Delete", style="YES_NO"
         ):
             return
-        try:
-            self.store.delete(profile)
-        except (OSError, ValueError) as error:
-            show_message_dialog(str(error), "Error")
+        problems = form.delete_profile(
+            profile, store=self.store, session=self.session, rebind_hotkey=self._rebind_hotkey
+        )
+        if problems is not None:
+            self._show_problems(problems)
             return
-        # If it was running, its slideshow stops; its hotkey is free for other uses.
-        self.session.update(profile.profile_id, None)
-        self._rebind_hotkey(profile, None)
         self.update_choiceprofile()
         self.onCreateNewProfile(None)
 

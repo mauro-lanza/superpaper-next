@@ -1,13 +1,11 @@
 """Creating, editing, deleting and testing perspectives."""
 
-import configparser
 import os
 
 import wx  # ty:ignore[unresolved-import]
 
-import superpaper.geometry.perspective as persp
-from superpaper.geometry import canvas, display_store
-from superpaper.geometry.perspective import Named, Swivel, SwivelAxis, Tilt
+from superpaper.geometry import perspective_form
+from superpaper.geometry.perspective import Named
 from superpaper.paths import resource
 from superpaper.profiles import profile_file
 from superpaper.profiles.profile_id import NEW_PROFILE_LABEL
@@ -270,39 +268,27 @@ class PerspectiveConfig(wx.Dialog):
             self.tc_name.SetValue(persp_name)
             self.cb_dispsys_def.SetValue(True)
             return
-        self.cb_master.SetValue(self.layout.use_perspective)
-        self.tc_name.SetValue(persp_name)
-        self.cb_dispsys_def.SetValue(persp_name == self.layout.default_perspective)
-        self.choice_centr_disp.SetSelection(perspective.central_display)
-        px_per_mm = self.layout.max_ppi() / 25.4
-        for tc, offs in zip(self.tclist_vieweroffs, perspective.viewer_pos):
-            tc.SetValue(str(offs / px_per_mm))
-        self.populate_grid(perspective.swivels, perspective.tilts, px_per_mm)
+        self.show_form(perspective_form.form_from(perspective, self.layout))
 
-    def populate_grid(self, swivels, tilts, px_per_mm):
-        """Fill data grid from the swivels and tilts of the displays."""
-        for row, sw, ti in zip(self.grid_rows, swivels, tilts):
-            row[0].SetLabel(str(self.grid_rows.index(row)))
-            row[1].SetSelection(sw.axis.value)
-            row[2].SetValue(str(sw.angle))
-            row[3].SetValue(str(round(sw.lateral_offset / px_per_mm, 1)))
-            row[4].SetValue(str(round(sw.depth_offset / px_per_mm, 1)))
-            row[5].SetValue(str(ti.angle))
-            row[6].SetValue(str(round(ti.vertical_offset / px_per_mm, 1)))
-            row[7].SetValue(str(round(ti.depth_offset / px_per_mm, 1)))
+    def show_form(self, form):
+        """Write ``form`` into the fields."""
+        self.cb_master.SetValue(form.use_perspective)
+        self.tc_name.SetValue(form.name)
+        self.cb_dispsys_def.SetValue(form.is_default)
+        self.choice_centr_disp.SetSelection(form.central_display)
+        for tc, text in zip(self.tclist_vieweroffs, form.viewer_offsets):
+            tc.SetValue(text)
+        for index, (row, axis, cells) in enumerate(zip(self.grid_rows, form.swivel_axes, form.rotation_cells)):
+            row[0].SetLabel(str(index))
+            row[1].SetSelection(axis)
+            for tc, text in zip(row[2:], cells):
+                tc.SetValue(text)
 
     def update_choiceprofile(self):
         """Reload profile list into the choice box."""
         self.profnames = self.layout.perspective_names()
         self.profnames.append(NEW_PROFILE_LABEL)
         self.choice_profiles.SetItems(self.profnames)
-
-    def check_for_large_image_size(self, perspective):
-        """How large an image ``perspective`` would produce as an intermediate step:
-        (whether that is too large, its size)."""
-        crops = self.layout.ppi_norm_crops(self.offsets)
-        size = canvas.source_size(crops, perspective)
-        return (canvas.exceeds_perspective_limit(size), size)
 
     #
     # Button methods
@@ -311,8 +297,7 @@ class PerspectiveConfig(wx.Dialog):
         """Save master checkbox state into the layout."""
         master = self.cb_master.GetValue()
         if master != self.layout.use_perspective:
-            self.layout = self.layout.with_use_perspective(master)
-            self._save_choice()
+            self._save_choice(self.layout.with_use_perspective(master))
 
     def _load_choice(self):
         """Start from the editor's perspective choice. The geometry the perspectives are
@@ -320,21 +305,27 @@ class PerspectiveConfig(wx.Dialog):
         never the editor's unsaved band edits."""
         self.layout = self.layout.with_perspectives_of(self.frame.staged.layout)
 
-    def _save_choice(self):
-        """Save the perspective choice alone, without the editor's unsaved layout; the
-        editor and the session then use it. Returns False, with the dialog back at the
-        editor's choice, if it could not be saved."""
-        try:
-            display_store.save_perspective_choice(self.frame.paths.config, self.layout)
-        except (OSError, configparser.Error, ValueError, KeyError) as error:
-            show_message_dialog(f"The perspective settings could not be saved: {error}", "Error")
-            self._load_choice()
-            self.cb_master.SetValue(self.layout.use_perspective)
-            self.update_choiceprofile()
+    def _save_choice(self, layout):
+        """Save the perspective choice of ``layout`` alone, without the editor's unsaved
+        layout; the editor and the session then use it. Returns False, with the dialog back
+        at the editor's choice, if it could not be saved."""
+        failure = perspective_form.save_choice(self.frame.paths.config, layout)
+        if failure is not None:
+            self._show_save_failure(failure)
             return False
+        self._adopt_saved(layout)
+        return True
+
+    def _adopt_saved(self, layout):
+        self.layout = layout
         self.frame.adopt_perspectives(self.layout)
         self.frame.refresh_displays()
-        return True
+
+    def _show_save_failure(self, failure):
+        show_message_dialog(failure.message, "Error")
+        self._load_choice()
+        self.cb_master.SetValue(self.layout.use_perspective)
+        self.update_choiceprofile()
 
     def onSelect(self, event):
         """Acts once a profile is picked in the dropdown menu."""
@@ -351,57 +342,40 @@ class PerspectiveConfig(wx.Dialog):
     def onSave(self, evt=None):
         """Save perspective config to file and update display system state."""
         persp_name = self.tc_name.GetLineText(0)
-        if not persp_name:
-            msg = "Profile name is required."
-            show_message_dialog(msg)
-            return 0
-        if self.layout.perspective(persp_name) is None:
-            try:
-                persp.check_new_perspective_name(persp_name)
-            except ValueError as error:
-                show_message_dialog(str(error))
-                return 0
-        toggle = self.cb_master.GetValue()
-        is_ds_def = self.cb_dispsys_def.GetValue()
-        centr_disp = int(self.choice_centr_disp.GetSelection())
-        try:
-            viewer_offset_mm = persp.parse_viewer_offsets_mm([tc.GetLineText(0) for tc in self.tclist_vieweroffs])
-            swivels, tilts = persp.parse_rotations_mm(
-                [row[1].GetSelection() for row in self.grid_rows],
-                [[tc.GetLineText(0) for tc in row[2:]] for row in self.grid_rows],
-            )
-        except ValueError as error:
-            show_message_dialog(str(error))
-            return 0
-        perspective = persp.perspective_from_mm(
-            persp_name, self.layout.max_ppi(), centr_disp, viewer_offset_mm, swivels, tilts
+        form = perspective_form.PerspectiveForm(
+            name=persp_name,
+            use_perspective=self.cb_master.GetValue(),
+            is_default=self.cb_dispsys_def.GetValue(),
+            central_display=int(self.choice_centr_disp.GetSelection()),
+            viewer_offsets=tuple(tc.GetLineText(0) for tc in self.tclist_vieweroffs),
+            swivel_axes=tuple(row[1].GetSelection() for row in self.grid_rows),
+            rotation_cells=tuple(tuple(tc.GetLineText(0) for tc in row[2:]) for row in self.grid_rows),
         )
 
-        # Warn before saving settings that would need huge intermediate images. They are
-        # checked as they are, so the layout is only changed once they are accepted.
-        if self.warn_large_img:
-            too_large, canv = self.check_for_large_image_size(perspective)
-            if too_large:
-                msg = (
-                    "These perspective settings will produce large intermediate images "
-                    "which might use a large amount of system memory during processing. "
-                    "Take care not to set the perspective so that you would see arbitrarily "
-                    "far into the projected image as this will produce unboundedly large "
-                    "images and will cause problems, even a system crash."
-                    "\n\n"
-                    f"Intermediate resolution with these settings is {canv[0]}x{canv[1]}"
-                    "\n\n"
-                    "Do you want to continue?\n"
-                    "\n"
-                    "This warning may be disabled from settings."
-                )
-                if not show_message_dialog(msg, "Info", style="YES_NO"):
-                    return 0
-        self.layout = self.layout.with_perspective(perspective, use_perspective=toggle, is_default=is_ds_def)
-        # The .persp file is written first, then the default it is named in; refresh_displays
-        # then loads both as one layout, for the session.
-        if not self._save_choice():
-            return 0
+        def save(*, confirmed):
+            return perspective_form.save_perspective(
+                form,
+                layout=self.layout,
+                offsets=self.offsets,
+                warn_large=self.warn_large_img,
+                confirmed=confirmed,
+                config_dir=self.frame.paths.config,
+            )
+
+        result = save(confirmed=False)
+        if isinstance(result, perspective_form.NeedsConfirm):
+            if not show_message_dialog(result.message, "Info", style="YES_NO"):
+                return 0
+            result = save(confirmed=True)
+        match result:
+            case perspective_form.Problems():
+                show_message_dialog(result.message)
+                return 0
+            case perspective_form.SaveFailed():
+                self._show_save_failure(result)
+                return 0
+            case perspective_form.Saved():
+                self._adopt_saved(result.layout)
 
         # update dialog profile list
         self.update_choiceprofile()
@@ -414,8 +388,7 @@ class PerspectiveConfig(wx.Dialog):
         if selection == wx.NOT_FOUND:
             return
         persp_name = self.choice_profiles.GetString(selection)
-        self.layout = self.layout.without_perspective(persp_name)
-        if not self._save_choice():
+        if not self._save_choice(self.layout.without_perspective(persp_name)):
             return
         # update dialog profile list
         self.update_choiceprofile()
@@ -423,16 +396,8 @@ class PerspectiveConfig(wx.Dialog):
 
     def onCreateNewProfile(self, evt):
         """Reset profile settings options to neutral state."""
-        self.cb_master.SetValue(self.layout.use_perspective)
         self.choice_profiles.SetSelection(self.choice_profiles.FindString(NEW_PROFILE_LABEL))
-        self.tc_name.SetValue("")
-        self.cb_dispsys_def.SetValue(False)
-        self.choice_centr_disp.SetSelection(0)
-        for tc in self.tclist_vieweroffs:
-            tc.SetValue(str(0))
-        swivels = len(self.layout.displays) * [Swivel(SwivelAxis.NONE, 0.0, 0.0, 0.0)]
-        tilts = len(self.layout.displays) * [Tilt(0.0, 0.0, 0.0)]
-        self.populate_grid(swivels, tilts, 1)
+        self.show_form(perspective_form.blank_form(self.layout))
 
     def onOk(self, event):
         """Apply/save perspective settings and close dialog."""
