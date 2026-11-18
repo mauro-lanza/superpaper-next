@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from superpaper.geometry import display_detection, layout_edit
+from superpaper.geometry import display_detection, display_store, layout_edit
 from superpaper.geometry.layout_edit import ConfiguringBezels, ConfiguringPositions, Idle
 
 MONITORS = [
@@ -163,3 +163,18 @@ def test_cancelling_the_position_entry_restores_the_offsets_it_opened_with(layou
     _, restored = layout_edit.cancel_positions(opened_with, entered)
 
     assert restored == layout
+
+
+def test_saving_display_settings_writes_them_to_the_config_directory(layout, tmp_path):
+    assert layout_edit.save_display_settings(tmp_path, layout) is None
+    assert display_store.read_layout(tmp_path, layout.key) is not None
+
+
+def test_display_settings_that_cant_be_written_come_back_as_a_failure(layout, tmp_path):
+    not_a_directory = tmp_path / "file"
+    not_a_directory.write_text("", encoding="utf-8")
+
+    failure = layout_edit.save_display_settings(not_a_directory, layout)
+
+    assert isinstance(failure, layout_edit.SaveFailed)
+    assert failure.message.startswith("The display settings could not be saved: ")

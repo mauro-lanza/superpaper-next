@@ -374,6 +374,22 @@ def test_saved_general_settings_apply_from_now_on(tmp_path, use_hotkeys, registe
     assert shown == [("Logging is enabled after an application restart.", "Info")]
 
 
+def test_settings_that_cant_be_written_are_reported_and_not_applied(tmp_path):
+    shown = []
+    superpaper = application(settings=Settings(show_help=True), notify=lambda message, title: shown.append(title))
+    blocker = tmp_path / "file"
+    blocker.write_text("", encoding="utf-8")
+    superpaper.settings_path = blocker / "general_settings"
+    superpaper.hotkeys = Mock()
+
+    saved = superpaper.apply_settings(Settings(show_help=False, use_hotkeys=True))
+
+    assert saved is False
+    assert superpaper.settings == Settings(show_help=True)
+    assert shown == ["Error"]
+    assert not superpaper.hotkeys.register_general.called
+
+
 def test_a_dialog_setting_is_written_and_kept_for_the_next_window(tmp_path):
     superpaper = application(settings=Settings(show_help=True))
     superpaper.settings_path = tmp_path / "general_settings"

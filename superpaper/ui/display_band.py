@@ -5,6 +5,7 @@ import wx  # ty:ignore[unresolved-import]
 
 from superpaper.geometry import layout_edit
 from superpaper.ui.help import show_help_popup
+from superpaper.ui.message import show_message_dialog
 
 
 class DisplayBand(wx.CollapsiblePane):
@@ -18,7 +19,8 @@ class DisplayBand(wx.CollapsiblePane):
     ``layout_editor`` sets the bezels in the preview. The editor provides the
     rest: ``relayout()`` lays the editor out again, ``refresh_preview()`` shows the staged
     layout in the preview, ``enable_profile_editing(enable)`` locks the profile settings
-    while bezels are being set, ``save_layout(layout)`` writes a layout to disk, and
+    while bezels are being set, ``save_layout(layout)`` writes a layout to disk and returns
+    a layout_edit.SaveFailed or None, and
     ``on_saved()`` is called once the layout is saved.
     """
 
@@ -187,7 +189,10 @@ class DisplayBand(wx.CollapsiblePane):
 
     def onSave(self, event):
         """Write the staged display-wide settings to disk."""
-        self._save_layout(self.staged.layout)
+        failed = self._save_layout(self.staged.layout)
+        if failed is not None:
+            show_message_dialog(failed.message, "Error")
+            return
         self._on_saved()
         self.set_baseline()
 

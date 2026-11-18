@@ -181,7 +181,12 @@ class DisplayPositionEntry(wx.Frame):
     def onCbusepx(self, event):
         """Updates units of shown position data."""
         use_px = self.cb_use_px.GetValue()
-        self.convert_units(use_px)
+        try:
+            self.convert_units(use_px)
+        except ValueError as error:
+            show_message_dialog(f"The positions could not be converted: {error}", "Error")
+            self.cb_use_px.SetValue(not use_px)
+            return
         self.set_unit_labels(use_px)
 
     def update_offsets_and_redraw(self):
@@ -263,10 +268,13 @@ class DisplayPositionEntry(wx.Frame):
             row[6].SetValue(str(top))
 
     def convert_units(self, use_px):
-        """Convert table data between px and mm in place."""
+        """Convert table data between px and mm in place; raises ValueError, changing nothing,
+        if a field is not a number."""
         max_ppi = self.staged.layout.max_ppi()
-        for row in self.grid_rows:
-            for tc in row[1:]:
-                curval = tc.GetValue()
-                if curval:
-                    tc.SetValue(positions.convert_unit(curval, max_ppi, to_px=use_px))
+        converted = [
+            (tc, positions.convert_unit(tc.GetValue(), max_ppi, to_px=use_px))
+            for row in self.grid_rows
+            for tc in row[1:]
+        ]
+        for tc, text in converted:
+            tc.SetValue(text)
