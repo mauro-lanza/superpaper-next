@@ -20,6 +20,8 @@ import queue
 import threading
 import time
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, assert_never
 
@@ -48,6 +50,14 @@ SHUTDOWN_TIMEOUT = 5.0
 """How long quitting waits for a wallpaper change under way, in seconds."""
 
 
+@dataclass(frozen=True)
+class _Next:
+    """A request for the next image, which the worker merges with the ones right after it."""
+
+
+_NEXT = _Next()
+
+
 class Session:
     """The running profile and its slideshow, kept by one worker thread.
 
@@ -72,7 +82,7 @@ class Session:
         self._paths = paths
         self._set_command = set_command
         self._clock = clock
-        self._requests: queue.SimpleQueue[Callable[[], None] | None] = queue.SimpleQueue()
+        self._requests: queue.SimpleQueue[Callable[[], None] | _Next | None] = queue.SimpleQueue()
         self._closed = False
         self._running: StoredProfile | None = None
         self._paused = False
@@ -117,7 +127,7 @@ class Session:
 
     def next(self) -> None:
         """Show the running profile's next image now; its slideshow counts down from here."""
-        self._post(lambda: self._change(advance=True))
+        self._post(_NEXT)
 
     def toggle_pause(self) -> None:
         """Pause the running profile's slideshow, or resume it."""
@@ -183,7 +193,7 @@ class Session:
         if self._worker.is_alive():
             logger.info("Quitting while a wallpaper change is still under way.")
 
-    def _post(self, request: Callable[[], None]) -> bool:
+    def _post(self, request: Callable[[], None] | _Next) -> bool:
         if self._closed:
             logger.info("Superpaper is quitting; the request is dropped.")
             return False
@@ -192,17 +202,34 @@ class Session:
 
     def _serve(self) -> None:
         """Handle requests as they come, and the slideshow's change whenever it is due."""
+        carried: Callable[[], None] | _Next | None = None
         while not self._closed:
-            try:
-                request = self._requests.get(timeout=self._until_due())
-            except queue.Empty:
-                request = None
+            if carried is not None:
+                request, carried = carried, None
+            else:
+                try:
+                    request = self._requests.get(timeout=self._until_due())
+                except queue.Empty:
+                    request = None
             if self._closed:
                 return
-            if request is not None:
+            if isinstance(request, _Next):
+                presses = 1
+                # Mashing Next moves the position once per press but renders only the last.
+                while True:
+                    try:
+                        following = self._requests.get_nowait()
+                    except queue.Empty:
+                        break
+                    if not isinstance(following, _Next):
+                        carried = following
+                        break
+                    presses += 1
+                _handle(partial(self._change, steps=presses))
+            elif request is not None:
                 _handle(request)
             if not self._closed and self._deadline is not None and self._clock() >= self._deadline:
-                _handle(lambda: self._change(advance=True))
+                _handle(lambda: self._change(steps=1))
 
     def _until_due(self) -> float | None:
         if self._deadline is None:
@@ -216,13 +243,13 @@ class Session:
         if show_again(stored, self._paths, layout=self._layout, set_command=self._set_command()):
             self._arm()
         else:
-            self._change(advance=False)
+            self._change(steps=0)
 
     def _activate(self, stored: StoredProfile) -> None:
         running = self._running
         if running is not None and running.profile_id == stored.profile_id:
             self._running = stored
-            self._change(advance=True)
+            self._change(steps=1)
             return
         self._running = stored
         self._paused = False
@@ -231,18 +258,20 @@ class Session:
             write_active_profile(self._paths.cache, stored.profile_id)
         except OSError as error:
             logger.warning("Could not remember the running profile: %s", error)
-        self._change(advance=False)
+        self._change(steps=0)
 
-    def _change(self, *, advance: bool) -> None:
-        """Show the running profile's current images, or with ``advance`` its next ones;
-        its slideshow changes next one delay from now."""
+    def _change(self, *, steps: int) -> None:
+        """Show the running profile's current images, or with ``steps`` its images that many
+        positions on, rendering only the last; its slideshow changes next one delay from now."""
         stored = self._running
         if stored is None:
             logger.info("No profile is running.")
             return
         self._arm()
         selection = stored.selection
-        files = selection.advance() if advance or not selection.is_complete() else selection.current()
+        for _ in range(steps - 1):
+            selection.advance()
+        files = selection.advance() if steps or not selection.is_complete() else selection.current()
         if not files:
             logger.error("Wallpaper change skipped: profile '%s' has no complete selection.", stored.profile.name)
             return
