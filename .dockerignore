@@ -8,7 +8,7 @@
 releases/
 docs/
 tests/
-example-script/
+docs/examples/
 *.egg-info/
 **/__pycache__/
 **/*.pyc

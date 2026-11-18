@@ -14,4 +14,4 @@ The command is split on whitespace into executable arguments without invoking a 
 
 ## Script after a wallpaper change
 
-`run-after-wp-change.py` in the config directory is run with `python3` after each change, with the wallpaper image as the first argument followed by each source image. See the [example script](../example-script/run-after-wp-change.py).
+`run-after-wp-change.py` in the config directory is run with `python3` after each change, with the wallpaper image as the first argument followed by each source image. See the [example script](./examples/run-after-wp-change.py).

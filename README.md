@@ -37,7 +37,7 @@ This fork focuses on KDE Plasma 6 support and the wallpaper selection experience
 - Add wallpapers one by one or a folder at a time (no subfolders)
 - **KDE Activities**: name a profile after a KDE Activity (case-sensitive) and its wallpaper follows the active activity. KDE Plasma 6 and Activity support: *Contributed by [FredworkLemmas](https://github.com/FredworkLemmas)*
 - Command-line interface
-- Run a script after wallpaper change: [example script](./example-script/run-after-wp-change.py)
+- Run a script after wallpaper change: [example script](./docs/examples/run-after-wp-change.py)
 - Tray applet for slideshow control. On Linux a native StatusNotifierItem tray is used when a `StatusNotifierWatcher` is on the session bus (left-click opens the settings, middle-click advances the wallpaper, right-click shows the menu with the profiles under **Profiles**); otherwise the classic wx tray is used.
 - Hotkey support for easy slideshow control (Only Linux and Windows)
 - Align test tool to help fine tune your settings (Accessible only from GUI)
@@ -137,7 +137,7 @@ Check the logs and come create an issue!
 
 ## Known issues
 
-For some common problems and solutions, check the [issue tracker](./ISSUES.md).
+For known differences from upstream issues, see [ISSUES.md](./ISSUES.md).
 
 
 ## License

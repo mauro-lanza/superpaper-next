@@ -1,14 +1,4 @@
-# Pre-commit hooks for superpaper-next.
-#
-# Tooling (ruff, ty) is managed by uv in the project virtualenv (.venv) via the
-# "dev" dependency group in pyproject.toml. uv itself lives in ./.venv-tools.
-#
-# One-time bootstrap on a fresh checkout:
-#     .venv-tools/bin/uv sync --group dev
-#     .venv-tools/bin/uv run pre-commit install
-#
-# Run manually against everything:
-#     .venv-tools/bin/uv run pre-commit run --all-files
+# Setup: uv sync --group dev && uv run pre-commit install
 
 minimum_pre_commit_version: "3.5.0"
 default_install_hook_types: [pre-commit]

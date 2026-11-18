@@ -1,7 +1,7 @@
 # Releasing
 
 How to build and publish Superpaper Next artifacts. Metadata and dependencies
-come from `pyproject.toml` (see the comments there).
+come from `pyproject.toml`.
 
 ## PyPI (wheel + sdist)
 

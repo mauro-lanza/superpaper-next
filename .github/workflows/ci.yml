@@ -1,11 +1,6 @@
 name: CI
 
-# Runs the same lint/format/type gate that pre-commit enforces locally, so PRs
-# are checked automatically. Type checking (ty) runs here too: the wx/dbus
-# imports it cannot resolve without the GUI/Linux extras are suppressed with
-# inline `# ty:ignore[unresolved-import]` directives, so ty and the headless
-# unit tests pass against the `dev` group sync alone. GUI integration remains a
-# separate platform-testing concern.
+# Lint, format, type-check and headless tests on the dev group only.
 
 on:
   push:
@@ -29,18 +24,14 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v7
 
-      # setup-uv v8 dropped major/minor tags for supply-chain safety, so the
-      # full version must be pinned. Latest as of 2026-07-01.
+      # setup-uv v8 has no major/minor tags, so the full version is pinned.
       - name: Set up uv
         uses: astral-sh/setup-uv@v8.2.0
         with:
           enable-cache: true
           python-version: "3.14"
 
-      # Syncs the project plus the `dev` dependency group (ruff, ty, pytest,
-      # pre-commit)
-      # from uv.lock. Only the core runtime deps (all wheels) come along; the
-      # gui/linux extras that need system build deps are not installed.
+      # gui/linux extras need system build deps and are not installed.
       - name: Install dev tooling
         run: uv sync --frozen --group dev
 
