@@ -7,7 +7,7 @@ A crop is (left, top, right, bottom) of one display on a canvas.
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from superpaper.perspective import Perspective, get_backprojected_display_system
+from superpaper.geometry.perspective import Perspective, get_backprojected_display_system
 
 MAX_PERSPECTIVE_CANVAS = 12000
 """The largest side, in pixels, of the intermediate image of a perspective correction that is

@@ -8,8 +8,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from superpaper.profile_id import ProfileId
-from superpaper.profiles import Profile
+from superpaper.profiles.profile_file import Profile
+from superpaper.profiles.profile_id import ProfileId
 from superpaper.settings import Settings
 from tests.conftest import import_headless, module_stub, wx_stub
 

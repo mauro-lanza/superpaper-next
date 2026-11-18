@@ -14,8 +14,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Literal, get_args
 
-from superpaper.perspective import Default, Disabled, PerspectiveChoice, choice_label, parse_choice
-from superpaper.selection import is_supported_image
+from superpaper.geometry.perspective import Default, Disabled, PerspectiveChoice, choice_label, parse_choice
+from superpaper.profiles.selection import is_supported_image
 
 logger = logging.getLogger(__name__)
 

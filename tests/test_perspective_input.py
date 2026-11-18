@@ -2,8 +2,7 @@ import re
 
 import pytest
 
-from superpaper import profiles
-from superpaper.perspective import (
+from superpaper.geometry.perspective import (
     Default,
     Disabled,
     Named,
@@ -18,6 +17,7 @@ from superpaper.perspective import (
     parse_viewer_offsets_mm,
     perspective_from_mm,
 )
+from superpaper.profiles import profile_file
 
 
 @pytest.mark.parametrize("name", ["default", "DEFAULT", "Default", "disabled", "Disabled", "None", "none", "NONE"])
@@ -42,10 +42,10 @@ def test_a_perspective_choice_is_parsed_from_its_text_and_spelled_the_same_again
 
 @pytest.mark.parametrize("text", ["default", "disabled", "desk"])
 def test_a_profile_file_keeps_its_perspective_choice(text):
-    profile = profiles.parse(f"name=p\nperspective={text}\ndisplay0paths=/a.png\n")
+    profile = profile_file.parse(f"name=p\nperspective={text}\ndisplay0paths=/a.png\n")
 
     assert profile.perspective == parse_choice(text)
-    assert f"perspective={text}\n" in profiles.serialize(profile)
+    assert f"perspective={text}\n" in profile_file.serialize(profile)
 
 
 def test_lengths_convert_millimetres_to_pixels_and_keep_angles():

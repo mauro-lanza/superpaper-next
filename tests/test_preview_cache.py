@@ -3,8 +3,8 @@ import os
 import pytest
 from PIL import Image
 
-from superpaper import render
-from superpaper.render import SourceImageError, open_preview_image, source_icon_image
+from superpaper.rendering import render
+from superpaper.rendering.render import SourceImageError, open_preview_image, source_icon_image
 
 
 @pytest.fixture(autouse=True)

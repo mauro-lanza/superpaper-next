@@ -8,12 +8,12 @@ import pytest
 from PIL import Image
 
 import superpaper.session as session
-from superpaper import render
 from superpaper.desktop.process import Result
 from superpaper.desktop.wallpaper import Pieces, Spanned
 from superpaper.paths import AppPaths
-from superpaper.profile_id import ProfileId
-from superpaper.profiles import Profile
+from superpaper.profiles.profile_file import Profile
+from superpaper.profiles.profile_id import ProfileId
+from superpaper.rendering import render
 from tests.conftest import monitor
 
 # Two 2x2 displays with a one-pixel gap between them, the second one pixel lower.

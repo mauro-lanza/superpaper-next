@@ -7,21 +7,22 @@ import os
 import sys
 from collections.abc import Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import assert_never
 
 import superpaper.desktop as desktop
-import superpaper.sp_logging as sp_logging
-from superpaper import profile_store, profiles
-from superpaper.display_detection import DisplayDetectionError, detect_layout
-from superpaper.displays import Layout
+from superpaper.geometry.display_detection import DisplayDetectionError, detect_layout
+from superpaper.geometry.displays import Layout
+from superpaper.geometry.perspective import Named
 from superpaper.paths import AppPaths, ensure_dirs
-from superpaper.perspective import Named
-from superpaper.profile_id import ProfileId, ProfileIdError
+from superpaper.profiles import profile_file, profile_store
+from superpaper.profiles.profile_id import ProfileId, ProfileIdError
 from superpaper.session import show
 from superpaper.settings import SETTINGS_FILE, read_settings, write_settings
 from superpaper.user_input import Offset, OffsetError, parse_offset_args
 
 logger = logging.getLogger(__name__)
+_PACKAGE_LOGGER = logging.getLogger("superpaper")
 
 
 class CliError(Exception):
@@ -148,7 +149,7 @@ def parse_arguments(argv: Sequence[str]) -> Request:
             message = f"One of the passed image names was not a file: {filename}"
             raise CliError(message)
     try:
-        spangroups = profiles.parse_spangroups(args.spangroups) if args.spangroups else None
+        spangroups = profile_file.parse_spangroups(args.spangroups) if args.spangroups else None
     except ValueError as error:
         raise CliError(str(error)) from error
     try:
@@ -167,6 +168,29 @@ def parse_arguments(argv: Sequence[str]) -> Request:
         set_command=args.command[0] if args.command else "",
         debug=args.debug,
     )
+
+
+def configure_logging(*, debug: bool, log_file: Path | None = None) -> None:
+    """Log to the console when debugging, and to ``log_file`` (which also means debugging).
+
+    Nothing is configured at import; this runs once, before any work starts. Without either
+    argument, warnings and errors still reach stderr through Python's last-resort handler.
+    Calling this again replaces the earlier configuration.
+    """
+    for handler in _PACKAGE_LOGGER.handlers[:]:
+        _PACKAGE_LOGGER.removeHandler(handler)
+        handler.close()
+    debugging = debug or log_file is not None
+    _PACKAGE_LOGGER.setLevel(logging.INFO if debugging else logging.NOTSET)
+    if debugging:
+        _PACKAGE_LOGGER.addHandler(logging.StreamHandler())
+    if log_file is not None:
+        _PACKAGE_LOGGER.addHandler(logging.FileHandler(log_file, mode="w", encoding="utf-8"))
+    sys.excepthook = _log_uncaught_exception if log_file is not None else sys.__excepthook__
+
+
+def _log_uncaught_exception(exception_type, exception, traceback) -> None:
+    _PACKAGE_LOGGER.critical("Uncaught exception", exc_info=(exception_type, exception, traceback))
 
 
 def _start_tray(paths: AppPaths, profile_id: ProfileId | None, *, debug: bool) -> None:
@@ -190,9 +214,7 @@ def _start_tray(paths: AppPaths, profile_id: ProfileId | None, *, debug: bool) -
     settings = read_settings(settings_file, sys.platform)
     if not settings_file.exists():
         write_settings(settings_file, settings)
-    sp_logging.configure_logging(
-        debug=debug or settings.logging, log_file=paths.cache / "log" if settings.logging else None
-    )
+    configure_logging(debug=debug or settings.logging, log_file=paths.cache / "log" if settings.logging else None)
     _span_desktop(settings.set_command)
     run_tray(paths, settings, profile=profile_id)
 
@@ -225,7 +247,7 @@ def _check_profile_exists(paths: AppPaths, profile_id: ProfileId) -> None:
 
 
 def _set_images(request: SetImages, paths: AppPaths) -> int:
-    sp_logging.configure_logging(debug=request.debug)
+    configure_logging(debug=request.debug)
     if request.debug:
         logger.info("Command line request: %s", request)
     ensure_dirs(paths)
@@ -251,7 +273,7 @@ def _set_images(request: SetImages, paths: AppPaths) -> int:
         spanmode = "single"
     else:
         spanmode = "multi"
-    profile = profiles.draft(
+    profile = profile_file.draft(
         images,
         spanmode=spanmode,
         perspective=Named(request.perspective) if request.perspective else None,

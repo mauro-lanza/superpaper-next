@@ -5,12 +5,13 @@ import os
 
 import wx  # ty:ignore[unresolved-import]
 
-import superpaper.perspective as persp
-from superpaper import canvas, display_store, profiles
+import superpaper.geometry.perspective as persp
+from superpaper.geometry import canvas, display_store
+from superpaper.geometry.perspective import Named, Swivel, SwivelAxis, Tilt
 from superpaper.paths import resource
-from superpaper.perspective import Named, Swivel, SwivelAxis, Tilt
-from superpaper.profile_id import NEW_PROFILE_LABEL
-from superpaper.selection import real_file
+from superpaper.profiles import profile_file
+from superpaper.profiles.profile_id import NEW_PROFILE_LABEL
+from superpaper.profiles.selection import real_file
 from superpaper.ui.help import show_help_popup
 from superpaper.ui.message import draft_shown, show_message_dialog
 
@@ -478,7 +479,9 @@ class PerspectiveConfig(wx.Dialog):
         perspective = Named(self.choice_profiles.GetString(self.choice_profiles.GetSelection()))
 
         # The session takes the layout onSave reloaded, then shows the draft.
-        profile = profiles.draft(testimage, spanmode="advanced", perspective=perspective, offsets=self.typed_offsets)
+        profile = profile_file.draft(
+            testimage, spanmode="advanced", perspective=perspective, offsets=self.typed_offsets
+        )
         wx.BeginBusyCursor()
         self.frame.session.apply_draft(profile, testimage, on_done=lambda problem: wx.CallAfter(draft_shown, problem))
         return 1

@@ -2,9 +2,9 @@
 
 import pytest
 
-from superpaper import canvas
-from superpaper.canvas import DisplayArea, PlacedDisplay
-from superpaper.perspective import Perspective, Swivel, SwivelAxis, Tilt
+from superpaper.geometry import canvas
+from superpaper.geometry.canvas import DisplayArea, PlacedDisplay
+from superpaper.geometry.perspective import Perspective, Swivel, SwivelAxis, Tilt
 
 TWO_AREAS = [
     DisplayArea((1920, 1080), (0, 0), (0, 0)),

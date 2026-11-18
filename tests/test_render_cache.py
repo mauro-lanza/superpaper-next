@@ -4,8 +4,8 @@ import os
 
 from PIL import Image
 
-from superpaper import render_cache
-from superpaper.profile_id import ProfileId
+from superpaper.profiles.profile_id import ProfileId
+from superpaper.rendering import render_cache
 from tests.conftest import monitor
 
 # Two 2x2 displays with a one-pixel gap between them, the second one pixel lower.

@@ -17,7 +17,7 @@ Display detection is bounded and transactional: transient enumeration failures a
 | Issue | Remaining work |
 |-------|----------------|
 | [#58](https://github.com/hhannine/superpaper/issues/58) | Manual pan controls exist, but there is no automatic centering on a selected monitor. |
-| [#63](https://github.com/hhannine/superpaper/issues/63) | Zoom-in and pan exist; zoom-out below cover-fit is not supported (`render.py` clamps zoom to 1.0). |
+| [#63](https://github.com/hhannine/superpaper/issues/63) | Zoom-in and pan exist; zoom-out below cover-fit is not supported (`rendering/render.py` clamps zoom to 1.0). |
 | [#92](https://github.com/hhannine/superpaper/issues/92), [#115](https://github.com/hhannine/superpaper/issues/115) | Rendering is cover-and-crop. Fit/contain, letterbox, no-upscale, stretch, and tile modes are missing. |
 | [#126](https://github.com/hhannine/superpaper/issues/126) | Native SNI is verified on KDE Wayland, not on the GNOME setup from the original report. |
 | [#141](https://github.com/hhannine/superpaper/issues/141) | KDE application and known UI failures were addressed, but the broad report has no automated cross-version Plasma coverage. |

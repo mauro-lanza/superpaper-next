@@ -6,8 +6,18 @@ from types import ModuleType, SimpleNamespace
 
 import pytest
 
+from superpaper.cli import configure_logging
 from superpaper.desktop.process import Result
+from superpaper.settings import read_settings
 from tests.conftest import write_profile
+
+module_logger = logging.getLogger("superpaper.test_logging")
+
+
+@pytest.fixture
+def unconfigured_logging():
+    yield
+    configure_logging(debug=False)
 
 
 def cli_subprocess_env(tmp_path):
@@ -171,7 +181,7 @@ def test_first_tray_start_writes_the_default_settings(monkeypatch, app_paths):
 
 
 def test_tray_logs_to_the_cache_when_logging_is_on(monkeypatch, app_paths):
-    from superpaper import cli, sp_logging
+    from superpaper import cli
 
     fake_tray(monkeypatch)
     settings_file = app_paths.config / "general_settings"
@@ -183,11 +193,11 @@ def test_tray_logs_to_the_cache_when_logging_is_on(monkeypatch, app_paths):
         assert "from a module" in (app_paths.cache / "log").read_text(encoding="utf-8")
         assert settings_file.read_text(encoding="utf-8") == "logging=true\n"
     finally:
-        sp_logging.configure_logging(debug=False)
+        cli.configure_logging(debug=False)
 
 
 def test_the_debug_flag_alone_starts_the_tray_with_logging(monkeypatch, app_paths):
-    from superpaper import cli, sp_logging
+    from superpaper import cli
 
     started = fake_tray(monkeypatch)
     try:
@@ -196,13 +206,68 @@ def test_the_debug_flag_alone_starts_the_tray_with_logging(monkeypatch, app_path
         assert [profile for _, _, profile in started] == [None]
         assert logging.getLogger("superpaper.test").isEnabledFor(logging.INFO)
     finally:
-        sp_logging.configure_logging(debug=False)
+        cli.configure_logging(debug=False)
+
+
+def test_without_debugging_nothing_is_configured(unconfigured_logging):
+    configure_logging(debug=False)
+
+    assert not module_logger.isEnabledFor(logging.INFO)
+    assert sys.excepthook is sys.__excepthook__
+
+
+def test_debugging_logs_to_the_console(unconfigured_logging, capsys):
+    configure_logging(debug=True)
+
+    module_logger.info("from a module")
+
+    assert module_logger.isEnabledFor(logging.INFO)
+    assert capsys.readouterr().err == "from a module\n"
+
+
+def test_a_log_file_also_records_uncaught_exceptions(unconfigured_logging, tmp_path):
+    log_file = tmp_path / "log"
+    configure_logging(debug=False, log_file=log_file)
+
+    module_logger.info("started")
+    message = "boom"
+    try:
+        raise ValueError(message)  # noqa: TRY301
+    except ValueError:
+        sys.excepthook(*sys.exc_info())
+
+    log = log_file.read_text(encoding="utf-8")
+    assert "started" in log
+    assert "ValueError: boom" in log
+
+
+def test_configuring_again_replaces_the_handlers(unconfigured_logging, tmp_path, capsys):
+    log_file = tmp_path / "log"
+    for _ in range(3):
+        configure_logging(debug=True, log_file=log_file)
+
+    module_logger.info("once")
+
+    assert capsys.readouterr().err == "once\n"
+    assert log_file.read_text(encoding="utf-8") == "once\n"
+
+
+def test_reading_settings_with_logging_on_adds_no_handlers(unconfigured_logging, tmp_path, capsys):
+    settings_file = tmp_path / "general_settings"
+    settings_file.write_text("logging=true\n", encoding="utf-8")
+
+    for _ in range(3):
+        assert read_settings(settings_file, "linux").logging is True
+
+    module_logger.info("not shown")
+    assert not module_logger.isEnabledFor(logging.INFO)
+    assert capsys.readouterr().err == ""
 
 
 def test_setimages_dispatches_one_shot_render(monkeypatch, tmp_path, app_paths, spanned):
     from superpaper import cli
-    from superpaper.perspective import Disabled
-    from superpaper.profiles import Profile
+    from superpaper.geometry.perspective import Disabled
+    from superpaper.profiles.profile_file import Profile
 
     image = tmp_path / "wallpaper.png"
     image.touch()
@@ -242,8 +307,8 @@ def test_a_wallpaper_that_cant_be_shown_exits_with_an_error(monkeypatch, tmp_pat
 
 def test_advanced_cli_arguments_are_preserved(monkeypatch, tmp_path, app_paths, spanned):
     from superpaper import cli
-    from superpaper.perspective import Named
-    from superpaper.profiles import Profile
+    from superpaper.geometry.perspective import Named
+    from superpaper.profiles.profile_file import Profile
 
     image = tmp_path / "wallpaper.png"
     image.touch()
@@ -506,7 +571,8 @@ def test_missing_image_exits_nonzero(tmp_path, app_paths):
 def test_a_corrupt_saved_layout_exits_with_a_message_naming_the_file(
     monkeypatch, tmp_path, app_paths, caplog, filename, content, named
 ):
-    from superpaper import cli, display_detection
+    from superpaper import cli
+    from superpaper.geometry import display_detection
 
     image = tmp_path / "wallpaper.png"
     image.touch()

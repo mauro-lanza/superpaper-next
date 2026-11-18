@@ -38,8 +38,8 @@ def app_paths(tmp_path):
 def load_profile(paths, name):
     """The record of the saved profile ``name`` (or ProfileId), loaded as the tray loads
     it; None if it doesn't load."""
-    from superpaper.profile_id import ProfileId
-    from superpaper.profile_store import ProfileStore
+    from superpaper.profiles.profile_id import ProfileId
+    from superpaper.profiles.profile_store import ProfileStore
 
     store = ProfileStore(paths)
     store.reload()
@@ -61,7 +61,7 @@ def display_layout(monkeypatch, tmp_path):
 
     The layouts are loaded from ``config_dir``, by default a directory with none saved.
     """
-    from superpaper import display_detection
+    from superpaper.geometry import display_detection
 
     def build(monitors=TWO_DISPLAYS, config_dir=None):
         monkeypatch.setattr(display_detection, "get_monitors", lambda: monitors)

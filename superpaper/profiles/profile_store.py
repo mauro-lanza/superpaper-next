@@ -15,12 +15,13 @@ from enum import Enum, auto
 from functools import partial
 from pathlib import Path
 
-from superpaper import profiles, render_cache
 from superpaper.files import write_atomically
 from superpaper.paths import AppPaths
-from superpaper.profile_id import ManagedPathError, ProfileId, ProfileIdError, collision_key, profile_path
-from superpaper.profiles import Profile
-from superpaper.selection import Selection
+from superpaper.profiles import profile_file
+from superpaper.profiles.profile_file import Profile
+from superpaper.profiles.profile_id import ManagedPathError, ProfileId, ProfileIdError, collision_key, profile_path
+from superpaper.profiles.selection import Selection
+from superpaper.rendering import render_cache
 
 logger = logging.getLogger(__name__)
 
@@ -226,8 +227,8 @@ def _load(path: Path, profile_id: ProfileId, cache_dir: Path) -> StoredProfile |
         return ProfileDiscoveryDiagnostic(path, ProfileDiagnosticKind.IO_ERROR, str(error), profile_id)
     digest = _content_digest(content)
     try:
-        profile = profiles.parse(content.decode("utf-8"))
-    except (UnicodeDecodeError, profiles.ProfileFormatError) as error:
+        profile = profile_file.parse(content.decode("utf-8"))
+    except (UnicodeDecodeError, profile_file.ProfileFormatError) as error:
         return ProfileDiscoveryDiagnostic(path, ProfileDiagnosticKind.MALFORMED_CONTENT, str(error), profile_id, digest)
     # The filename is the identity; a name= line that disagrees (a file renamed by hand,
     # or a case-only rename on Windows) is corrected on the next save.
@@ -411,7 +412,7 @@ def save_managed_profile(
         destination = profile_path(root, destination_id)
     except (OSError, ManagedPathError, ProfileIdError, ValueError) as error:
         raise ProfileTransactionError(_DESTINATION_WRITE, error) from error
-    content = profiles.serialize(profile).encode("utf-8")
+    content = profile_file.serialize(profile).encode("utf-8")
     destination_selection = _selection_path(paths.cache, destination_id)
 
     if current_profile_id is None:

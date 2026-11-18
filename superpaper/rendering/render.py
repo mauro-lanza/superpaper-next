@@ -11,9 +11,9 @@ from collections.abc import Sequence
 
 from PIL import Image, ImageOps, UnidentifiedImageError
 
-import superpaper.perspective as persp
-from superpaper.canvas import canvas_size, canvas_size_with_bezels
-from superpaper.displays import Layout
+import superpaper.geometry.perspective as persp
+from superpaper.geometry.canvas import canvas_size, canvas_size_with_bezels
+from superpaper.geometry.displays import Layout
 
 logger = logging.getLogger(__name__)
 

@@ -2,7 +2,7 @@
 
 import wx  # ty:ignore[unresolved-import]
 
-from superpaper import canvas
+from superpaper.geometry import canvas
 from superpaper.paths import resource
 from superpaper.ui.help import show_help_popup
 from superpaper.ui.message import show_message_dialog

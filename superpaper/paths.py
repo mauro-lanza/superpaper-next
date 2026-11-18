@@ -67,7 +67,7 @@ def ensure_dirs(paths: AppPaths) -> None:
     if paths.profiles.is_dir():
         return
     paths.profiles.mkdir(parents=True)
-    examples = install_dir() / "superpaper" / "profiles"
+    examples = install_dir() / "superpaper" / "resources" / "example_profiles"
     if examples.is_dir():
         for example in examples.iterdir():
             shutil.copy(example, paths.profiles)

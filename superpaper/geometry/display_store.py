@@ -17,9 +17,9 @@ from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from superpaper.displays import Display, Layout
 from superpaper.files import write_atomically
-from superpaper.perspective import Perspective, Swivel, SwivelAxis, Tilt
+from superpaper.geometry.displays import Display, Layout
+from superpaper.geometry.perspective import Perspective, Swivel, SwivelAxis, Tilt
 
 logger = logging.getLogger(__name__)
 

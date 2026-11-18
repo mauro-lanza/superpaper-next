@@ -2,8 +2,9 @@
 
 import pytest
 
-from superpaper import display_store, files
-from superpaper.perspective import Perspective, Swivel, SwivelAxis, Tilt
+from superpaper import files
+from superpaper.geometry import display_store
+from superpaper.geometry.perspective import Perspective, Swivel, SwivelAxis, Tilt
 
 LAYOUT = display_store.SavedLayout(
     ppi_norm_offsets=[(0, 0), (1920, 0)],

@@ -77,8 +77,8 @@ superpaper = [
     "resources/test.png",
     "resources/icons8-merge-vertical-96.png",
     "resources/icons8-merge-horizontal-96.png",
-    "profiles/example.profile",
-    "profiles/example_multi.profile",
+    "resources/example_profiles/example.profile",
+    "resources/example_profiles/example_multi.profile",
 ]
 
 # Desktop-entry + icon installation (formerly setup.py data_files). The scalable

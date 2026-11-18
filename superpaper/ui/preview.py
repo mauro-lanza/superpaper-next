@@ -6,9 +6,9 @@ from typing import Literal, assert_never, overload
 import wx  # ty:ignore[unresolved-import]
 from PIL import ImageEnhance
 
-from superpaper import canvas
-from superpaper.profiles import SpanMode
-from superpaper.render import SourceImageError, open_preview_image, resize_to_fill
+from superpaper.geometry import canvas
+from superpaper.profiles.profile_file import SpanMode
+from superpaper.rendering.render import SourceImageError, open_preview_image, resize_to_fill
 from superpaper.ui.layout_editor import LayoutEditor
 
 logger = logging.getLogger(__name__)

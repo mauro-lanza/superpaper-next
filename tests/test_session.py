@@ -11,10 +11,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from superpaper import display_detection
 from superpaper import session as session_module
-from superpaper.profile_id import ProfileId
-from superpaper.profiles import Profile
+from superpaper.geometry import display_detection
+from superpaper.profiles.profile_file import Profile
+from superpaper.profiles.profile_id import ProfileId
 from superpaper.session import Session
 
 DELAY = 600.0
