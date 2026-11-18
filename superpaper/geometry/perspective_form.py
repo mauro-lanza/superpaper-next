@@ -10,6 +10,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from superpaper.files import SaveFailed
 from superpaper.geometry import canvas, display_store
 from superpaper.geometry.displays import MM_PER_INCH, Layout
 from superpaper.geometry.perspective import (
@@ -20,7 +21,7 @@ from superpaper.geometry.perspective import (
     parse_viewer_offsets_mm,
     perspective_from_mm,
 )
-from superpaper.user_input import Offset
+from superpaper.user_input import Offset, Problems
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,22 +47,10 @@ class Saved:
 
 
 @dataclass(frozen=True, slots=True)
-class Problems:
-    """What keeps the form from being saved, for the user to fix."""
-
-    message: str
-
-
-@dataclass(frozen=True, slots=True)
 class NeedsConfirm:
     """The settings would need a very large intermediate image; save again with
     ``confirmed`` once the user accepts."""
 
-    message: str
-
-
-@dataclass(frozen=True, slots=True)
-class SaveFailed:
     message: str
 
 
@@ -121,17 +110,17 @@ def save_perspective(
     ``offsets`` are the applied manual offsets that the image size check uses.
     """
     if not form.name:
-        return Problems("Profile name is required.")
+        return Problems(("Profile name is required.",))
     if layout.perspective(form.name) is None:
         try:
             check_new_perspective_name(form.name)
         except ValueError as error:
-            return Problems(str(error))
+            return Problems((str(error),))
     try:
         viewer_offset_mm = parse_viewer_offsets_mm(form.viewer_offsets)
         swivels, tilts = parse_rotations_mm(form.swivel_axes, form.rotation_cells)
     except ValueError as error:
-        return Problems(str(error))
+        return Problems((str(error),))
     perspective = perspective_from_mm(
         form.name, layout.max_ppi(), form.central_display, viewer_offset_mm, swivels, tilts
     )

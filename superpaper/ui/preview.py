@@ -4,7 +4,7 @@ import logging
 from typing import Literal, assert_never, overload
 
 import wx  # ty:ignore[unresolved-import]
-from PIL import ImageEnhance
+from PIL import Image, ImageEnhance
 
 from superpaper.geometry import canvas
 from superpaper.profiles.profile_file import SpanMode
@@ -337,7 +337,14 @@ class WallpaperPreviewPanel(wx.Panel):
     def resize_and_bitmap(self, fname, size, enhance_color=False):
         """Take filename of an image and resize and crop it to size."""
         try:
-            pil = resize_to_fill(open_preview_image(fname), size, quality="fast", zoom=self.zoom, offset=self.offset)
+            pil = resize_to_fill(
+                open_preview_image(fname),
+                size,
+                zoom=self.zoom,
+                offset=self.offset,
+                resample=Image.Resampling.HAMMING,
+                reducing_gap=1.5,
+            )
         except SourceImageError as error:  # unreadable, truncated, too large, or no longer there
             logger.info("Cannot preview image '%s': %s", fname, error)
             black_bmp = wx.Bitmap.FromRGBA(size[0], size[1], red=0, green=0, blue=0, alpha=255)

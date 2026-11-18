@@ -11,10 +11,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import assert_never
 
+from superpaper.files import SaveFailed
 from superpaper.geometry import display_store
 from superpaper.geometry.canvas import Point
-from superpaper.geometry.displays import DisplaySettings, Layout
-from superpaper.user_input import parse_diagonals
+from superpaper.geometry.displays import Layout
+from superpaper.user_input import Problems, parse_bezel, parse_diagonals
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,11 +39,6 @@ class ConfiguringBezels:
 
 
 EditState = Idle | ConfiguringPositions | ConfiguringBezels
-
-
-@dataclass(frozen=True, slots=True)
-class SaveFailed:
-    message: str
 
 
 def start_positions(state: EditState, layout: Layout) -> ConfiguringPositions:
@@ -113,37 +109,25 @@ def save_display_settings(config_dir: Path, layout: Layout) -> SaveFailed | None
     return None
 
 
-def has_unsaved_changes(layout: Layout, saved: DisplaySettings) -> bool:
-    """Whether the display settings of ``layout`` differ from the ``saved`` ones."""
-    return layout.settings() != saved
-
-
 def with_entered_diagonals(layout: Layout, texts: Sequence[str]) -> Layout | None:
     """The layout with the diagonals the field ``texts`` spell, or None while they aren't all valid."""
     inches = parse_diagonals(texts)
     return None if inches is None else layout.with_diagonals(inches)
 
 
-def with_entered_bezels(
-    layout: Layout, entered: Sequence[tuple[float | None, float | None]]
-) -> Layout | list[tuple[int, int]]:
-    """The layout with the (right, bottom) bezels entered for each display, in millimetres, where
-    None is an entry that wasn't a valid thickness; else the (display, 0 right | 1 bottom) of each."""
-    problems: list[tuple[int, int]] = []
+def with_entered_bezels(layout: Layout, entered: Sequence[tuple[str, str]]) -> Layout | Problems:
+    """The layout with the (right, bottom) bezel thicknesses the field texts of each display
+    spell, in millimetres; else a message for each text that isn't a valid thickness."""
+    messages: list[str] = []
     bezels: list[Point] = []
-    for index, (right, bottom) in enumerate(entered):
-        if right is None:
-            problems.append((index, 0))
-        if bottom is None:
-            problems.append((index, 1))
+    for right_text, bottom_text in entered:
+        right, bottom = parse_bezel(right_text), parse_bezel(bottom_text)
+        for text, thickness in ((right_text, right), (bottom_text, bottom)):
+            if thickness is None:
+                messages.append(f"Bezel thickness must be a non-negative number, '{text}' was entered.")
         if right is not None and bottom is not None:
             bezels.append((right, bottom))
-    return problems or layout.with_bezels(bezels)
-
-
-def with_detected_sizes_arranged(layout: Layout) -> Layout:
-    """The layout back at the detected sizes, with the displays arranged afresh."""
-    return layout.with_detected_sizes().with_initial_offsets()
+    return Problems(tuple(messages)) if messages else layout.with_bezels(bezels)
 
 
 def _require_idle(state: EditState) -> None:

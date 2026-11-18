@@ -11,7 +11,7 @@ import superpaper.session as session
 from superpaper.desktop.process import Result
 from superpaper.desktop.wallpaper import Pieces, Spanned
 from superpaper.paths import AppPaths
-from superpaper.profiles.profile_file import Profile
+from superpaper.profiles.profile_file import OffsetsCorrection, Profile
 from superpaper.profiles.profile_id import ProfileId
 from superpaper.rendering import render
 from tests.conftest import monitor
@@ -30,7 +30,7 @@ def write_image(path, size=(5, 3), colour=(10, 20, 30), *, modified=None):
 
 def settings(name, *, spanmode="single", legacy_corrections=False):
     """A profile's settings; ``legacy_corrections`` adds an offsets= line from before display layouts."""
-    corrections = (("offsets", ((0, 0), (0, 0))),) if legacy_corrections else ()
+    corrections = (OffsetsCorrection(((0, 0), (0, 0))),) if legacy_corrections else ()
     return Profile(name=name, spanmode=spanmode, slideshow=False, corrections=corrections)
 
 

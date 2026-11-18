@@ -18,6 +18,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from superpaper.files import write_atomically
+from superpaper.geometry.canvas import Point
 from superpaper.geometry.displays import Display, Layout
 from superpaper.geometry.perspective import Perspective, Swivel, SwivelAxis, Tilt
 
@@ -30,11 +31,11 @@ LAYOUTS_FILE = "display_systems.dat"
 class SavedLayout:
     """What display_systems.dat keeps about one layout."""
 
-    ppi_norm_offsets: list
+    ppi_norm_offsets: list[Point]
     """Each display's position on the density-normalised canvas, bezels included."""
-    bezel_mms: list
+    bezel_mms: list[Point]
     """Each display's (right, bottom) bezel in millimetres."""
-    user_diagonal_inches: list | None
+    user_diagonal_inches: list[float] | None
     """The diagonals the user entered, or None for the detected sizes."""
     use_perspective: bool
     default_perspective: str | None
@@ -93,14 +94,11 @@ def read_layout(config_dir: Path, key: str) -> SavedLayout | None:
         return None
     section = config[key]
     try:
-        bezel_mms = _str_to_list(section["bezel_mms"], item_len=2)
-        if bezel_mms:
-            bezel_mms = [(round(bez[0], 2), round(bez[1], 2)) for bez in bezel_mms]
         default_perspective = section.get("def_perspective", "None")
         layout = SavedLayout(
-            ppi_norm_offsets=_str_to_list(section["ppi_norm_offsets"], item_len=2),
-            bezel_mms=bezel_mms,
-            user_diagonal_inches=_str_to_list(section["user_diagonal_inches"], item_len=1),
+            ppi_norm_offsets=_str_to_points(section["ppi_norm_offsets"]),
+            bezel_mms=[(round(x, 2), round(y, 2)) for x, y in _str_to_points(section["bezel_mms"])],
+            user_diagonal_inches=_str_to_numbers(section["user_diagonal_inches"]),
             use_perspective=bool(int(section.get("use_perspective", 0))),
             default_perspective=None if default_perspective == "None" else default_perspective,
         )
@@ -116,9 +114,9 @@ def write_layout(config_dir: Path, key: str, layout: SavedLayout) -> None:
     path = config_dir / LAYOUTS_FILE
     config = _read(path)
     config[key] = {
-        "ppi_norm_offsets": _list_to_str(layout.ppi_norm_offsets, item_len=2),
-        "bezel_mms": _list_to_str(layout.bezel_mms, item_len=2),
-        "user_diagonal_inches": _list_to_str(layout.user_diagonal_inches, item_len=1),
+        "ppi_norm_offsets": _rows_to_str(layout.ppi_norm_offsets),
+        "bezel_mms": _rows_to_str(layout.bezel_mms),
+        "user_diagonal_inches": _numbers_to_str(layout.user_diagonal_inches),
         "use_perspective": str(int(layout.use_perspective)),
         "def_perspective": str(layout.default_perspective),
     }
@@ -149,13 +147,11 @@ def write_perspectives(config_dir: Path, key: str, perspectives: Sequence[Perspe
     for perspective in perspectives:
         config[perspective.name] = {
             "central_disp": str(perspective.central_display),
-            "viewer_pos": _list_to_str(list(perspective.viewer_pos), item_len=1),
-            "swivels": _list_to_str(
-                [(s.axis.value, s.angle, s.lateral_offset, s.depth_offset) for s in perspective.swivels], item_len=4
+            "viewer_pos": _numbers_to_str(perspective.viewer_pos),
+            "swivels": _rows_to_str(
+                [(s.axis.value, s.angle, s.lateral_offset, s.depth_offset) for s in perspective.swivels]
             ),
-            "tilts": _list_to_str(
-                [(t.angle, t.vertical_offset, t.depth_offset) for t in perspective.tilts], item_len=3
-            ),
+            "tilts": _rows_to_str([(t.angle, t.vertical_offset, t.depth_offset) for t in perspective.tilts]),
         }
     logger.info("Saving perspectives: %s", config.sections())
     _write(config_dir / f"{key}.persp", config)
@@ -237,53 +233,23 @@ def _encoding() -> str:
     return locale.getpreferredencoding(False)
 
 
-def _list_to_str(lst, item_len=1):
-    """Format lists as ,(;) separated strings."""
-    if item_len == 1:
-        if lst:
-            return ",".join(str(lst_itm) for lst_itm in lst)
-        else:
-            return "None"
-    else:
-        joined_items = []
-        for sub_lst in lst:
-            joined_items.append(",".join(str(sub_itm) for sub_itm in sub_lst))
-        return ";".join(joined_items)
+def _numbers_to_str(numbers: Sequence[float] | None) -> str:
+    """The numbers ','-separated; "None" for no numbers."""
+    return ",".join(map(str, numbers)) if numbers else "None"
 
 
-def _str_to_list(joined_list, item_len=1):
-    """Extract list from joined_list."""
-    if item_len == 1:
-        if joined_list in [None, "None"]:
-            return None
-        split_list = joined_list.split(",")
-        conv_list = []
-        for item in split_list:
-            try:
-                val = int(item)
-            except ValueError:
-                try:
-                    val = float(item)
-                except ValueError:
-                    val = item
-                    logger.info("str_to_list: ValueError: not int or float: %s", item)
-            conv_list.append(val)
-        return conv_list
-    else:
-        split_list = joined_list.split(";")
-        conv_list = []
-        for item in split_list:
-            split_item = item.split(",")
-            conv_item = []
-            for sub_item in split_item:
-                try:
-                    val = int(sub_item)
-                except ValueError:
-                    try:
-                        val = float(sub_item)
-                    except ValueError:
-                        val = sub_item
-                        logger.info("str_to_list: ValueError: not int or float: %s", sub_item)
-                conv_item.append(val)
-            conv_list.append(tuple(conv_item))
-        return conv_list
+def _rows_to_str(rows: Sequence[Sequence[float]]) -> str:
+    """The rows of numbers ','-separated, the rows ';'-separated."""
+    return ";".join(",".join(map(str, row)) for row in rows)
+
+
+def _str_to_numbers(text: str) -> list[float] | None:
+    """The ','-separated numbers of ``text``; None for "None"."""
+    if text == "None":
+        return None
+    return [_number(item) for item in text.split(",")]
+
+
+def _str_to_points(text: str) -> list[Point]:
+    """The ';'-separated (x, y) pairs of ``text``."""
+    return [(x, y) for x, y in _number_rows(text, 2)]

@@ -12,8 +12,12 @@ import os
 import random
 import threading
 from collections.abc import Callable, Sequence
+from typing import Literal, assert_never, get_args
 
 logger = logging.getLogger(__name__)
+
+SortMode = Literal["shuffle", "alphabetical", "date_seeded_shuffle"]
+SORT_MODES: tuple[SortMode, ...] = get_args(SortMode)
 
 SUPPORTED_IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".bmp", ".gif", ".tiff", ".webp")
 
@@ -67,7 +71,7 @@ class Selection:
     def __init__(
         self,
         sources: Sequence[Sequence[str]],
-        sortmode: str,
+        sortmode: SortMode,
         size: int,
         *,
         images: Sequence[str] | None = None,
@@ -190,7 +194,7 @@ class Selection:
 class _ImageList:
     """One position's images in slideshow order, rearranged each time they have all been shown."""
 
-    def __init__(self, files: list[str], sortmode: str):
+    def __init__(self, files: list[str], sortmode: SortMode):
         self.counter = 0
         self.files = files
         self.sortmode = sortmode
@@ -203,15 +207,16 @@ class _ImageList:
             self.arrange()
 
     def arrange(self) -> None:
-        if self.sortmode == "shuffle":
-            random.shuffle(self.files)
-        elif self.sortmode == "date_seeded_shuffle":
-            today = datetime.datetime.now()  # noqa: DTZ005  # intentional local-time seed
-            random.Random(today.strftime("%Y%m%d%H")).shuffle(self.files)
-        elif self.sortmode == "alphabetical":
-            self.files.sort()
-        else:
-            logger.info("Unknown sort mode: %s", self.sortmode)
+        match self.sortmode:
+            case "shuffle":
+                random.shuffle(self.files)
+            case "date_seeded_shuffle":
+                today = datetime.datetime.now()  # noqa: DTZ005  # intentional local-time seed
+                random.Random(today.strftime("%Y%m%d%H")).shuffle(self.files)
+            case "alphabetical":
+                self.files.sort()
+            case _:
+                assert_never(self.sortmode)
 
 
 def _file_identity(path: str) -> str:

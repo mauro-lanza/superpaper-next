@@ -11,6 +11,7 @@ from superpaper.geometry import canvas, layout_edit
 from superpaper.geometry.displays import Layout
 from superpaper.geometry.perspective import Default, Disabled, choice_label, parse_choice
 from superpaper.paths import resource
+from superpaper.profile_actions import delete_profile, revert_profile, save_profile, saved_profile, show_draft
 from superpaper.profiles import form, profile_file
 from superpaper.profiles.profile_file import SPAN_MODES, SpanMode
 from superpaper.profiles.profile_id import NEW_PROFILE_LABEL
@@ -21,7 +22,7 @@ from superpaper.ui.help import HelpFrame, image_quality_advice, show_help_popup
 from superpaper.ui.message import draft_shown, show_message_dialog
 from superpaper.ui.perspective_dialog import PerspectiveConfig
 from superpaper.ui.preview import WallpaperPreviewPanel
-from superpaper.user_input import Offset, OffsetError, parse_offsets
+from superpaper.user_input import Offset, OffsetError, Problems, parse_offsets
 
 logger = logging.getLogger(__name__)
 
@@ -273,7 +274,7 @@ class WallpaperSettingsPanel(wx.Panel):
             statbox_parent_sshow,
             -1,
             name="SortChoice",
-            choices=list(form.SORT_LABELS),
+            choices=list(form.SORT_LABELS.values()),
             style=wx.CB_READONLY,
         )
         self.st_sshow_delay = wx.StaticText(statbox_parent_sshow, -1, "Delay (minutes):")
@@ -535,7 +536,7 @@ class WallpaperSettingsPanel(wx.Panel):
         display_data = self._display_areas()
         # Preview the store's current record: its selection follows the slideshow.
         self.wpprev_pnl.preview_wallpaper(
-            form.preview_images(self.store, stored),
+            (self.store.get(stored.profile_id) or stored).selection.current(),
             self.span_mode,
             display_data,
             self.preview_spangroups(),
@@ -562,7 +563,7 @@ class WallpaperSettingsPanel(wx.Panel):
             if shown.sort_label is None:
                 self.ch_sshow_sort.SetSelection(wx.NOT_FOUND)
             else:
-                self.ch_sshow_sort.SetSelection(form.SORT_LABELS.index(shown.sort_label))
+                self.ch_sshow_sort.SetSelection(list(form.SORT_LABELS.values()).index(shown.sort_label))
         else:
             self.cb_slideshow.SetValue(False)
             wx.PostEvent(self.cb_slideshow, wx.CommandEvent(commandEventType=wx.EVT_CHECKBOX.typeId))
@@ -825,10 +826,6 @@ class WallpaperSettingsPanel(wx.Panel):
             self.sizer_main.Layout()
         return True
 
-    def read_spangroups(self) -> tuple[tuple[int, ...], ...]:
-        """The groups of displays the user has chosen, in the order the groups first appear."""
-        return form.spangroups_of(self._spangroup_choices())
-
     def _spangroup_choices(self):
         return tuple(ch.GetSelection() for ch in self.ch_list_spangroups)
 
@@ -1008,7 +1005,7 @@ class WallpaperSettingsPanel(wx.Panel):
 
     def onBrowsePaths(self, event):
         """Opens the pick paths dialog."""
-        num_groups = len(self.read_spangroups()) if self.use_spangroups() else None
+        num_groups = len(form.spangroups_of(self._spangroup_choices())) if self.use_spangroups() else None
         dlg = BrowsePaths(
             self,
             self.has_sources_per_target(),
@@ -1053,7 +1050,7 @@ class WallpaperSettingsPanel(wx.Panel):
         changes made to its file outside the editor."""
         selection = self.choice_profiles.GetSelection()
         name = self.choice_profiles.GetString(selection) if selection != wx.NOT_FOUND else ""
-        profile = form.revert_profile(name, store=self.store, session=self.session)
+        profile = revert_profile(name, store=self.store, session=self.session)
         if profile is not None:
             self.update_choiceprofile()
             self.choice_profiles.SetSelection(self.choice_profiles.FindString(profile.profile.name))
@@ -1070,13 +1067,13 @@ class WallpaperSettingsPanel(wx.Panel):
         profile are left untouched. Use Save to persist the changes.
         """
         draft = form.prepare_draft(self._read_form(), self._focused_path(), self.loaded_profile)
-        if isinstance(draft, form.Problems):
+        if isinstance(draft, Problems):
             self._show_problems(draft)
             return
         wx.BeginBusyCursor()
         # The staged layout, so unsaved display settings — bezels, sizes, positions — are
         # reflected; it is a value, so the worker thread renders exactly what is staged now.
-        form.show_draft(
+        show_draft(
             draft,
             loaded=self.loaded_profile,
             layout=self.staged.layout,
@@ -1085,7 +1082,7 @@ class WallpaperSettingsPanel(wx.Panel):
             on_shown=draft_shown,
         )
 
-    def _show_problems(self, problems: form.Problems):
+    def _show_problems(self, problems: Problems):
         """Tell the user what keeps the profile from being saved or applied."""
         show_message_dialog("\n\n".join(problems.messages), "Error")
 
@@ -1104,7 +1101,7 @@ class WallpaperSettingsPanel(wx.Panel):
 
     def _save_profile(self):
         current = self._read_form()
-        result = form.save_profile(
+        result = save_profile(
             current,
             focused_path=self._focused_path(),
             loaded=self.loaded_profile,
@@ -1112,7 +1109,7 @@ class WallpaperSettingsPanel(wx.Panel):
             session=self.session,
             rebind_hotkey=self._rebind_hotkey,
         )
-        if isinstance(result, form.Problems):
+        if isinstance(result, Problems):
             self._show_problems(result)
             return None
         saved_profile = result.stored
@@ -1155,7 +1152,7 @@ class WallpaperSettingsPanel(wx.Panel):
         """Deletes the currently selected profile after getting confirmation."""
         selection = self.choice_profiles.GetSelection()
         selected_name = self.choice_profiles.GetString(selection) if selection != wx.NOT_FOUND else ""
-        profile = form.saved_profile(self.store, selected_name)
+        profile = saved_profile(self.store, selected_name)
         if profile is None:
             show_message_dialog("Selected profile is not saved.", "Error")
             return
@@ -1163,9 +1160,7 @@ class WallpaperSettingsPanel(wx.Panel):
             f"Do you want to delete profile: {selected_name}?", "Confirm Delete", style="YES_NO"
         ):
             return
-        problems = form.delete_profile(
-            profile, store=self.store, session=self.session, rebind_hotkey=self._rebind_hotkey
-        )
+        problems = delete_profile(profile, store=self.store, session=self.session, rebind_hotkey=self._rebind_hotkey)
         if problems is not None:
             self._show_problems(problems)
             return

@@ -3,7 +3,6 @@ that the application in superpaper.controller opens through its Shell."""
 
 import configparser
 import logging
-import os
 import sys
 
 import wx  # ty:ignore[unresolved-import]
@@ -11,7 +10,7 @@ import wx  # ty:ignore[unresolved-import]
 from superpaper.controller import Shell, Superpaper
 from superpaper.geometry.display_detection import DisplayDetectionError
 from superpaper.paths import AppPaths
-from superpaper.profiles.profile_id import ProfileId, ProfileIdError
+from superpaper.profiles.profile_id import ProfileId
 from superpaper.settings import Settings
 from superpaper.ui.editor import ConfigFrame
 from superpaper.ui.help import HelpFrame
@@ -22,20 +21,15 @@ from superpaper.ui.tray import TaskBarIcon
 logger = logging.getLogger(__name__)
 
 
-def run(paths: AppPaths, settings: Settings, profile: ProfileId | str | os.PathLike[str] | None = None):
+def run(paths: AppPaths, settings: Settings, profile: ProfileId | None = None):
     """Run the tray application until it is quit; ``profile`` is run at once, if given."""
     # On Linux (wxGTK) the tray icon (StatusNotifierItem) title is derived
     # from the program name, i.e. the basename of sys.argv[0]. When launched
     # via "python -m superpaper" this becomes "__main__.py", so normalize it
     # to a clean application name before the wx.App is created.
     sys.argv[0] = "Superpaper"
-    startup_profile = None
     if profile:
-        try:
-            startup_profile = profile if isinstance(profile, ProfileId) else ProfileId.from_path(profile)
-        except ProfileIdError:
-            startup_profile = None
-        logger.info("Startup profile: %s", startup_profile.value if startup_profile else profile)
+        logger.info("Startup profile: %s", profile.value)
     if sys.platform == "linux":
         # Route incoming D-Bus calls (native SNI tray) through wxGTK's own
         # GLib main loop. Must be set as the default main loop before the
@@ -46,7 +40,7 @@ def run(paths: AppPaths, settings: Settings, profile: ProfileId | str | os.PathL
             DBusGMainLoop(set_as_default=True)
         except ImportError:
             pass
-    app = App(paths, settings, startup_profile)
+    app = App(paths, settings, profile)
     app.MainLoop()
 
 

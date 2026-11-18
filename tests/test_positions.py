@@ -22,10 +22,8 @@ def layout(monkeypatch, tmp_path):
 
 def test_units_convert_between_millimetres_and_pixels(layout):
     ppi = layout.max_ppi()
-    assert positions.to_pixels(25.4, ppi, use_px=False) == pytest.approx(ppi)
-    assert positions.from_pixels(ppi, ppi, use_px=False) == pytest.approx(25.4)
-    assert positions.to_pixels(7, ppi, use_px=True) == 7
-    assert positions.from_pixels(7, ppi, use_px=True) == 7
+    assert positions.mm_to_pixels(25.4, ppi) == pytest.approx(ppi)
+    assert positions.pixels_to_mm(ppi, ppi) == pytest.approx(25.4)
 
 
 def test_the_edges_of_each_display_include_the_bezels_at_right_and_bottom(layout):

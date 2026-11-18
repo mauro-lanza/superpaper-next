@@ -64,19 +64,6 @@ def test_profile_id_rejects_unsafe_names(name, code):
     assert error.value.raw == name
 
 
-@pytest.mark.parametrize(
-    "raw",
-    ["Work", "Work.profile", "/outside/profiles/Work.profile", r"C:\outside\Work.profile", Path("/x/Work.profile")],
-)
-def test_a_profile_named_by_a_path_is_identified_by_its_file_name_only(raw):
-    assert ProfileId.from_path(raw) == ProfileId("Work")
-
-
-def test_a_path_without_a_usable_file_name_is_not_a_profile():
-    with pytest.raises(ProfileIdError):
-        ProfileId.from_path("/outside/")
-
-
 def test_the_new_profile_entry_is_not_a_profile_name():
     with pytest.raises(ProfileIdError) as error:
         ProfileId.parse(NEW_PROFILE_LABEL.upper())

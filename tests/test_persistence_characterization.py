@@ -4,7 +4,7 @@ import pytest
 
 from superpaper.geometry.perspective import Default, Disabled, Named
 from superpaper.profiles import profile_file
-from superpaper.profiles.profile_file import Profile
+from superpaper.profiles.profile_file import OffsetsCorrection, Profile
 from superpaper.settings import read_settings, write_settings
 from tests.conftest import load_profile, write_profile
 
@@ -27,7 +27,7 @@ def test_a_profile_is_written_as_the_editor_always_wrote_it():
         slideshow=True,
         delay=60.0,
         sortmode="alphabetical",
-        corrections=(("offsets", ((1, -2), (3, 4))),),
+        corrections=(OffsetsCorrection(((1, -2), (3, 4))),),
         hotkey=("control", "super", "w"),
         perspective=Named("desk"),
         zoom=1.25,
@@ -63,7 +63,7 @@ def test_a_written_profile_reads_back_the_same(tmp_path):
         perspective=Disabled(),
         zoom=1.5,
         pan=(0.25, -1.0),
-        corrections=(("offsets", ((0, 0), (12, -3))),),
+        corrections=(OffsetsCorrection(((0, 0), (12, -3))),),
         sources=((str(tmp_path / "a=b"),), ("/one", "/two")),
     )
 

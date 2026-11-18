@@ -259,17 +259,6 @@ def test_a_start_with_nothing_to_run_runs_nothing(startup):
     assert superpaper.session.requests == []
 
 
-def test_startup_outside_path_cannot_select_by_path():
-    managed = profile("Work")
-    superpaper = application(profiles=[managed])
-
-    startup_id = ProfileId.from_path("/outside/not-the-managed-file/Work.profile")
-
-    assert superpaper.store.get(startup_id) is managed
-    assert ProfileId.from_path("/outside/Other.profile") == ProfileId("Other")
-    assert superpaper.store.get(ProfileId("Other")) is None
-
-
 @pytest.mark.parametrize("still_saved", [True, False])
 def test_reloading_tells_the_session_what_became_of_the_running_profile(still_saved):
     running = profile("Work")

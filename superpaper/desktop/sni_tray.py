@@ -18,12 +18,14 @@ the toolkit's own tray icon.
 """
 
 import logging
+import os
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from itertools import count
 from typing import Any, assert_never
 
-from superpaper.rendering.render import load_argb32
+from PIL import Image
+
 from superpaper.tray_menu import Check, Item, MenuEntry, Separator, Submenu
 
 logger = logging.getLogger(__name__)
@@ -56,6 +58,25 @@ def sni_supported():
     except Exception as exc:
         logger.info("SNI watcher probe failed: %s", exc)
         return False
+
+
+def load_argb32(path) -> tuple[int, int, bytes] | None:
+    """The PNG at ``path`` as (width, height, ARGB32 bytes, big-endian), or None if it can't be read."""
+    if not path or not os.path.isfile(path):
+        return None
+    try:
+        with Image.open(path) as img:
+            rgba = img.convert("RGBA")
+    except (OSError, ValueError) as error:
+        logger.info("Failed to load the icon %s: %s", path, error)
+        return None
+    raw = rgba.tobytes("raw", "RGBA")
+    argb = bytearray(len(raw))
+    argb[0::4] = raw[3::4]
+    argb[1::4] = raw[0::4]
+    argb[2::4] = raw[1::4]
+    argb[3::4] = raw[2::4]
+    return (*rgba.size, bytes(argb))
 
 
 def _load_icon_pixmap(path):

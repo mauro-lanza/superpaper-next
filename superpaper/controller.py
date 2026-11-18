@@ -12,6 +12,7 @@ import superpaper.desktop as desktop
 import superpaper.geometry.display_detection as display_detection
 from superpaper.desktop.hotkeys import Hotkeys
 from superpaper.paths import AppPaths
+from superpaper.profile_actions import carry_on_running
 from superpaper.profiles import profile_store
 from superpaper.profiles.profile_id import ProfileId
 from superpaper.profiles.profile_store import ProfileDiagnosticKind, ProfileStore, StoredProfile
@@ -158,11 +159,7 @@ class Superpaper:
     def reload_profiles(self) -> None:
         """Load the profiles directory again, asking about profiles that can't be loaded."""
         self._load_profiles()
-        # The running profile carries on with its current record, whose file may have
-        # changed, or stops if it is gone.
-        running = self.session.running
-        if running is not None:
-            self.session.update(running.profile_id, self.store.get(running.profile_id))
+        carry_on_running(self.store, self.session)
 
     def _load_profiles(self) -> None:
         """Read the profiles directory again, offering to delete profiles that can't be loaded."""

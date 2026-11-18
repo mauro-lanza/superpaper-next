@@ -1,6 +1,5 @@
 """Profile identity: which filenames are profiles, and where their files may live."""
 
-import os
 import sys
 import unicodedata
 from dataclasses import InitVar, dataclass, field
@@ -72,13 +71,6 @@ class ProfileId:
     def parse_new(cls, raw: object) -> ProfileId:
         _validate_profile_id(raw, new=True)
         return cls(raw)
-
-    @classmethod
-    def from_path(cls, name_or_path: str | os.PathLike[str]) -> ProfileId:
-        """The profile named by ``name_or_path``: a profile name, or the path of its file,
-        of which only the file's name counts, so a path can't choose where a profile lives."""
-        leaf = os.fspath(name_or_path).replace("\\", "/").rsplit("/", 1)[-1]
-        return cls.parse(leaf.removesuffix(".profile"))
 
     @property
     def value(self) -> str:

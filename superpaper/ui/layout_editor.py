@@ -8,7 +8,7 @@ from superpaper.geometry import canvas, layout_edit
 from superpaper.paths import resource
 from superpaper.ui.message import show_message_dialog
 from superpaper.ui.positions_dialog import DisplayPositionEntry
-from superpaper.user_input import parse_bezel
+from superpaper.user_input import Problems, parse_bezel
 
 logger = logging.getLogger(__name__)
 
@@ -557,16 +557,12 @@ class LayoutEditor:
         def onApply(self, event):
             pops = self.layout_editor.bezel_popups
             preview = self.layout_editor.preview
-            entered = [(pair[0].test_bezel_value(), pair[1].test_bezel_value()) for pair in pops]
+            entered = [(pair[0].tc_bez.GetValue(), pair[1].tc_bez.GetValue()) for pair in pops]
             result = layout_edit.with_entered_bezels(preview.staged.layout, entered)
-            if isinstance(result, list):
+            if isinstance(result, Problems):
                 # Abort applying and alert user but don't
                 # Dismiss popup to fascilitate fixing.
-                display, side = result[0]
-                msg = (
-                    "Bezel thickness must be a non-negative number, "
-                    f"'{pops[display][side].tc_bez.GetValue()}' was entered."
-                )
+                msg = result.messages[0]
                 logger.info(msg)
                 self.Hide()
                 show_message_dialog(msg, "Error", parent=self)

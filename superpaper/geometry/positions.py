@@ -11,14 +11,12 @@ Edges = tuple[float, float, float, float]
 """(left, top, right, bottom) of a display, bezels included at right and bottom."""
 
 
-def to_pixels(value: float, max_ppi: float, *, use_px: bool) -> float:
-    """``value`` in the entry unit (pixels if ``use_px``, else millimetres) as pixels."""
-    return value * (1 if use_px else max_ppi / MM_PER_INCH)
+def mm_to_pixels(value: float, max_ppi: float) -> float:
+    return value * (max_ppi / MM_PER_INCH)
 
 
-def from_pixels(value: float, max_ppi: float, *, use_px: bool) -> float:
-    """Pixels ``value`` in the entry unit (pixels if ``use_px``, else millimetres)."""
-    return value * (1 if use_px else 1 / (max_ppi / MM_PER_INCH))
+def pixels_to_mm(value: float, max_ppi: float) -> float:
+    return value * (1 / (max_ppi / MM_PER_INCH))
 
 
 def edges_in_unit(layout: Layout, *, use_px: bool) -> list[Edges]:
@@ -26,7 +24,7 @@ def edges_in_unit(layout: Layout, *, use_px: bool) -> list[Edges]:
     max_ppi = layout.max_ppi()
 
     def unit(pixels: float) -> float:
-        return from_pixels(pixels, max_ppi, use_px=use_px)
+        return pixels if use_px else pixels_to_mm(pixels, max_ppi)
 
     crops = layout.ppi_norm_crops(len(layout.displays) * [(0, 0)])
     bezels = layout.ppi_norm_bezels()
@@ -44,7 +42,7 @@ def convert_unit(text: str, max_ppi: float, *, to_px: bool) -> str:
     if not text:
         return text
     value = float(text)
-    return str(to_pixels(value, max_ppi, use_px=False) if to_px else from_pixels(value, max_ppi, use_px=False))
+    return str(mm_to_pixels(value, max_ppi) if to_px else pixels_to_mm(value, max_ppi))
 
 
 def parse_new_offsets(fields: Sequence[tuple[str, str]], max_ppi: float, *, use_px: bool) -> list[Point]:
@@ -64,6 +62,6 @@ def parse_new_offsets(fields: Sequence[tuple[str, str]], max_ppi: float, *, use_
                 else:
                     message = "Please enter a position for every display. Some value is empty."
                 raise ValueError(message)
-            pixels.append(to_pixels(value, max_ppi, use_px=use_px))
+            pixels.append(value if use_px else mm_to_pixels(value, max_ppi))
         offsets.append((pixels[0], pixels[1]))
     return canvas.translate_to_origin(offsets)

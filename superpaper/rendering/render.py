@@ -116,32 +116,14 @@ def source_icon_image(path, size: tuple[int, int]) -> Image.Image | None:
     return image.resize(fitted, Image.Resampling.BOX)
 
 
-def load_argb32(path) -> tuple[int, int, bytes] | None:
-    """The PNG at ``path`` as (width, height, ARGB32 bytes, big-endian), or None if it can't be read."""
-    if not path or not os.path.isfile(path):
-        return None
-    try:
-        with Image.open(path) as img:
-            rgba = img.convert("RGBA")
-    except (OSError, ValueError) as error:
-        logger.info("Failed to load the icon %s: %s", path, error)
-        return None
-    raw = rgba.tobytes("raw", "RGBA")
-    argb = bytearray(len(raw))
-    argb[0::4] = raw[3::4]
-    argb[1::4] = raw[0::4]
-    argb[2::4] = raw[1::4]
-    argb[3::4] = raw[2::4]
-    return (*rgba.size, bytes(argb))
-
-
 def resize_to_fill(
-    img,
-    res,
-    quality: str | Image.Resampling = Image.Resampling.LANCZOS,
-    zoom=1.0,
-    offset=(0.0, 0.0),
-):
+    img: Image.Image,
+    res: tuple[int, int],
+    zoom: float = 1.0,
+    offset: tuple[float, float] = (0.0, 0.0),
+    resample: Image.Resampling = Image.Resampling.LANCZOS,
+    reducing_gap: float | None = None,
+) -> Image.Image:
     """Resize image to fill given rectangle and do a positioned crop to size.
 
     The image is always scaled so that it fully covers the target rectangle
@@ -150,30 +132,13 @@ def resize_to_fill(
     [-1.0, 1.0] that slides the crop window within the available overflow:
     0.0 keeps the default centered crop, -1.0 aligns to the left/top edge and
     +1.0 aligns to the right/bottom edge. The result always fills ``res``.
+    Contract: zoom >= 1, offset in [-1, 1].
+    ``resample`` and ``reducing_gap`` are Pillow's resize arguments of those names.
     """
-    if quality == "fast":
-        quality = Image.Resampling.HAMMING
-        reducing_gap = 1.5
-    else:
-        quality = Image.Resampling.LANCZOS
-        reducing_gap = None
-
     if img.mode != "RGB":
         img = img.convert("RGB")
 
-    # Sanitize positioning parameters.
-    try:
-        zoom = float(zoom)
-    except TypeError, ValueError:
-        zoom = 1.0
-    if zoom < 1.0:
-        zoom = 1.0
-    try:
-        offset_x = min(1.0, max(-1.0, float(offset[0])))
-        offset_y = min(1.0, max(-1.0, float(offset[1])))
-    except TypeError, ValueError, IndexError:
-        offset_x, offset_y = 0.0, 0.0
-
+    offset_x, offset_y = offset
     image_size = img.size  # returns image (width,height)
     if image_size == res and zoom == 1.0 and offset_x == 0.0 and offset_y == 0.0:
         # input image is already of the correct size, no action needed.
@@ -190,7 +155,7 @@ def resize_to_fill(
         max(round(resize_multiplier * image_size[0]), res[0]),
         max(round(resize_multiplier * image_size[1]), res[1]),
     )
-    img = img.resize(new_size, resample=quality, reducing_gap=reducing_gap)
+    img = img.resize(new_size, resample=resample, reducing_gap=reducing_gap)
 
     extra_width = new_size[0] - res[0]
     extra_height = new_size[1] - res[1]

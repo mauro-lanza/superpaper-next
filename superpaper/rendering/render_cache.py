@@ -1,6 +1,6 @@
 """Rendered wallpapers on disk, in the cache directory.
 
-A saved profile's renders are named after its ProfileId. <id>-a.png and <id>-b.png
+A saved profile's renders are named after its ProfileId's value. <id>-a.png and <id>-b.png
 (.jpg on Windows) take turns, because some desktops ignore a wallpaper file that is
 replaced in place, and <id>-a-crop-0.png and so on hold one image per display for the
 desktops that set one per display. Everything else rendered (the editor's Apply, the
@@ -21,7 +21,6 @@ from typing import TYPE_CHECKING
 from PIL import Image
 
 from superpaper.files import write_atomically
-from superpaper.profiles.profile_id import ProfileId
 
 if TYPE_CHECKING:
     from superpaper.geometry.displays import Layout
@@ -61,11 +60,14 @@ class _Name:
     piece: int | None
 
 
-def slot(cache_dir: Path, profile_id: ProfileId | None) -> Slot:
-    """The renders of the saved profile ``profile_id``, or the drafts when it is None."""
-    if profile_id is None:
-        return Slot(cache_dir / DRAFTS, "draft")
-    return Slot(cache_dir, profile_id.value)
+def slot(cache_dir: Path, profile_id_value: str) -> Slot:
+    """The renders of the saved profile; ``profile_id_value`` must be a ProfileId.value."""
+    return Slot(cache_dir, profile_id_value)
+
+
+def draft_slot(cache_dir: Path) -> Slot:
+    """The drafts' renders."""
+    return Slot(cache_dir / DRAFTS, "draft")
 
 
 def save(slot: Slot, image: Image.Image, *, platform: str = sys.platform) -> Path:
@@ -123,10 +125,11 @@ def latest(slot: Slot) -> Rendered | None:
     return Rendered(image, [path for _, path in pieces], modified)
 
 
-def sweep(cache_dir: Path, keep: Iterable[ProfileId]) -> None:
-    """Delete the renders of every profile but ``keep``: profiles deleted or renamed since
-    they were rendered. Drafts, and files that aren't renders, are left alone."""
-    stems = {profile_id.value for profile_id in keep}
+def sweep(cache_dir: Path, keep: Iterable[str]) -> None:
+    """Delete the renders of every profile but those whose stems are ``keep``: profiles
+    deleted or renamed since they were rendered. Drafts, and files that aren't renders,
+    are left alone."""
+    stems = set(keep)
     try:
         entries = list(os.scandir(cache_dir))
     except OSError as error:
