@@ -13,8 +13,7 @@ class ProfileIdError(ValueError):
 NEW_PROFILE_LABEL = "Create a new profile"
 """The profile dropdown's entry for starting a new profile; no profile may be named so."""
 _WINDOWS_INVALID_CHARACTERS = frozenset('<>:"|?*')
-_MAX_PROFILE_ID_BYTES = 200
-_MAX_PROFILE_ID_UTF16_UNITS = 200
+_MAX_PROFILE_NAME_CHARS = 50
 _RESERVED_APPLICATION_NAMES = frozenset({NEW_PROFILE_LABEL.casefold(), "cli"})
 _WINDOWS_DEVICES = frozenset(
     {"con", "prn", "aux", "nul", "conin$", "conout$"}
@@ -118,10 +117,8 @@ def _windows_problem(raw: str) -> str | None:
 def _superpaper_conventions_problem(raw: str) -> str | None:
     if unicodedata.normalize("NFC", raw) != raw:
         return "Profile names must use Unicode NFC normalization."
-    utf8_length = len(raw.encode("utf-8"))
-    utf16_length = len(raw.encode("utf-16-le")) // 2
-    if utf8_length > _MAX_PROFILE_ID_BYTES or utf16_length > _MAX_PROFILE_ID_UTF16_UNITS:
-        return "Profile names cannot exceed 200 UTF-8 bytes or 200 UTF-16 code units."
+    if len(raw) > _MAX_PROFILE_NAME_CHARS:
+        return f"Profile names cannot exceed {_MAX_PROFILE_NAME_CHARS} characters."
     if "=" in raw:
         # Older versions split the "name=" line at every "=" and would truncate it.
         return "Profile names cannot contain: ="
