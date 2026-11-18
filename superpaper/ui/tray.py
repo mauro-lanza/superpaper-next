@@ -8,7 +8,6 @@ import logging
 import os
 import sys
 from collections.abc import Callable
-from functools import partial
 from typing import assert_never
 
 import wx  # ty:ignore[unresolved-import]
@@ -17,10 +16,10 @@ import wx.adv  # ty:ignore[unresolved-import]
 import superpaper.desktop as desktop
 from superpaper.__version__ import __version__
 from superpaper.desktop.linux import running_kde
+from superpaper.desktop.sni_tray import build_tray, sni_supported
 from superpaper.paths import resource
+from superpaper.tray_menu import Check, Item, MenuEntry, Separator, Submenu, build_menu
 from superpaper.ui.message import show_message_dialog
-from superpaper.ui.sni_tray import build_tray, sni_supported
-from superpaper.ui.tray_menu import Check, Item, MenuEntry, Separator, Submenu
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +79,7 @@ class TaskBarIcon(wx.adv.TaskBarIcon):
         if sys.platform == "linux" and sni_supported():
             self._sni_tray = build_tray(
                 menu=self.menu,
+                call_soon=wx.CallAfter,
                 activate=self._open_editor,
                 secondary_activate=session.next,
                 bus_name=f"org.kde.StatusNotifierItem-{os.getpid()}-1",
@@ -106,22 +106,16 @@ class TaskBarIcon(wx.adv.TaskBarIcon):
 
     def menu(self) -> tuple[MenuEntry, ...]:
         """The tray menu as it is now, for both the wx and the native SNI tray to show."""
-        profiles = tuple(
-            Item(stored.profile.name, partial(self._start_profile, stored)) for stored in self._store.profiles
-        )
-        return (
-            Item("Open Config Folder", self.open_config),
-            Item("Wallpaper Configuration", self._open_editor),
-            Item("Settings", self._open_settings),
-            Item("Reload Profiles", self._reload_profiles),
-            Separator(),
-            Submenu("Profiles", profiles),
-            Separator(),
-            Item("Next Wallpaper", self._session.next),
-            Check("Pause Timer", self._session.toggle_pause, checked=self._session.paused),
-            Separator(),
-            Item("About", self.on_about),
-            Item("Exit", self._quit),
+        return build_menu(
+            self._store,
+            self._session,
+            open_config=self.open_config,
+            open_editor=self._open_editor,
+            open_settings=self._open_settings,
+            reload_profiles=self._reload_profiles,
+            start_profile=self._start_profile,
+            about=self.on_about,
+            quit=self._quit,
         )
 
     def CreatePopupMenu(self):

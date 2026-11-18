@@ -2,16 +2,18 @@
 
 import pytest
 
-from superpaper.ui.tray_menu import Check, Item, Separator, Submenu
-from tests.conftest import import_headless, wx_stub
+from superpaper.desktop import sni_tray as sni_module
+from superpaper.tray_menu import Check, Item, Separator, Submenu
 
 
 @pytest.fixture
-def sni_tray(monkeypatch):
-    """The SNI module against a wx stub whose CallAfter runs at once."""
-    module, forget = import_headless(monkeypatch, "sni_tray", wx_stub())
-    yield module
-    forget()
+def sni_tray():
+    """The SNI module, whose ``call_soon`` runs actions at once."""
+    return sni_module
+
+
+def model_of(sni_tray, menu):
+    return sni_tray._MenuModel(menu, lambda action: action())
 
 
 def entries(started, *, paused=False):
@@ -28,7 +30,7 @@ def entries(started, *, paused=False):
 
 def test_the_menu_lists_the_profiles_and_starts_the_one_chosen(sni_tray):
     started = []
-    model = sni_tray._MenuModel(lambda: entries(started))
+    model = model_of(sni_tray, lambda: entries(started))
 
     model.rebuild()
     submenu = model.nodes[model.layout[2]]
@@ -43,7 +45,7 @@ def test_the_menu_lists_the_profiles_and_starts_the_one_chosen(sni_tray):
 def test_the_top_level_keeps_its_ids_when_the_profiles_change(sni_tray):
     profiles = [Item("Work", lambda: None)]
     menu = lambda: (Item("Settings", lambda: None), Submenu("Profiles", tuple(profiles)), Item("Exit", lambda: None))  # noqa: E731
-    model = sni_tray._MenuModel(menu)
+    model = model_of(sni_tray, menu)
 
     model.rebuild()
     before = model.layout
@@ -56,7 +58,7 @@ def test_the_top_level_keeps_its_ids_when_the_profiles_change(sni_tray):
 
 def test_a_check_item_carries_its_state(sni_tray):
     started = []
-    model = sni_tray._MenuModel(lambda: entries(started, paused=True))
+    model = model_of(sni_tray, lambda: entries(started, paused=True))
 
     model.rebuild()
     check = model.nodes[model.layout[4]]
@@ -68,7 +70,7 @@ def test_a_check_item_carries_its_state(sni_tray):
 
 def test_separators_and_unknown_ids_do_nothing(sni_tray):
     started = []
-    model = sni_tray._MenuModel(lambda: entries(started))
+    model = model_of(sni_tray, lambda: entries(started))
 
     model.rebuild()
     model.activate(model.layout[1])
@@ -84,7 +86,7 @@ def test_an_action_that_fails_is_logged_and_the_menu_carries_on(sni_tray, caplog
         message = "broken"
         raise RuntimeError(message)
 
-    model = sni_tray._MenuModel(lambda: (Item("Broken", broken),))
+    model = model_of(sni_tray, lambda: (Item("Broken", broken),))
 
     model.rebuild()
     model.activate(1)

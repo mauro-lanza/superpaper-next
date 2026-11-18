@@ -150,20 +150,3 @@ def headless_tray_module(monkeypatch):
     tray, forget = import_headless(monkeypatch, "tray", stubs)
     yield tray
     forget()
-
-
-@pytest.fixture
-def headless_app_module(monkeypatch):
-    """Import the tray application against minimal wx and window stubs."""
-    stubs = {
-        **wx_stub(),
-        **module_stub("superpaper.ui.editor", ConfigFrame=object),
-        **module_stub("superpaper.ui.help", HelpFrame=object),
-        **module_stub("superpaper.ui.settings_dialog", SettingsFrame=object),
-        **module_stub("superpaper.ui.message", show_message_dialog=lambda *args, **kwargs: None),
-        **module_stub("superpaper.ui.hotkeys", Hotkeys=object),
-        **module_stub("superpaper.ui.tray", TaskBarIcon=object),
-    }
-    app, forget = import_headless(monkeypatch, "app", stubs)
-    yield app
-    forget()
