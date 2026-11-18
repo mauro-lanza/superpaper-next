@@ -33,6 +33,7 @@ HEADLESS_MODULES = (
     "superpaper.geometry.perspective",
     "superpaper.paths",
     "superpaper.profiles",
+    "superpaper.profiles.form",
     "superpaper.profiles.profile_file",
     "superpaper.profiles.profile_id",
     "superpaper.profiles.selection",
