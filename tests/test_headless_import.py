@@ -30,6 +30,7 @@ HEADLESS_MODULES = (
     "superpaper.geometry.display_detection",
     "superpaper.geometry.display_store",
     "superpaper.geometry.displays",
+    "superpaper.geometry.layout_edit",
     "superpaper.geometry.perspective",
     "superpaper.geometry.perspective_form",
     "superpaper.geometry.positions",
