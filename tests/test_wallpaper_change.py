@@ -2,6 +2,7 @@
 wrong is said, and the last wallpaper is shown again at startup."""
 
 import os
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
@@ -10,6 +11,7 @@ from PIL import Image
 import superpaper.session as session
 from superpaper.desktop.process import Result
 from superpaper.desktop.wallpaper import Pieces, Spanned
+from superpaper.geometry.perspective import Default, Disabled, Named, Perspective, Swivel, SwivelAxis, Tilt
 from superpaper.paths import AppPaths
 from superpaper.profiles.profile_file import OffsetsCorrection, Profile
 from superpaper.profiles.profile_id import ProfileId
@@ -259,6 +261,36 @@ def test_a_desktop_that_keeps_its_wallpaper_isnt_given_it_again_at_startup(app_p
 
     assert startup() is True
     assert desktop.handed == []
+
+
+@pytest.mark.parametrize(
+    ("perspective", "default", "rendered_again"),
+    [
+        (Default(), "desk", True),
+        (Default(), "gone", False),
+        (Default(), None, False),
+        (Named("desk"), None, True),
+        (Named("gone"), None, False),
+        (Disabled(), "desk", False),
+    ],
+)
+def test_a_perspective_that_no_longer_exists_isnt_rendered_again_at_startup(
+    app_paths, display_layout, desktop, perspective, default, rendered_again
+):
+    desktop.keeps_wallpaper = True
+    write_image(app_paths.cache / "main-a.png")
+    desk = Perspective(
+        "desk", 0, (0.0, 0.0, 1000.0), (Swivel(SwivelAxis.NONE, 0.0, 0.0, 0.0),) * 2, (Tilt(0.0, 0.0, 0.0),) * 2
+    )
+    layout = replace(
+        display_layout(TINY_DISPLAYS), use_perspective=True, default_perspective=default, perspectives=(desk,)
+    )
+    main = SimpleNamespace(
+        profile=replace(settings("main", spanmode="advanced"), perspective=perspective), profile_id=ProfileId("main")
+    )
+
+    assert session.show_again(main, app_paths, layout=layout) is True
+    assert bool(desktop.handed) is rendered_again
 
 
 def test_startup_without_a_render_shows_nothing(app_paths, desktop, startup):
