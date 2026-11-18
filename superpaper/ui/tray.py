@@ -4,27 +4,49 @@ On Linux the native StatusNotifierItem tray (sni_tray) offers the same menu, thr
 same methods of TaskBarIcon.
 """
 
+import logging
 import os
 import sys
+from collections.abc import Callable
+from functools import partial
+from typing import assert_never
 
-import wx  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-import]
-import wx.adv  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-import]
+import wx  # ty:ignore[unresolved-import]
+import wx.adv  # ty:ignore[unresolved-import]
 
 import superpaper.desktop as desktop
-import superpaper.sp_logging as sp_logging
 from superpaper.__version__ import __version__
 from superpaper.desktop.linux import running_kde
 from superpaper.paths import resource
 from superpaper.ui.message import show_message_dialog
 from superpaper.ui.sni_tray import build_tray, sni_supported
+from superpaper.ui.tray_menu import Check, Item, MenuEntry, Separator, Submenu
+
+logger = logging.getLogger(__name__)
 
 TRAY_TOOLTIP = "Superpaper"
 
 
-def create_menu_item(menu, label, func, *args, **kwargs):
-    """Helper function to create menu items for the tray menu."""
-    item = wx.MenuItem(menu, -1, label, **kwargs)
-    menu.Bind(wx.EVT_MENU, lambda event: func(event, *args), id=item.GetId())
+def _append_entries(menu: wx.Menu, entries: tuple[MenuEntry, ...]) -> None:
+    for entry in entries:
+        match entry:
+            case Item(label, action):
+                _append_item(menu, label, action, wx.ITEM_NORMAL)
+            case Check(label, action, checked):
+                _append_item(menu, label, action, wx.ITEM_CHECK).Check(checked)
+            case Separator():
+                menu.AppendSeparator()
+            case Submenu(label, items):
+                submenu = wx.Menu()
+                _append_entries(submenu, items)
+                menu.AppendSubMenu(submenu, label)
+            case _:
+                assert_never(entry)
+
+
+def _append_item(menu: wx.Menu, label: str, action: Callable[[], None], kind: int) -> wx.MenuItem:
+    item = wx.MenuItem(menu, -1, label, kind=kind)
+    menu.Bind(wx.EVT_MENU, lambda event: action(), id=item.GetId())
     menu.Append(item)
     return item
 
@@ -49,20 +71,21 @@ class TaskBarIcon(wx.adv.TaskBarIcon):
         self._reload_profiles = reload_profiles
         self._start_profile = start_profile
         self._quit = quit
-        self.pause_item = None
         self.Bind(wx.adv.EVT_TASKBAR_LEFT_DOWN, self.on_left_down)
-        self.Bind(wx.adv.EVT_TASKBAR_LEFT_DCLICK, self.configure_wallpapers)
+        self.Bind(wx.adv.EVT_TASKBAR_LEFT_DCLICK, lambda event: self._open_editor())
         self.Bind(wx.adv.EVT_TASKBAR_RIGHT_DOWN, self.on_right_down)
         # On Linux, prefer a native StatusNotifierItem tray (works on Wayland);
         # the wx TaskBarIcon renders but is non-interactive on KDE Plasma 6.
         self._sni_tray = None
         if sys.platform == "linux" and sni_supported():
             self._sni_tray = build_tray(
-                self,
-                f"org.kde.StatusNotifierItem-{os.getpid()}-1",
-                str(resource("superpaper.png")),
-                TRAY_TOOLTIP,
-                TRAY_TOOLTIP,
+                menu=self.menu,
+                activate=self._open_editor,
+                secondary_activate=session.next,
+                bus_name=f"org.kde.StatusNotifierItem-{os.getpid()}-1",
+                icon_path=str(resource("superpaper.png")),
+                title=TRAY_TOOLTIP,
+                tooltip=TRAY_TOOLTIP,
             )
         if self._sni_tray is None:
             self.set_icon(str(resource("superpaper.png")))
@@ -78,38 +101,33 @@ class TaskBarIcon(wx.adv.TaskBarIcon):
             try:
                 self._sni_tray.remove()
             except Exception as exc:
-                sp_logging.G_LOGGER.info("SNI tray cleanup failed: %s", exc)
+                logger.info("SNI tray cleanup failed: %s", exc)
         wx.CallAfter(self.Destroy)
 
-    #
-    # The menu, which the native SNI menu shares (sni_tray._MenuModel).
-    #
-    @property
-    def list_of_profiles(self):
-        """The saved profiles, in the order the menus show them."""
-        return self._store.profiles
-
-    @property
-    def is_paused(self):
-        return self._session.paused
+    def menu(self) -> tuple[MenuEntry, ...]:
+        """The tray menu as it is now, for both the wx and the native SNI tray to show."""
+        profiles = tuple(
+            Item(stored.profile.name, partial(self._start_profile, stored)) for stored in self._store.profiles
+        )
+        return (
+            Item("Open Config Folder", self.open_config),
+            Item("Wallpaper Configuration", self._open_editor),
+            Item("Settings", self._open_settings),
+            Item("Reload Profiles", self._reload_profiles),
+            Separator(),
+            Submenu("Profiles", profiles),
+            Separator(),
+            Item("Next Wallpaper", self._session.next),
+            Check("Pause Timer", self._session.toggle_pause, checked=self._session.paused),
+            Separator(),
+            Item("About", self.on_about),
+            Item("Exit", self._quit),
+        )
 
     def CreatePopupMenu(self):
         """Method called by WX library when user right clicks tray icon. Opens tray menu."""
         menu = wx.Menu()
-        create_menu_item(menu, "Open Config Folder", self.open_config)
-        create_menu_item(menu, "Wallpaper Configuration", self.configure_wallpapers)
-        create_menu_item(menu, "Settings", self.configure_settings)
-        create_menu_item(menu, "Reload Profiles", self.reload_profiles)
-        menu.AppendSeparator()
-        for item in self.list_of_profiles:
-            create_menu_item(menu, item.profile.name, self.start_profile, item)
-        menu.AppendSeparator()
-        create_menu_item(menu, "Next Wallpaper", self.next_wallpaper)
-        self.pause_item = create_menu_item(menu, "Pause Timer", self.pause_timer, kind=wx.ITEM_CHECK)
-        self.pause_item.Check(self.is_paused)
-        menu.AppendSeparator()
-        create_menu_item(menu, "About", self.on_about)
-        create_menu_item(menu, "Exit", self.on_exit)
+        _append_entries(menu, self.menu())
         return menu
 
     def set_icon(self, path):
@@ -117,48 +135,24 @@ class TaskBarIcon(wx.adv.TaskBarIcon):
         icon = wx.Icon(path)
         self.SetIcon(wx.BitmapBundle(icon), TRAY_TOOLTIP)
 
-    def on_left_down(self, *event):
+    def on_left_down(self, event):
         """Allows binding left click event."""
-        sp_logging.G_LOGGER.info("Tray icon was left-clicked.")
+        logger.info("Tray icon was left-clicked.")
         # Open configuration on left click as fallback
-        self.configure_wallpapers(event)
+        self._open_editor()
 
     def on_right_down(self, event):
         """Handle right click event."""
-        sp_logging.G_LOGGER.info("Tray icon was right-clicked.")
+        logger.info("Tray icon was right-clicked.")
 
-    def open_config(self, event):
+    def open_config(self):
         """Opens Superpaper's config folder."""
         result = desktop.open_folder(self._config_dir)
         if not result.ok:
-            sp_logging.G_LOGGER.error("open_config failed for %s: %s", self._config_dir, result.problem)
+            logger.error("open_config failed for %s: %s", self._config_dir, result.problem)
             show_message_dialog("There was an error trying to open the config folder.")
 
-    def configure_wallpapers(self, event):
-        """Opens wallpaper configuration panel."""
-        self._open_editor()
-
-    def configure_settings(self, event):
-        """Opens general settings panel."""
-        self._open_settings()
-
-    def reload_profiles(self, event):
-        """Reloads profiles from disk."""
-        self._reload_profiles()
-
-    def start_profile(self, event, profile):
-        """Run ``profile``, or show its next image if it runs already."""
-        self._start_profile(profile)
-
-    def next_wallpaper(self, event):
-        """Show the running profile's next image."""
-        self._session.next()
-
-    def pause_timer(self, event):
-        """Pause the running slideshow, or resume it."""
-        self._session.toggle_pause()
-
-    def on_about(self, event):
+    def on_about(self):
         """Opens About dialog."""
         # Credit for AboutDiaglog example to Jan Bodnar of
         # http://zetcode.com/wxpython/dialogs/
@@ -194,7 +188,3 @@ class TaskBarIcon(wx.adv.TaskBarIcon):
         info.AddDeveloper("Henri Hänninen")
         info.AddArtist(artists)
         wx.adv.AboutBox(info)
-
-    def on_exit(self, event):
-        """Exits Superpaper."""
-        self._quit()

@@ -6,7 +6,7 @@ wx main loop before it runs.
 
 import logging
 
-import wx  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-import]
+import wx  # ty:ignore[unresolved-import]
 
 from superpaper.desktop.linux import running_kde
 from superpaper.ui.message import show_message_dialog

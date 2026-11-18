@@ -7,10 +7,10 @@ import os
 import sys
 from dataclasses import replace
 
-import wx  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-import]
+import wx  # ty:ignore[unresolved-import]
 
 import superpaper.desktop as desktop
-import superpaper.displays as displays
+import superpaper.display_detection as display_detection
 import superpaper.profile_store as profile_store
 from superpaper.paths import AppPaths
 from superpaper.profile_id import ProfileId, ProfileIdError
@@ -37,7 +37,7 @@ def run(paths: AppPaths, settings: Settings, profile: ProfileId | str | os.PathL
     startup_profile = None
     if profile:
         try:
-            startup_profile = _startup_profile_id(profile)
+            startup_profile = profile if isinstance(profile, ProfileId) else ProfileId.from_path(profile)
         except ProfileIdError:
             startup_profile = None
         logger.info("Startup profile: %s", startup_profile.value if startup_profile else profile)
@@ -55,17 +55,6 @@ def run(paths: AppPaths, settings: Settings, profile: ProfileId | str | os.PathL
     app.MainLoop()
 
 
-def _startup_profile_id(profile: ProfileId | str | os.PathLike[str]) -> ProfileId:
-    """Extract a managed identity from a legacy path or a direct profile ID."""
-    if isinstance(profile, ProfileId):
-        return profile
-    value = os.fspath(profile)
-    leaf = value.replace("\\", "/").rsplit("/", 1)[-1]
-    if leaf.endswith(".profile"):
-        leaf = leaf.removesuffix(".profile")
-    return ProfileId.parse(leaf)
-
-
 class App(wx.App):
     """The wx application, which builds Superpaper once wx is ready."""
 
@@ -81,7 +70,13 @@ class App(wx.App):
         self.SetAppDisplayName("Superpaper")
         frame = wx.Frame(None)
         self.SetTopWindow(frame)
-        self.superpaper = Superpaper(frame, self._paths, self._settings, self._startup_profile)
+        try:
+            self.superpaper = Superpaper(frame, self._paths, self._settings, self._startup_profile)
+        except (ValueError, configparser.Error) as error:
+            message = f"The saved display layout could not be read: {error}"
+            logger.exception(message)
+            show_message_dialog(message, "Error")
+            return False
         return True
 
     def InitLocale(self):
@@ -103,7 +98,7 @@ class Superpaper:
         # The running profile, its slideshow and every wallpaper change, starting with the
         # displays as they are now. Wallpaper changes use the custom command as last saved.
         self.session = Session(
-            paths, displays.DisplaySystem(paths.config), set_command=lambda: self.settings.set_command
+            paths, display_detection.detect_layout(paths.config), set_command=lambda: self.settings.set_command
         )
         self.store = ProfileStore(paths)
         self._load_profiles()
@@ -179,7 +174,7 @@ class Superpaper:
         if problem:
             logger.error("%s", problem)
             wx.CallAfter(show_message_dialog, problem, "Error")
-        size_hint = self.session.display_system.size_hint()
+        size_hint = self.session.layout.size_hint()
         if size_hint:
             logger.warning("%s", size_hint)
             wx.CallAfter(show_message_dialog, size_hint)
@@ -245,14 +240,14 @@ class Superpaper:
         use it. If detection fails, the previous layout stays in use.
 
         Displays are detected here, on the main thread, never by the session's worker:
-        see displays.get_display_data.
+        see display_detection.detect_displays.
         """
         try:
-            display_system = displays.DisplaySystem(self.paths.config)
-        except (displays.DisplayDetectionError, OSError, ValueError, KeyError, configparser.Error) as error:
+            layout = display_detection.detect_layout(self.paths.config)
+        except (display_detection.DisplayDetectionError, OSError, ValueError, KeyError, configparser.Error) as error:
             logger.warning("Keeping the previous display layout: %s", error)
             return
-        self.session.use_displays(display_system)
+        self.session.use_displays(layout)
 
     def rebind_hotkey(self, before, after):
         """Rebind a profile's hotkey once it was saved, renamed or deleted: see

@@ -10,16 +10,128 @@ of the displays relative to each other.
 Written by Henri Hänninen, copyright 2020 under MIT licence.
 """
 
+import logging
 import math
+from collections.abc import Sequence
+from dataclasses import dataclass
+from enum import Enum
 from math import pi
+from typing import assert_never
 
 import numpy as np
 
-import superpaper.sp_logging as sp_logging
+from superpaper.user_input import parse_float
+
+logger = logging.getLogger(__name__)
 
 # "none" is display_store's no-default sentinel; "default" and "disabled" clash with the
 # editor's perspective choices.
 _RESERVED_PERSPECTIVE_NAMES = frozenset({"default", "disabled", "none"})
+DEFAULT_LABEL = "default"
+DISABLED_LABEL = "disabled"
+ROTATION_CELL_NAMES = (
+    "Swivel angle",
+    "Sw. ax. lat. off.",
+    "Sw. ax. dep. off.",
+    "Tilt angle",
+    "Ti. ax. ver. off.",
+    "Ti. ax. dep. off.",
+)
+
+
+class SwivelAxis(Enum):
+    """Which vertical edge of a display it turns around; the values are what .persp files hold."""
+
+    NONE = 0
+    LEFT = 1
+    RIGHT = 2
+
+
+@dataclass(frozen=True, slots=True)
+class Swivel:
+    """A display's turn around a vertical axis: the angle in degrees, and the axis offset in ppi norm pixels."""
+
+    axis: SwivelAxis
+    angle: float
+    lateral_offset: float
+    depth_offset: float
+
+
+@dataclass(frozen=True, slots=True)
+class Tilt:
+    """A display's tilt around its horizontal midline: the angle in degrees, and the axis offset in ppi norm pixels."""
+
+    angle: float
+    vertical_offset: float
+    depth_offset: float
+
+
+@dataclass(frozen=True, slots=True)
+class Perspective:
+    """A named set of corrections for displays turned towards the viewer.
+
+    ``viewer_pos`` is (lateral, vertical, depth) from the centre of display ``central_display``,
+    in ppi norm pixels. ``swivels`` and ``tilts`` have one entry per display. Numbers keep
+    the int or float the .persp file gave, so saving writes the file back as it was read.
+    """
+
+    name: str
+    central_display: int
+    viewer_pos: tuple[float, float, float]
+    swivels: tuple[Swivel, ...]
+    tilts: tuple[Tilt, ...]
+
+    def of_displays(self, indices: tuple[int, ...] | list[int]) -> Perspective:
+        """The perspective of just the displays at ``indices``."""
+        return Perspective(
+            self.name,
+            self.central_display,
+            self.viewer_pos,
+            tuple(self.swivels[index] for index in indices),
+            tuple(self.tilts[index] for index in indices),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class Default:
+    """The layout's default perspective."""
+
+
+@dataclass(frozen=True, slots=True)
+class Disabled:
+    """No perspective correction."""
+
+
+@dataclass(frozen=True, slots=True)
+class Named:
+    """The saved perspective called ``name``."""
+
+    name: str
+
+
+PerspectiveChoice = Default | Disabled | Named
+
+
+def parse_choice(text: str) -> PerspectiveChoice:
+    """The choice a profile file or the editor's dropdown spells as ``text``."""
+    if text == DEFAULT_LABEL:
+        return Default()
+    if text == DISABLED_LABEL:
+        return Disabled()
+    return Named(text)
+
+
+def choice_label(choice: PerspectiveChoice) -> str:
+    """How a profile file and the editor's dropdown spell ``choice``."""
+    match choice:
+        case Default():
+            return DEFAULT_LABEL
+        case Disabled():
+            return DISABLED_LABEL
+        case Named(name):
+            return name
+        case _:
+            assert_never(choice)
 
 
 def check_new_perspective_name(name: str) -> None:
@@ -29,27 +141,74 @@ def check_new_perspective_name(name: str) -> None:
         raise ValueError(message)
 
 
-def lengths_to_ppi_norm(
+def perspective_from_mm(
+    name: str,
     max_ppi: float,
+    central_display: int,
     viewer_offset_mm: list[float],
-    swivels_mm: list[tuple[int, float, float, float]],
+    swivels_mm: list[tuple[SwivelAxis, float, float, float]],
     tilts_mm: list[tuple[float, float, float]],
-) -> tuple[list[float], list[tuple[int, float, float, float]], list[tuple[float, float, float]]]:
-    """Convert the dialog's lengths from millimetres to pixels at ``max_ppi``; angles and axes are kept."""
+) -> Perspective:
+    """The perspective for the dialog's lengths in millimetres, converted to pixels at
+    ``max_ppi``; angles and axes are kept."""
     px_per_mm = max_ppi / 25.4
-    viewer_offset = [px_per_mm * length for length in viewer_offset_mm]
-    swivels = [(axis, angle, px_per_mm * lateral, px_per_mm * depth) for axis, angle, lateral, depth in swivels_mm]
-    tilts = [(angle, px_per_mm * vertical, px_per_mm * depth) for angle, vertical, depth in tilts_mm]
-    return viewer_offset, swivels, tilts
+    lateral, vertical, depth = (px_per_mm * length for length in viewer_offset_mm)
+    return Perspective(
+        name,
+        central_display,
+        (lateral, vertical, depth),
+        tuple(Swivel(axis, angle, px_per_mm * lat, px_per_mm * dep) for axis, angle, lat, dep in swivels_mm),
+        tuple(Tilt(angle, px_per_mm * ver, px_per_mm * dep) for angle, ver, dep in tilts_mm),
+    )
 
 
-def get_backprojected_display_system(crops, persp_data, plot=False):
+def parse_viewer_offsets_mm(texts: Sequence[str]) -> list[float]:
+    """The viewer's (horizontal, vertical, distance) offsets in millimetres, as typed.
+
+    Raises ValueError saying what is wrong with them; the distance must be positive.
+    """
+    numbers = [parse_float(text) for text in texts]
+    offsets = [number for number in numbers if number is not None]
+    if len(offsets) != len(numbers):
+        message = "Viewer offsets should be lenghts in millimeters, separate decimals with a point."
+        raise ValueError(message)
+    if offsets[2] <= 0:
+        message = "Viewer distance must be entered and positive."
+        raise ValueError(message)
+    return offsets
+
+
+def parse_rotations_mm(
+    axes: Sequence[int], cells: Sequence[Sequence[str]]
+) -> tuple[list[tuple[SwivelAxis, float, float, float]], list[tuple[float, float, float]]]:
+    """The swivels and tilts of the displays in the dialog's grid, as typed.
+
+    ``axes`` holds each display's swivel axis choice (a SwivelAxis value) and ``cells`` its
+    texts in the order of ROTATION_CELL_NAMES. Raises ValueError naming the display and
+    column of a cell that is not a number.
+    """
+    swivels = []
+    tilts = []
+    for display, (axis, row) in enumerate(zip(axes, cells, strict=True)):
+        numbers = []
+        for name, text in zip(ROTATION_CELL_NAMES, row, strict=True):
+            number = parse_float(text)
+            if number is None:
+                message = f"Display {display}, '{name}': '{text}' is not a number; separate decimals with a point."
+                raise ValueError(message)
+            numbers.append(number)
+        swivels.append((SwivelAxis(axis), numbers[0], numbers[1], numbers[2]))
+        tilts.append((numbers[3], numbers[4], numbers[5]))
+    return swivels, tilts
+
+
+def get_backprojected_display_system(crops, perspective: Perspective):
     """
     Return a back-projected quadrilateral and associated projection
-    transformation coefficients for each display in the DisplaySystem.
+    transformation coefficients for each display in the Layout.
 
     Displays are initialized in a flat plane in homogeneous coordinates
-    front of the viewer using the size and offset data from DisplaySystem.
+    front of the viewer using the size and offset data from the Layout.
     These represent the display as they would be without any swivels or tilts.
     Then each display is rotated in 3D around a swivel axis and a tilt axis
     to get a 3D representation of the display setup.
@@ -60,32 +219,13 @@ def get_backprojected_display_system(crops, persp_data, plot=False):
     are used to compute the perspective correction coefficients that are used
     with Pillow to perform the perspective transformation on the source image.
     """
-    # get_ppi_norm_crops: [(0, 695, 3840, 2855), (3943, 0, 5940, 3550)]
-    # central_disp = 0
-    # viewer_pos_wrt_central = (0, 0, 500/25.4 * 163) # (lateral, vert, depth)
-    # crops = [(0, 695, 3840, 2855), (3943, 0, 5940, 3550)] # left, top, right, bottom
-    # sizes = [(crp[2] - crp[0], crp[3] - crp[1]) for crp in crops]
-    # swivels = (
-    #     ("right", 0*pi/8, 0, 0),
-    #     # ("left", 0*pi/16, 0, 0)
-    #     ("left", 1.8*pi/8, 0, 0)
-    # )
-    # tilts = (
-    #     # (0/360 * 2*pi, 0, 0),
-    #     # (0/360 * 2*pi, 0, 0)
-    #     # (1/360 * 2*pi, 0, 0),
-    #     # (1/360 * 2*pi, 0, 0)
-    #     (-2/360 * 2*pi, 0, 50/25.4 * 163),
-    #     (-2/360 * 2*pi, 0, 50/25.4 * 163)
-    # )
-
     sizes = [(crp[2] - crp[0], crp[3] - crp[1]) for crp in crops]
-    central_disp = persp_data["central_disp"]
-    viewer_pos_wrt_central = persp_data["viewer_pos"]  # (lateral, vert, depth)
-    swivels = persp_data["swivels"]
-    tilts = persp_data["tilts"]
-    sp_logging.G_LOGGER.info("swivs: %s", swivels)
-    sp_logging.G_LOGGER.info("tilts: %s", tilts)
+    central_disp = perspective.central_display
+    viewer_pos_wrt_central = perspective.viewer_pos  # (lateral, vert, depth)
+    swivels = perspective.swivels
+    tilts = perspective.tilts
+    logger.info("swivs: %s", swivels)
+    logger.info("tilts: %s", tilts)
 
     disp_positions, init_plane_basis = position_displays_viewer(central_disp, viewer_pos_wrt_central, crops)
     init_plane_point = disp_positions[central_disp]
@@ -102,11 +242,11 @@ def get_backprojected_display_system(crops, persp_data, plot=False):
         for corner in quad:
             work_quad.append((round(corner[0] - leftmost_corner), round(corner[1] - bottommost_corner)))
         translated_quads.append(work_quad)
-    sp_logging.G_LOGGER.info("translated_quads: %s", translated_quads)
+    logger.info("translated_quads: %s", translated_quads)
     ordered_quads = [(tquad[2], tquad[3], tquad[1], tquad[0]) for tquad in translated_quads]
-    sp_logging.G_LOGGER.info("ordered_quads: %s", ordered_quads)
+    logger.info("ordered_quads: %s", ordered_quads)
     ordered_crops = [crop_from_quad(ordqu) for ordqu in ordered_quads]
-    sp_logging.G_LOGGER.info("ordered_crops: %s", ordered_crops)
+    logger.info("ordered_crops: %s", ordered_crops)
     ppi_norm_corners = [
         ((crop[0], crop[1]), (crop[2], crop[1]), (crop[2], crop[3]), (crop[0], crop[3])) for crop in crops
     ]
@@ -114,27 +254,6 @@ def get_backprojected_display_system(crops, persp_data, plot=False):
     for ordquad, ppi_norm_quad in zip(ordered_quads, ppi_norm_corners):
         coeffs = find_coeffs(ordquad, ppi_norm_quad)
         projected_coeffs.append(coeffs)
-
-    if plot:
-        import matplotlib.pyplot as plt  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-import]
-
-        data = (ppi_norm_corners[0], ppi_norm_corners[1], ordered_quads[0], ordered_quads[1])
-        colors = ("red", "orange", "blue", "cyan")
-        # groups = ("orig", "rotated")
-
-        plt.figure()
-        # ax = fig.add_subplot(1, 1, 1, facecolor="1.0")
-        # for dat, color, group in zip(data, colors, groups):
-        for dat, color in zip(data, colors):
-            for corner in dat:
-                x, y = corner
-                # ax.scatter(x,    y, alpha=0.8, c=color, edgecolors='none', s=30)
-                plt.plot(x, y, c=color, marker="o", linestyle="dashed", linewidth=2, markersize=6)
-        plt.title("rot test")
-        # plt.legend(loc=2)
-        plt.gca().set_aspect("equal", adjustable="box")
-        plt.gca().invert_yaxis()
-        plt.show()
 
     return (ordered_crops, projected_coeffs)
 
@@ -166,7 +285,7 @@ def crop_from_quad(quad):
 
 
 def get_backprojected_display(
-    display_size, display_center, swivel_ax_ang_off, tilt_ang_off, bproj_pln_basis, bproj_pln_point
+    display_size, display_center, swivel_ax_ang_off: Swivel, tilt_ang_off: Tilt, bproj_pln_basis, bproj_pln_point
 ):
     """
     Return a quadrilateral that is produced then a display is back projected
@@ -184,24 +303,30 @@ def get_backprojected_display(
     The display is placed on the z-axis, centering it to (0, 0, view_dist).
     """
 
-    swiv_ax, swiv_ang, swiv_loff, swiv_depth = swivel_ax_ang_off
-    if swiv_ax == 0:
-        # No swivel; keep code simpler by performing rotation of 0 degrees
-        swiv_ax = "left"
-        swiv_ang = 0
-        swiv_loff = 0
-        swiv_depth = 0
-    elif swiv_ax == 1:
-        swiv_ax = "left"
-    elif swiv_ax == 2:
-        swiv_ax = "right"
-    tilt_ang, tilt_voff, tilt_depth = tilt_ang_off
+    swiv_ang, swiv_loff, swiv_depth = (
+        swivel_ax_ang_off.angle,
+        swivel_ax_ang_off.lateral_offset,
+        swivel_ax_ang_off.depth_offset,
+    )
+    match swivel_ax_ang_off.axis:
+        case SwivelAxis.NONE:
+            # No swivel; keep code simpler by performing rotation of 0 degrees
+            swiv_ax = "left"
+            swiv_ang = 0
+            swiv_loff = 0
+            swiv_depth = 0
+        case SwivelAxis.LEFT:
+            swiv_ax = "left"
+        case SwivelAxis.RIGHT:
+            swiv_ax = "right"
+        case _:
+            assert_never(swivel_ax_ang_off.axis)
+    tilt_ang, tilt_voff, tilt_depth = tilt_ang_off.angle, tilt_ang_off.vertical_offset, tilt_ang_off.depth_offset
     # convert angles to radians
     swiv_ang *= -1 * 2 * pi / 360  # something causes swivels go the wrong way; maybe the y-axis flip?
     tilt_ang *= 2 * pi / 360
 
     display_plane = XYPlaneRectangle(display_center, display_size)
-    display_center = display_plane.center
     axis_swivel = display_plane.swivel_axis(swiv_ax, depth_offset=swiv_depth, lateral_offset=swiv_loff)
     axis_tilt = display_plane.tilt_axis(depth_offset=tilt_depth, vertical_offset=tilt_voff)
 
@@ -291,31 +416,6 @@ class XYPlaneRectangle:
         pt_on_line[1] += vertical_offset
         pt_on_line[2] += depth_offset
         return (axis, pt_on_line)
-
-    def normal(self):
-        """Return the normal vector of the rectangle placed at the center.
-
-        Take length 1 and points to -z direction."""
-        normal = np.array(
-            [
-                self.center[0],
-                self.center[1],
-                self.center[2] - 1,
-                self.center[3],
-            ]
-        )
-        return normal
-
-    def basis(self):
-        """Return homogenous crd vectors that parametrize the display
-        plane up and right.
-
-        Put the origo to the center of the display."""
-        top_mid = (self.corners[0] + self.corners[1]) / 2
-        right_mid = self.side_middle_pt("right")
-        basis_x = right_mid
-        basis_y = top_mid
-        return (basis_x, basis_y)
 
 
 def swivel_and_tilt(vector, axis_tilt, tilt, axis_swivel, swivel):
@@ -421,6 +521,5 @@ def find_coeffs(source_coords, target_coords):
         matrix.append([0, 0, 0, t[0], t[1], 1, -s[1] * t[0], -s[1] * t[1]])
     A = np.matrix(matrix, dtype=float)
     B = np.array(source_coords).reshape(8)
-    # res = np.dot(np.linalg.inv(A.T * A) * A.T, B)
     res = np.linalg.solve(A, B)
     return np.array(res).reshape(8)

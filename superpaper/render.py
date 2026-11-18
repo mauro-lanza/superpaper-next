@@ -8,15 +8,12 @@ import logging
 import os
 from collections import OrderedDict
 from collections.abc import Sequence
-from operator import itemgetter
-from typing import TYPE_CHECKING
 
 from PIL import Image, ImageOps, UnidentifiedImageError
 
 import superpaper.perspective as persp
-
-if TYPE_CHECKING:
-    from superpaper.displays import DisplaySystem
+from superpaper.canvas import canvas_size, canvas_size_with_bezels
+from superpaper.displays import Layout
 
 logger = logging.getLogger(__name__)
 
@@ -138,26 +135,6 @@ def load_argb32(path) -> tuple[int, int, bytes] | None:
     return (*rgba.size, bytes(argb))
 
 
-def compute_canvas(res_array, offset_array):
-    """Computes the size of the total desktop area from monitor resolutions and offsets."""
-    # Take the subtractions of right-most right - left-most left
-    # and bottom-most bottom - top-most top (=0).
-    leftmost = 0
-    topmost = 0
-    right_edges = []
-    bottom_edges = []
-    for res, off in zip(res_array, offset_array):
-        right_edges.append(off[0] + res[0])
-        bottom_edges.append(off[1] + res[1])
-    # Right-most edge.
-    rightmost = max(right_edges)
-    # Bottom-most edge.
-    bottommost = max(bottom_edges)
-    canvas_size = [rightmost - leftmost, bottommost - topmost]
-    logger.info("Canvas size: %s", canvas_size)
-    return canvas_size
-
-
 def resize_to_fill(
     img,
     res,
@@ -232,56 +209,13 @@ def resize_to_fill(
         return cropped_res
 
 
-def compute_working_canvas(crop_tuples, bezels=None):
-    """Computes effective size of the desktop are taking into account PPI/offsets/bezels.
-
-    When ``bezels`` is provided (a list of ``(right, bottom)`` ppi-normalized
-    bezel sizes parallel to ``crop_tuples``), the outer bezels extend the
-    canvas so that the rendered image matches what the GUI preview shows. The
-    preview sizes its canvas with these bezels included, so omitting them here
-    made the applied wallpaper ignore outer bezels.
-    """
-    # Take the subtractions of right-most right - left-most left
-    # and bottom-most bottom - top-most top (=0).
-    leftmost = 0
-    topmost = 0
-    if bezels:
-        # Right-/bottom-most edge including each display's outer bezel.
-        rightmost = max(round(crp[2] + bez[0]) for crp, bez in zip(crop_tuples, bezels))
-        bottommost = max(round(crp[3] + bez[1]) for crp, bez in zip(crop_tuples, bezels))
-    else:
-        # Right-most edge of the crop tuples.
-        rightmost = max(crop_tuples, key=itemgetter(2))[2]
-        # Bottom-most edge of the crop tuples.
-        bottommost = max(crop_tuples, key=itemgetter(3))[3]
-    canvas_size = [rightmost - leftmost, bottommost - topmost]
-    return canvas_size
-
-
-def simple(source, layout: DisplaySystem, *, zoom=1.0, pan=(0.0, 0.0)) -> Image.Image:
+def simple(source, layout: Layout, *, zoom=1.0, pan=(0.0, 0.0)) -> Image.Image:
     """Span one image over the whole desktop, with no corrections.
 
     The image is resized to fill the bounding box of the displays, so this works for any
     arrangement of them. ``zoom`` and ``pan`` place the image as resize_to_fill describes.
     """
-    canvas_tuple = tuple(compute_canvas(layout.resolutions(), layout.digital_offsets()))
-    return resize_to_fill(open_source_image(source), canvas_tuple, zoom=zoom, offset=pan)
-
-
-def group_persp_data(persp_dat, groups):
-    """Rerturn list of grouped perspective data objects."""
-    if not persp_dat:
-        return [None] * len(groups)
-    group_persp_data_list = []
-    for grp in groups:
-        group_data = {
-            "central_disp": persp_dat["central_disp"],
-            "viewer_pos": persp_dat["viewer_pos"],
-            "swivels": [persp_dat["swivels"][index] for index in grp],
-            "tilts": [persp_dat["tilts"][index] for index in grp],
-        }
-        group_persp_data_list.append(group_data)
-    return group_persp_data_list
+    return resize_to_fill(open_source_image(source), layout.desktop_size(), zoom=zoom, offset=pan)
 
 
 def translate_to_group_coordinates(group_crop_list):
@@ -302,11 +236,11 @@ def translate_to_group_coordinates(group_crop_list):
 
 def advanced(
     sources: Sequence,
-    layout: DisplaySystem,
+    layout: Layout,
     *,
     manual_offsets,
-    spangroups=None,
-    perspective=None,
+    spangroups: tuple[tuple[int, ...], ...] | None = None,
+    perspective: persp.Perspective | None = None,
     zoom=1.0,
     pan=(0.0, 0.0),
 ) -> Image.Image:
@@ -314,35 +248,36 @@ def advanced(
     densities, with bezels and ``manual_offsets`` (each display's, in pixels) accounted for.
 
     ``spangroups`` lists the displays that each image spans; without groups, one image
-    spans all of them. ``sources`` has one image per group. ``perspective`` is the
-    layout's perspective data, which also corrects for displays turned towards the viewer.
+    spans all of them. ``sources`` has one image per group. ``perspective`` also corrects
+    for displays turned towards the viewer.
     """
     # Cropping now sections of the image to be shown, USE EFFECTIVE WORKING
     # SIZES. Also EFFECTIVE SIZE Offsets are now required.
     resolutions = layout.resolutions()
     cropped_images = {}
-    crop_tuples = layout.get_ppi_norm_crops(manual_offsets)
+    crop_tuples = layout.ppi_norm_crops(manual_offsets)
     if not spangroups:
-        spangroups = [list(range(len(resolutions)))]
+        spangroups = (tuple(range(len(resolutions))),)
 
     grp_crop_tuples = translate_to_group_coordinates([[crop_tuples[index] for index in grp] for grp in spangroups])
     grp_res_array = [[resolutions[index] for index in grp] for grp in spangroups]
     # Per-display outer bezel sizes (ppi-normalized), grouped to match the
     # crops, so the working canvas can include outer bezels like the preview.
-    bezels_px = layout.bezels_in_px()
+    bezels_px = layout.ppi_norm_bezels()
     grp_bezels = [[bezels_px[index] for index in grp] for grp in spangroups]
-    grp_persp_dat = group_persp_data(perspective, spangroups)
 
-    for source, grp, grp_p_dat, grp_crops, grp_res_arr, grp_bez in zip(
-        sources, spangroups, grp_persp_dat, grp_crop_tuples, grp_res_array, grp_bezels, strict=True
+    for source, grp, grp_crops, grp_res_arr, grp_bez in zip(
+        sources, spangroups, grp_crop_tuples, grp_res_array, grp_bezels, strict=True
     ):
         img = open_source_image(source)
-        if perspective:
-            proj_plane_crops, persp_coeffs = persp.get_backprojected_display_system(grp_crops, grp_p_dat)
+        if perspective is not None:
+            proj_plane_crops, persp_coeffs = persp.get_backprojected_display_system(
+                grp_crops, perspective.of_displays(grp)
+            )
             # Canvas containing back-projected displays
-            canvas_tuple_proj = tuple(compute_working_canvas(proj_plane_crops))
+            canvas_tuple_proj = canvas_size(proj_plane_crops)
             # Canvas containing ppi normalized displays
-            canvas_tuple_trgt = tuple(compute_working_canvas(grp_crops))
+            canvas_tuple_trgt = canvas_size(grp_crops)
             logger.info("Back-projected canvas size: %s", canvas_tuple_proj)
             img_workingsize = resize_to_fill(img, canvas_tuple_proj, zoom=zoom, offset=pan)
             for _crop_tup, coeffs, ppin_crop, (i_res, res) in zip(
@@ -366,7 +301,7 @@ def advanced(
             # displays. Takes account manual offsets that might require extra space.
             # Outer bezels extend the canvas so the result matches the preview
             # (issue #156); the per-display crops below stay resolution-sized.
-            canvas_tuple_eff = tuple(compute_working_canvas(grp_crops, grp_bez))
+            canvas_tuple_eff = canvas_size_with_bezels(grp_crops, grp_bez)
             # Image is now the height of the eff tallest display + possible manual
             # offsets and the width of the combined eff widths + possible manual
             # offsets.
@@ -381,22 +316,21 @@ def advanced(
     # Combine crops to a single canvas of the size of the actual desktop
     # actual combined size of the display resolutions
     offsets = layout.digital_offsets()
-    canvas_tuple_fin = tuple(compute_canvas(resolutions, offsets))
-    combined_image = Image.new("RGB", canvas_tuple_fin, color=0)
+    combined_image = Image.new("RGB", layout.desktop_size(), color=0)
     combined_image.load()
     for crp_id in cropped_images:
         combined_image.paste(cropped_images[crp_id], offsets[crp_id])
     return combined_image
 
 
-def multi(sources: Sequence, layout: DisplaySystem, *, zoom=1.0, pan=(0.0, 0.0)) -> Image.Image:
+def multi(sources: Sequence, layout: Layout, *, zoom=1.0, pan=(0.0, 0.0)) -> Image.Image:
     """Show a different image on each display: ``sources`` has one per display.
 
     Each image fills its display, and the gaps between displays stay black.
     """
     resolutions = layout.resolutions()
     offsets = layout.digital_offsets()
-    combined_image = Image.new("RGB", tuple(compute_canvas(resolutions, offsets)), color=0)
+    combined_image = Image.new("RGB", layout.desktop_size(), color=0)
     combined_image.load()
     for source, res, offset in zip(sources, resolutions, offsets, strict=True):
         combined_image.paste(resize_to_fill(open_source_image(source), res, zoom=zoom, offset=pan), offset)

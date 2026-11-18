@@ -19,3 +19,5 @@ releases/
 
 # Test artifacts
 .pytest_cache/
+
+scripts/

@@ -1,64 +1,80 @@
 """CLI for Superpaper. --help switch prints usage."""
 
 import argparse
+import configparser
+import logging
 import os
 import sys
-from typing import NoReturn
+from collections.abc import Sequence
+from dataclasses import dataclass
+from typing import assert_never
 
 import superpaper.desktop as desktop
 import superpaper.sp_logging as sp_logging
 from superpaper import profile_store, profiles
-from superpaper.desktop.spanmode import set_spanmode
-from superpaper.displays import DisplayDetectionError, DisplaySystem
+from superpaper.display_detection import DisplayDetectionError, detect_layout
+from superpaper.displays import Layout
 from superpaper.paths import AppPaths, ensure_dirs
+from superpaper.perspective import Named
 from superpaper.profile_id import ProfileId, ProfileIdError
 from superpaper.session import show
 from superpaper.settings import SETTINGS_FILE, read_settings, write_settings
+from superpaper.user_input import Offset, OffsetError, parse_offset_args
+
+logger = logging.getLogger(__name__)
 
 
-def start_tray(paths: AppPaths, profile: ProfileId | None = None, *, debug: bool = False) -> None:
-    """Run the tray applet, or explain what is missing if wxPython is not installed.
+class CliError(Exception):
+    """What the command line asked for can't be done; the message tells the user why."""
 
-    A first start writes the default settings, so that the file is there to edit.
+
+@dataclass(frozen=True, slots=True)
+class StartTray:
+    profile_id: ProfileId | None
+    debug: bool
+
+
+@dataclass(frozen=True, slots=True)
+class SetImages:
+    images: tuple[str, ...]
+    advanced: bool
+    perspective: str | None
+    spangroups: tuple[tuple[int, ...], ...] | None
+    offsets: tuple[Offset, ...]
+    set_command: str
+    debug: bool
+
+
+Request = StartTray | SetImages
+
+
+def run(argv: Sequence[str], paths: AppPaths) -> int:
+    """Do what the command line ``argv`` (without the program name) asks; returns the exit status.
+
+    Superpaper's directories are created, and the desktop set to span, only on the way to
+    setting a wallpaper, so that `--help` or a mistyped option changes nothing.
     """
     try:
-        from superpaper.ui.app import run
-    except ModuleNotFoundError as error:
-        if error.name != "wx":
-            raise
-        sys.exit(
-            "Superpaper's tray icon and settings window need wxPython. Install it from your "
-            "distribution's packages, or install Superpaper with the [gui] extra."
-        )
-    settings_file = paths.config / SETTINGS_FILE
-    settings = read_settings(settings_file, sys.platform)
-    if not settings_file.exists():
-        write_settings(settings_file, settings)
-    sp_logging.configure_logging(
-        debug=debug or settings.logging, log_file=paths.cache / "log" if settings.logging else None
-    )
-    run(paths, settings, profile=profile)
+        request = parse_arguments(argv)
+        match request:
+            case StartTray():
+                if request.profile_id is not None:
+                    _check_profile_exists(paths, request.profile_id)
+                _start_tray(paths, request.profile_id, debug=request.debug)
+                return 0
+            case SetImages():
+                return _set_images(request, paths)
+            case _:
+                assert_never(request)
+    except CliError as error:
+        logger.error("%s", error)  # noqa: TRY400  # the message is the whole report
+        return 1
 
 
-def _exit_with_error(message: str) -> NoReturn:
-    sp_logging.G_LOGGER.error(message)
-    sys.exit(1)
-
-
-def _detect_displays(paths: AppPaths) -> DisplaySystem:
-    try:
-        return DisplaySystem(paths.config)
-    except DisplayDetectionError as error:
-        _exit_with_error(f"No displays could be detected: {error}")
-
-
-def cli_logic(paths: AppPaths):
-    """
-    CLI command parsing and enacting.
-
-    Allows setting a wallpaper using Superpaper features without running the full application.
-    Superpaper's directories are created only once the arguments are known to be usable.
-    """
+def parse_arguments(argv: Sequence[str]) -> Request:
+    """The request the command line ``argv`` makes. Raises CliError if it can't be met."""
+    if not argv:
+        return StartTray(profile_id=None, debug=False)
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "-s",
@@ -111,87 +127,125 @@ def cli_logic(paths: AppPaths):
                                 Must be in quotes.""",
     )
     parser.add_argument("-d", "--debug", action="store_true", help="Run the full application with debugging.")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
-    if args.debug and len(sys.argv) == 2:
-        ensure_dirs(paths)
-        set_spanmode()
-        start_tray(paths, debug=True)
-        return 0
-    if args.setimages and not args.profile:
-        for filename in args.setimages:
-            if filename and not os.path.isfile(filename):
-                _exit_with_error(f"One of the passed image names was not a file: {filename}")
-    elif args.profile and not args.setimages:
+    if args.debug and len(argv) == 1:
+        return StartTray(profile_id=None, debug=True)
+    if args.profile and not args.setimages:
         try:
-            profile_id = ProfileId.parse(args.profile)
+            return StartTray(profile_id=ProfileId.parse(args.profile), debug=args.debug)
         except ProfileIdError as error:
-            _exit_with_error(f"Invalid profile name: {error}")
-        ensure_dirs(paths)
-        _detect_displays(paths)  # fail here, with a message, rather than in the tray
-        inventory = profile_store.discover(paths)
-        if inventory.find(profile_id) is None:
-            names = [entry.profile_id.value for entry in inventory.entries]
-            _exit_with_error(
-                f"No profile was found by the given name: {args.profile}. Valid profile names are: {names}"
-            )
-        set_spanmode()
-        start_tray(paths, profile=profile_id, debug=args.debug)
-        return 0
-    else:
-        _exit_with_error(
+            message = f"Invalid profile name: {error}"
+            raise CliError(message) from error
+    if not args.setimages or args.profile:
+        message = (
             "Pass either image(s) to set as the wallpaper with '-s' or '--setimages', "
             "or a profile to start Superpaper with using '-p' or '--profile'."
         )
-    sp_logging.configure_logging(debug=args.debug)
-    if args.debug:
-        sp_logging.G_LOGGER.info(f"Input images: {args.setimages}")
-        sp_logging.G_LOGGER.info(f"Input perspective: {args.perspective}")
-        sp_logging.G_LOGGER.info(f"Input spangroups: {args.spangroups}")
-        sp_logging.G_LOGGER.info(f"Input offsets: {args.offsets}")
-        sp_logging.G_LOGGER.info(f"User defined command: {args.command}")
-    ensure_dirs(paths)
-    display_system = None
-    if args.perspective:
-        display_system = _detect_displays(paths)
-        perspectives = display_system.perspective_dict
-        if args.perspective not in perspectives:
-            _exit_with_error(f"Valid perspective profile names are: {list(perspectives)}")
-    spangrp = None
-    if args.spangroups:
-        # Parse spangroups
-        spangrp = []
-        for grp in args.spangroups:
-            try:
-                ids = [int(idx) for idx in grp]
-            except ValueError:
-                _exit_with_error(f"One of the display ids was not an integer: {grp}")
-            spangrp.append(sorted(set(ids)))  # drop duplicates
-    if args.offsets and len(args.offsets) % 2 != 0:
-        _exit_with_error(
-            "Number of offset pixels not even. If passing manual offsets, give width and height offset "
-            "for each display, even if not actually offsetting every display."
-        )
+        raise CliError(message)
+    for filename in args.setimages:
+        if filename and not os.path.isfile(filename):
+            message = f"One of the passed image names was not a file: {filename}"
+            raise CliError(message)
     try:
-        offsets = [int(pixels) for pixels in args.offsets or []]
-    except ValueError:
-        _exit_with_error(f"The offsets must be whole numbers of pixels: {' '.join(args.offsets)}")
-    set_command = ""
-    if args.command:
-        if len(args.command) > 1:
-            _exit_with_error("Remember to put the custom command in quotes.")
-        set_command = args.command[0]
-    problem = desktop.setter_problem(set_command)
-    if problem:
-        _exit_with_error(problem)
+        spangroups = profiles.parse_spangroups(args.spangroups) if args.spangroups else None
+    except ValueError as error:
+        raise CliError(str(error)) from error
+    try:
+        offsets = parse_offset_args(args.offsets or [])
+    except OffsetError as error:
+        raise CliError(str(error)) from error
+    if args.command and len(args.command) > 1:
+        message = "Remember to put the custom command in quotes."
+        raise CliError(message)
+    return SetImages(
+        images=tuple(args.setimages),
+        advanced=args.advanced,
+        perspective=args.perspective,
+        spangroups=spangroups,
+        offsets=offsets,
+        set_command=args.command[0] if args.command else "",
+        debug=args.debug,
+    )
 
-    if display_system is None:  # the perspective check above already detected them
-        display_system = _detect_displays(paths)
-    if args.advanced and (hint := display_system.size_hint()):
-        sp_logging.G_LOGGER.warning("%s", hint)
-    set_spanmode()
-    images = [os.path.realpath(image) for image in args.setimages]
-    if args.advanced:
+
+def _start_tray(paths: AppPaths, profile_id: ProfileId | None, *, debug: bool) -> None:
+    """Run the tray applet, with ``profile_id`` started if given, and the desktop set to span.
+
+    A first start writes the default settings, so that the file is there to edit. Raises
+    CliError if wxPython is not installed.
+    """
+    ensure_dirs(paths)
+    try:
+        from superpaper.ui.app import run as run_tray
+    except ModuleNotFoundError as error:
+        if error.name != "wx":
+            raise
+        message = (
+            "Superpaper's tray icon and settings window need wxPython. Install it from your "
+            "distribution's packages, or install Superpaper with the [gui] extra."
+        )
+        raise CliError(message) from error
+    settings_file = paths.config / SETTINGS_FILE
+    settings = read_settings(settings_file, sys.platform)
+    if not settings_file.exists():
+        write_settings(settings_file, settings)
+    sp_logging.configure_logging(
+        debug=debug or settings.logging, log_file=paths.cache / "log" if settings.logging else None
+    )
+    _span_desktop(settings.set_command)
+    run_tray(paths, settings, profile=profile_id)
+
+
+def _span_desktop(set_command: str) -> None:
+    result = desktop.set_spanmode(set_command)
+    if not result.ok:
+        logger.warning("Could not set the desktop to span the displays: %s", result.problem)
+
+
+def _detect_displays(paths: AppPaths) -> Layout:
+    try:
+        return detect_layout(paths.config)
+    except DisplayDetectionError as error:
+        message = f"No displays could be detected: {error}"
+        raise CliError(message) from error
+    except (ValueError, configparser.Error) as error:
+        message = f"The saved display layout could not be read: {error}"
+        raise CliError(message) from error
+
+
+def _check_profile_exists(paths: AppPaths, profile_id: ProfileId) -> None:
+    ensure_dirs(paths)
+    _detect_displays(paths)  # fail here, with a message, rather than in the tray
+    inventory = profile_store.discover(paths)
+    if inventory.find(profile_id) is None:
+        names = [entry.profile_id.value for entry in inventory.entries]
+        message = f"No profile was found by the given name: {profile_id.value}. Valid profile names are: {names}"
+        raise CliError(message)
+
+
+def _set_images(request: SetImages, paths: AppPaths) -> int:
+    sp_logging.configure_logging(debug=request.debug)
+    if request.debug:
+        logger.info("Command line request: %s", request)
+    ensure_dirs(paths)
+    layout = None
+    if request.perspective:
+        layout = _detect_displays(paths)
+        perspectives = layout.perspective_names()
+        if request.perspective not in perspectives:
+            message = f"Valid perspective profile names are: {perspectives}"
+            raise CliError(message)
+    problem = desktop.setter_problem(request.set_command)
+    if problem:
+        raise CliError(problem)
+    if layout is None:  # the perspective check above already detected them
+        layout = _detect_displays(paths)
+    if request.advanced and (hint := layout.size_hint()):
+        logger.warning("%s", hint)
+    _span_desktop(request.set_command)
+    images = [os.path.realpath(image) for image in request.images]
+    if request.advanced:
         spanmode = "advanced"
     elif len(images) == 1:
         spanmode = "single"
@@ -200,11 +254,9 @@ def cli_logic(paths: AppPaths):
     profile = profiles.draft(
         images,
         spanmode=spanmode,
-        perspective=args.perspective,
-        spangroups=spangrp,
-        offsets=list(zip(offsets[::2], offsets[1::2])),
+        perspective=Named(request.perspective) if request.perspective else None,
+        spangroups=request.spangroups,
+        offsets=request.offsets,
     )
     # What went wrong, if anything, is logged where it happened.
-    if show(profile, images, paths, display_system=display_system, set_command=set_command) is not None:
-        sys.exit(1)
-    return 0
+    return 1 if show(profile, images, paths, layout=layout, set_command=request.set_command) is not None else 0

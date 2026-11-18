@@ -1,10 +1,16 @@
 """Layout editing on the preview: dragging displays into position and setting bezels."""
 
-import wx  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-import]
+import logging
 
-import superpaper.sp_logging as sp_logging
+import wx  # ty:ignore[unresolved-import]
+
+from superpaper import canvas
 from superpaper.paths import resource
+from superpaper.ui.message import show_message_dialog
 from superpaper.ui.positions_dialog import DisplayPositionEntry
+from superpaper.user_input import parse_float
+
+logger = logging.getLogger(__name__)
 
 
 class LayoutEditor:
@@ -101,7 +107,7 @@ class LayoutEditor:
 
     def onConfigure(self, evt):
         """Start diplay position config mode."""
-        self.old_ppinorm_offs = self.preview.display_sys.get_ppinorm_offsets()  # back up the offsets
+        self.old_ppinorm_offs = self.preview.staged.layout.ppi_norm_offsets  # back up the offsets
         self._set_profile_controls_enabled(False)
         self._toggle_bezel_buttons(False, False)
         self.config_mode = True
@@ -111,7 +117,7 @@ class LayoutEditor:
         self.preview.Refresh()
 
     def onSave(self, evt):
-        """Stage current Display offsets into DisplaySystem.
+        """Stage current Display offsets into the staged layout.
 
         The new positions are kept in memory (and shown in the preview) but are
         only written to disk when the system band's Save is pressed.
@@ -119,18 +125,17 @@ class LayoutEditor:
         self.config_mode = False
         self.bind_movement_binds(False)
         self.toggle_buttons(True, False)
-        # Export offsets to DisplaySystem (staged, not persisted here)
+        staged = self.preview.staged
         if self.positions_dragged:  # only export drag positions if actually dragged
-            self.export_offsets(self.preview.display_sys)
-        display_data = self.preview.display_sys.get_disp_list(use_ppi_norm=True)
+            staged.layout = self.dragged_layout(staged.layout)
+        display_data = staged.layout.ppi_norm_areas()
         # Full redraw of preview with new offset data
         if self.preview.current_preview_images:
-            self.preview.preview_wallpaper(self.preview.current_preview_images, True, False, display_data=display_data)
+            self.preview.preview_wallpaper(self.preview.current_preview_images, "advanced", display_data=display_data)
         else:
             self.preview.display_data = display_data
             self.preview.refresh_preview(True)
             self.preview.resize_displays(True)
-            # self.show_staticbmps(True)
         self.draggable_shapes = []  # Destroys DragShapes
         self.positions_dragged = False
         self._set_profile_controls_enabled(True)
@@ -140,21 +145,13 @@ class LayoutEditor:
 
     def onReset(self, evt):
         """Reset Display preview positions to the initial guess."""
-        # Back up current offsets
-        ppinorm_offs = self.preview.display_sys.get_ppinorm_offsets()
-        # Compute and get reset offsets
-        self.preview.display_sys.compute_initial_preview_offsets()
-        display_data = self.preview.display_sys.get_disp_list(use_ppi_norm=True)
-        dtop_canvas_px = self.preview.get_canvas(display_data, True)
-        dtop_canvas_relsz, dtop_canvas_pos, scaling_fac = self.preview.fit_canvas_wrkarea(dtop_canvas_px)
-        (display_rel_sizes, img_rel_sizes, bz_rel_sizes) = self.preview.displays_on_canvas(
-            display_data, dtop_canvas_pos, scaling_fac, True
-        )
+        display_data = self.preview.staged.layout.with_initial_offsets().ppi_norm_areas()
+        dtop_canvas_px = canvas.desktop_extent_with_bezels(display_data)
+        _, dtop_canvas_pos, scaling_fac = canvas.fit_to_panel(dtop_canvas_px, self.preview.GetSize())
+        placed = canvas.place_displays_with_bezels(display_data, dtop_canvas_pos, scaling_fac)
         # Move display preview draggable_shapes
-        for shp, off in zip(self.draggable_shapes, display_rel_sizes):
-            shp.pos = off[1]
-        # Restore backed up offsets
-        self.preview.display_sys.update_ppinorm_offsets(ppinorm_offs)
+        for shp, display in zip(self.draggable_shapes, placed):
+            shp.pos = display.position
         self.positions_dragged = True
         self.preview.Refresh()
 
@@ -168,12 +165,12 @@ class LayoutEditor:
         self.bind_movement_binds(False)
         self.toggle_buttons(True, False)
         self.draggable_shapes = []  # Destroys DragShapes
-        self.preview.display_sys.update_ppinorm_offsets(self.old_ppinorm_offs)
+        staged = self.preview.staged
+        staged.layout = staged.layout.with_offsets(self.old_ppinorm_offs)
         # redraw preview with restored data
-        self.preview.display_data = self.preview.display_sys.get_disp_list(True)
+        self.preview.display_data = staged.layout.ppi_norm_areas()
         self.preview.refresh_preview()
-        self.preview.full_refresh_preview(True, True, False)
-        # self.show_staticbmps(True)
+        self.preview.full_refresh_preview(True, "advanced")
         self._set_profile_controls_enabled(True)
         self._toggle_bezel_buttons(False, True)
         self.positions_dragged = False
@@ -199,27 +196,15 @@ class LayoutEditor:
         for st_bmp in self.preview.preview_img_list:
             st_bmp.Show(show)
 
-    def export_offsets(self, display_sys):
-        """Read dragged preview positions, normalize them to be positive,
-        and scale sizes up to old canvas size."""
+    def dragged_layout(self, layout):
+        """``layout`` with the displays where the shapes were dragged: their positions on
+        the preview, scaled up to the true canvas and anchored at (0, 0)."""
         # DragShape sizes and positions need to be scaled up by true_canvas_old_w/preview_canv_w
         prev_canv_w = self.preview.st_bmp_canvas.GetSize()[0]
-        true_canv_w = self.preview.get_canvas(display_sys.get_disp_list(True))[0]
+        true_canv_w = canvas.desktop_extent(layout.ppi_norm_areas())[0]
         scaling = true_canv_w / prev_canv_w
-        sanitzed_offs = self.sanitize_shape_offs()
-        ppi_norm_offsets = []
-        for off in sanitzed_offs:
-            ppi_norm_offsets.append((off[0] * scaling, off[1] * scaling))
-        display_sys.update_ppinorm_offsets(ppi_norm_offsets, bezels_included=False)
-
-    def sanitize_shape_offs(self):
-        """Return shapes' relative offsets, anchoring to (0,0)."""
-        sanitized_offs = []
-        leftmost_offset = min([shape.pos[0] for shape in self.draggable_shapes])
-        topmost_offset = min([shape.pos[1] for shape in self.draggable_shapes])
-        for shape in self.draggable_shapes:
-            sanitized_offs.append((shape.pos[0] - leftmost_offset, shape.pos[1] - topmost_offset))
-        return sanitized_offs
+        offsets = canvas.translate_to_origin([shape.pos for shape in self.draggable_shapes])
+        return layout.with_offsets([(off[0] * scaling, off[1] * scaling) for off in offsets])
 
     #
     # DragImage methods
@@ -228,7 +213,7 @@ class LayoutEditor:
     class DragShape:
         def __init__(self, bmp):
             self.bmp = bmp
-            self.pos = (0, 0)
+            self.pos: tuple[int, int] = (0, 0)
             self.shown = True
             self.text = None
             self.fullscreen = False
@@ -381,18 +366,16 @@ class LayoutEditor:
         to allow adding bezels. Additionally hides display
         position config button(s)."""
         # TODO Change background color?
-        self.old_bezels = self.preview.display_sys.bezels_in_mm()
-        self.old_ppinorm_offs = self.preview.display_sys.get_ppinorm_offsets()
+        self.old_bezels = self.preview.staged.layout.bezels_in_mm()
+        self.old_ppinorm_offs = self.preview.staged.layout.ppi_norm_offsets
         self.bezel_conifg_mode = True
         # Draw bitmaps manually, widgets can't overlap
-        # self.show_staticbmps(False)
-        # self.create_shapes(enable_movement=False)
         self.show_bezel_buttons(True)
         # Hide preview positioning config button
         self.toggle_buttons(False, False)
 
     def bezel_config_save(self):
-        """Stage the new bezel values for the active DisplaySystem.
+        """Stage the new bezel values in the staged layout.
 
         Bezel sizes are kept in memory and shown in the preview; persistence to
         disk happens only when the system band's Save is pressed.
@@ -401,9 +384,7 @@ class LayoutEditor:
         self.show_bezel_buttons(False)
         # Show preview positioning config button
         self.toggle_buttons(True, False)
-        # self.draggable_shapes = []  # Destroys DragShapes / manually drawn previews
-        self.preview.full_refresh_preview(True, True, False)
-        # self.show_staticbmps(True)
+        self.preview.full_refresh_preview(True, "advanced")
         self.preview.Refresh()
 
     def bezel_config_cancel(self):
@@ -412,15 +393,13 @@ class LayoutEditor:
         self.show_bezel_buttons(False)
         # Show preview positioning config button
         self.toggle_buttons(True, False)
-        self.preview.display_sys.update_bezels(self.old_bezels)
-        self.preview.display_sys.update_ppinorm_offsets(self.old_ppinorm_offs)
+        staged = self.preview.staged
+        staged.layout = staged.layout.with_bezels(self.old_bezels).with_offsets(self.old_ppinorm_offs)
         for pops, bez_mms in zip(self.bezel_popups, self.old_bezels):
             pops[0].set_bezel_value(bez_mms[0])
             pops[1].set_bezel_value(bez_mms[1])
-        self.preview.display_data = self.preview.display_sys.get_disp_list(True)
-        # self.draggable_shapes = []  # Destroys DragShapes / manually drawn previews
-        self.preview.full_refresh_preview(True, True, False)
-        # self.show_staticbmps(True)
+        self.preview.display_data = staged.layout.ppi_norm_areas()
+        self.preview.full_refresh_preview(True, "advanced")
         self.preview.Refresh()
 
     def create_bezel_buttons(self):
@@ -451,7 +430,7 @@ class LayoutEditor:
 
     def create_bezel_popups(self):
         self.bezel_popups = []
-        bezel_mm = self.preview.display_sys.bezels_in_mm()
+        bezel_mm = self.preview.staged.layout.bezels_in_mm()
         for butts, bez_mm in zip(self.bez_buttons, bezel_mm):
             pop_rb = self.popup_at_button(butts[0])
             pop_rb.set_bezel_value(bez_mm[0])
@@ -528,7 +507,6 @@ class LayoutEditor:
         if button_pos is None:
             return
         pop = self.bezel_popups[button_pos[0]][button_pos[1]]
-        # pop.Popup()
         pop.Show()
 
     #
@@ -536,18 +514,14 @@ class LayoutEditor:
     #
 
     class BezelEntryPopup(wx.PopupTransientWindow):
-        # class BezelEntryPopup(wx.PopupWindow):
         """Popup that is shown when a bezel button is pressed in bezel config."""
 
         def __init__(self, parent, style, layout_editor):
-            # wx.PopupTransientWindow.__init__(self, parent, style)
             wx.PopupWindow.__init__(self, parent, style)
             self.layout_editor = layout_editor
             pnl = wx.Panel(self)
-            # pnl.SetBackgroundColour("CADET BLUE")
 
             st = wx.StaticText(pnl, -1, "Enter the size of adjacent bezels and gap\nin millimeters:")
-            # self.tc_bez = wx.TextCtrl(pnl, -1, size=(100, -1))
             self.tc_bez = wx.TextCtrl(pnl, -1, size=wx.Size(60, -1), style=wx.TE_RIGHT | wx.TE_PROCESS_ENTER)
             self.tc_bez.Bind(wx.EVT_TEXT_ENTER, self.OnEnter)
             self.current_bez_val = None
@@ -556,14 +530,12 @@ class LayoutEditor:
             butt_save.Bind(wx.EVT_BUTTON, self.onApply)
             butt_canc.Bind(wx.EVT_BUTTON, self.onCancel)
             butt_sizer = wx.BoxSizer(wx.HORIZONTAL)
-            # butt_sizer.AddStretchSpacer()
             butt_sizer.Add(self.tc_bez, 0, wx.ALL, 5)
             butt_sizer.Add(butt_save, 0, wx.ALL, 5)
             butt_sizer.Add(butt_canc, 0, wx.ALL, 5)
 
             sizer = wx.BoxSizer(wx.VERTICAL)
             sizer.Add(st, 0, wx.ALL, 5)
-            # sizer.Add(self.tc_bez, 0, wx.ALL, 5)
             sizer.Add(butt_sizer, 0, wx.ALL | wx.EXPAND, 0)
             pnl.SetSizer(sizer)
 
@@ -572,7 +544,6 @@ class LayoutEditor:
             self.Layout()
 
         def ProcessLeftDown(self, event):
-            # return wx.PopupTransientWindow.ProcessLeftDown(self, event)
             return False
 
         def OnEnter(self, evt):
@@ -584,14 +555,13 @@ class LayoutEditor:
 
         def onApply(self, event):
             entered_val = self.test_bezel_value()
-            if entered_val is False:
+            if entered_val is None:
                 # Abort applying and alert user but don't
                 # Dismiss popup to fascilitate fixing.
                 msg = f"Bezel thickness must be a non-negative number, '{self.tc_bez.GetValue()}' was entered."
-                sp_logging.G_LOGGER.info(msg)
+                logger.info(msg)
                 self.Hide()
-                dial = wx.MessageDialog(self, msg, "Error", wx.OK | wx.STAY_ON_TOP | wx.CENTRE)
-                dial.ShowModal()
+                show_message_dialog(msg, "Error", parent=self)
                 self.Show()
                 return -1
             self.current_bez_val = entered_val
@@ -599,23 +569,18 @@ class LayoutEditor:
             bezel_mms = []
             for pop_pair in pops:
                 bezel_mms.append((pop_pair[0].bezel_value(), pop_pair[1].bezel_value()))
-            # self.Dismiss()
             self.Hide()
             # propagate values and refresh preview
             preview = self.layout_editor.preview
-            preview.display_sys.update_bezels(bezel_mms)
-            preview.display_data = preview.display_sys.get_disp_list(True)
-            preview.full_refresh_preview(True, True, False)
-            # self.preview.show_staticbmps(False) # Use PaintDC drawing separately from staticbitmaps
-            # self.preview.draggable_shapes = []
-            # self.preview.create_shapes(enable_movement=False)
+            preview.staged.layout = preview.staged.layout.with_bezels(bezel_mms)
+            preview.display_data = preview.staged.layout.ppi_norm_areas()
+            preview.full_refresh_preview(True, "advanced")
 
         def onCancel(self, event):
             if self.current_bez_val:
                 self.tc_bez.SetValue(str(self.current_bez_val))
             else:
                 self.tc_bez.SetValue("0.0")
-            # self.Dismiss()
             self.Hide()
 
         def bezel_value(self):
@@ -629,13 +594,6 @@ class LayoutEditor:
             self.current_bez_val = str(val)
 
         def test_bezel_value(self):
-            """Test that entered value in tc_bez is valid and return it."""
-            val = self.tc_bez.GetValue()
-            try:
-                num = float(val)
-                if num >= 0:
-                    return num
-                else:
-                    return False
-            except ValueError:
-                return False
+            """The entered bezel thickness, or None unless it is a non-negative number."""
+            value = parse_float(self.tc_bez.GetValue())
+            return value if value is not None and value >= 0 else None

@@ -1,9 +1,7 @@
 """Help: the help window, and the help popups of the editor and its dialogs."""
 
-import wx  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-import]
+import wx  # ty:ignore[unresolved-import]
 
-import superpaper.perspective as persp
-import superpaper.render as render
 from superpaper.paths import resource
 
 
@@ -38,13 +36,11 @@ class HelpPanel(wx.Panel):
 
         show_help = get_settings().show_help
 
-        # st_show_at_start = wx.StaticText(self, -1, "Show this help at start")
         self.cb_show_at_start = wx.CheckBox(self, -1, "Show this help at start")
         self.cb_show_at_start.SetValue(show_help)
         self.button_close = wx.Button(self, label="Close")
         self.button_close.Bind(wx.EVT_BUTTON, self.onClose)
         self.sizer_buttons.AddStretchSpacer()
-        # self.sizer_buttons.Add(st_show_at_start, 0, wx.ALIGN_CENTER_VERTICAL|wx.ALL, 5)
         self.sizer_buttons.Add(self.cb_show_at_start, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 5)
         self.sizer_buttons.Add(self.button_close, 0, wx.CENTER | wx.ALL, 5)
 
@@ -90,7 +86,6 @@ Tips:
       save, and its a new profile.
     - 'Align Test' feature allows you to test your alignment settings.
 """
-        # st_help = wx.StaticText(self, -1, help_str)
         st_help = wx.TextCtrl(self, -1, help_str, size=wx.Size(700, 400), style=wx.TE_MULTILINE | wx.TE_READONLY)
         self.sizer_helpcontent.Add(st_help, 1, wx.EXPAND | wx.CENTER | wx.ALL, 5)
 
@@ -113,7 +108,6 @@ class HelpPopup(wx.PopupTransientWindow):
     def __init__(self, parent, text, quality_text=None, style=wx.BORDER_DEFAULT):
         wx.PopupTransientWindow.__init__(self, parent, style)
         pnl = wx.Panel(self)
-        # pnl.SetBackgroundColour("CADET BLUE")
 
         stlist = []
         if isinstance(text, str):
@@ -141,49 +135,18 @@ class HelpPopup(wx.PopupTransientWindow):
         self.Destroy()
 
 
-class ImageQualityHelpPopup(HelpPopup):
-    """Help popup of the preview, which also names the smallest source image for the
-    editor's current settings (unless each display has its own image)."""
+def show_help_popup(parent, text, button, quality_text=None):
+    """Pop ``text`` (a string, or a string for each paragraph) up below ``button``,
+    followed by ``quality_text`` if given."""
+    popup = HelpPopup(parent, text, quality_text)
+    popup.Position(button.ClientToScreen((0, 0)), wx.Size(0, button.GetSize()[1]))
+    popup.Popup()
 
-    def __init__(self, parent, text, *, editor, use_perspective, persp_name):
-        self.editor = editor
-        self.display_sys = editor.display_sys
-        self.advanced_on = editor.show_advanced_settings
-        self.use_perspective = use_perspective
-        self.persp_name = persp_name
-        quality_text = None if editor.use_multi_image else self.string_ideal_image_size()
-        super().__init__(parent, text, quality_text)
 
-    def string_ideal_image_size(self):
-        "Return a sentence what the minimum source image size is for best quality."
-        senten = (
-            "For the best image quality with current settings your\n"
-            r" wallpapers should be {} or larger."
-        )
-        display_sys = self.display_sys
-        if self.advanced_on:
-            if self.editor.cb_offsets.GetValue():
-                offsets = []
-                for tc in self.editor.tc_list_offsets:
-                    off_str = tc.GetValue().split(",")
-                    try:
-                        offsets.append((int(off_str[0]), int(off_str[1])))
-                    except ValueError, IndexError:
-                        offsets.append((0, 0))
-            else:
-                offsets = len(display_sys.disp_list) * [(0, 0)]
-            crops = display_sys.get_ppi_norm_crops(offsets)
-            persp_data = None
-            if self.use_perspective:
-                persp_data = display_sys.get_persp_data(self.persp_name)
-            if persp_data:
-                proj_plane_crops, persp_coeffs = persp.get_backprojected_display_system(crops, persp_data)
-                # Canvas containing back-projected displays
-                canv = render.compute_working_canvas(proj_plane_crops)
-            else:
-                canv = render.compute_working_canvas(crops)
-        else:
-            canv = render.compute_canvas(display_sys.resolutions(), display_sys.digital_offsets())
-        res_str = f"{canv[0]}x{canv[1]}"
-        fin = senten.format(res_str)
-        return fin
+def image_quality_advice(source_size):
+    """The sentence on how large wallpapers should be, given the (width, height) of the
+    image the settings call for."""
+    return (
+        "For the best image quality with current settings your\n"
+        f" wallpapers should be {source_size[0]}x{source_size[1]} or larger."
+    )

@@ -2,14 +2,17 @@
 hook, and how host programs are run."""
 
 import subprocess
+import sys
 from pathlib import Path
+from types import ModuleType, SimpleNamespace
 
 import pytest
 
 import superpaper.desktop as desktop
 from superpaper.desktop import linux, process
 from superpaper.desktop.kde import Activities
-from superpaper.desktop.spanmode import set_spanmode
+from superpaper.desktop.process import Result
+from superpaper.desktop.wallpaper import Pieces, Spanned
 
 IMAGE = "/tmp/wallpaper.png"
 # Only KDE Plasma looks at activities.
@@ -30,7 +33,7 @@ def ran(monkeypatch):
 
 
 def set_wallpaper(set_command="", image=IMAGE):
-    return linux.set_wallpaper(image, None, set_command=set_command, activities=NO_ACTIVITIES)
+    return linux.set_wallpaper(Spanned(image), set_command=set_command, activities=NO_ACTIVITIES)
 
 
 def test_custom_command_runs_once_in_known_session(monkeypatch, ran):
@@ -211,7 +214,7 @@ def test_only_kde_takes_one_image_per_display(monkeypatch, session, set_command,
 def test_span_mode_spans_one_image_across_the_displays(monkeypatch, ran, session, schema):
     monkeypatch.setenv("DESKTOP_SESSION", session)
 
-    set_spanmode()
+    assert desktop.set_spanmode("").ok
 
     assert [command for command, _ in ran] == [["/usr/bin/gsettings", "set", schema, "picture-options", "spanned"]]
 
@@ -221,6 +224,94 @@ def test_span_mode_leaves_desktops_without_the_setting_alone(monkeypatch, ran, s
     if session:
         monkeypatch.setenv("DESKTOP_SESSION", session)
 
-    set_spanmode()
+    assert desktop.set_spanmode("").ok
 
     assert ran == []
+
+
+@pytest.mark.parametrize("set_command", ["setter {image}", "feh"])
+def test_span_mode_leaves_the_desktop_alone_when_the_user_sets_the_wallpaper(monkeypatch, ran, set_command):
+    monkeypatch.setenv("DESKTOP_SESSION", "gnome")
+
+    assert desktop.set_spanmode(set_command).ok
+
+    assert ran == []
+
+
+def test_span_mode_reports_what_the_desktop_refused(monkeypatch):
+    monkeypatch.setenv("DESKTOP_SESSION", "gnome")
+    monkeypatch.setattr(
+        process.subprocess,
+        "run",
+        lambda command, **options: subprocess.CompletedProcess(command, 1, stdout="", stderr="no schema\n"),
+    )
+
+    result = desktop.set_spanmode("")
+
+    assert result.problem == "gsettings failed with exit status 1: no schema"
+
+
+def test_kde_needs_the_wallpaper_cut_into_pieces(monkeypatch):
+    monkeypatch.setenv("DESKTOP_SESSION", "plasma")
+    shown = []
+    monkeypatch.setattr(linux.kde, "set_wallpaper", lambda pieces, activities: shown.append(pieces) or Result())
+
+    uncut = linux.set_wallpaper(Spanned(IMAGE), set_command="", activities=NO_ACTIVITIES)
+    cut = linux.set_wallpaper(Pieces(IMAGE, ("/a.png", "/b.png")), set_command="", activities=NO_ACTIVITIES)
+
+    assert uncut.problem == "KDE Plasma needs the wallpaper cut into one image per display."
+    assert cut.ok
+    assert shown == [("/a.png", "/b.png")]
+
+
+@pytest.fixture
+def appkit(monkeypatch):
+    """AppKit, as ``install(screens)`` gives it with screens at the given x positions, in any order.
+
+    ``install`` returns what was set where, as (screen x, image) pairs.
+    """
+
+    def install(screens):
+        set_images = []
+        workspace = SimpleNamespace(
+            setDesktopImageURL_forScreen_options_error_=lambda url, screen, options, error: (
+                set_images.append((screen.x, url)) or (True, None)
+            )
+        )
+        appkit_module = ModuleType("AppKit")
+        appkit_module.NSScreen = SimpleNamespace(
+            screens=lambda: [
+                SimpleNamespace(x=x, frame=SimpleNamespace(origin=SimpleNamespace(x=x, y=0))) for x in screens
+            ]
+        )
+        appkit_module.NSWorkspace = SimpleNamespace(sharedWorkspace=lambda: workspace)
+        foundation = ModuleType("Foundation")
+        foundation.NSURL = SimpleNamespace(fileURLWithPath_=lambda path: path)
+        monkeypatch.setitem(sys.modules, "AppKit", appkit_module)
+        monkeypatch.setitem(sys.modules, "Foundation", foundation)
+        return set_images
+
+    yield install
+    sys.modules.pop("superpaper.desktop.macos", None)
+    if hasattr(desktop, "macos"):
+        del desktop.macos
+
+
+def test_macos_shows_one_piece_per_screen_in_display_order(appkit):
+    set_images = appkit(screens=[1920, 0])
+    from superpaper.desktop import macos
+
+    result = macos.set_wallpaper(Pieces(IMAGE, ("/left.png", "/right.png")))
+
+    assert result.ok
+    assert set_images == [(0, "/left.png"), (1920, "/right.png")]
+
+
+def test_macos_reports_pieces_that_dont_match_the_screens(appkit):
+    set_images = appkit(screens=[0, 1920])
+    from superpaper.desktop import macos
+
+    result = macos.set_wallpaper(Pieces(IMAGE, ("/only.png",)))
+
+    assert result.problem == "There are 2 screens but 1 wallpaper pieces."
+    assert set_images == []

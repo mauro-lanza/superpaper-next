@@ -1,13 +1,17 @@
 """The editor's preview of the displays and the wallpaper on them."""
 
-from typing import Literal, overload
+import logging
+from typing import Literal, assert_never, overload
 
-import wx  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-import]
+import wx  # ty:ignore[unresolved-import]
 from PIL import ImageEnhance
 
-import superpaper.sp_logging as sp_logging
+from superpaper import canvas
+from superpaper.profiles import SpanMode
 from superpaper.render import SourceImageError, open_preview_image, resize_to_fill
 from superpaper.ui.layout_editor import LayoutEditor
+
+logger = logging.getLogger(__name__)
 
 
 class WallpaperPreviewPanel(wx.Panel):
@@ -19,20 +23,20 @@ class WallpaperPreviewPanel(wx.Panel):
     setup, which will then be saved into a file as a monitor
     configuration. Method looks up saved setups to see if one
     exists that matches the given resolutions, offsets and sizes.
+
+    ``staged`` is the editor's StagedLayout, which the preview shows and its layout editor
+    changes.
     """
 
     def __init__(
         self,
         parent,
-        display_sys,
+        staged,
         *,
         set_profile_controls_enabled,
         toggle_bezel_buttons,
         mark_dirty,
         show_help,
-        image_list=None,
-        use_ppi_px=False,
-        use_multi_image=False,
     ):
         self.preview_size = (1080, 400)
         wx.Panel.__init__(self, parent, size=wx.Size(*self.preview_size))
@@ -45,7 +49,7 @@ class WallpaperPreviewPanel(wx.Panel):
         )
 
         # Buttons
-        self.layout_editor.create_buttons(use_ppi_px)
+        self.layout_editor.create_buttons(use_ppi_px=False)
 
         # Colour definitions
         self.clr_prw_mntr = wx.Colour(0, 0, 0, alpha=wx.ALPHA_OPAQUE)
@@ -53,14 +57,16 @@ class WallpaperPreviewPanel(wx.Panel):
         self.SetBackgroundColour(self.clr_prw_bkg)
 
         # Display data and sizes
-        self.display_sys = display_sys
-        self.display_data = self.display_sys.get_disp_list()
-        self.dtop_canvas_px = self.get_canvas(self.display_data)
-        self.dtop_canvas_relsz, self.dtop_canvas_pos, scaling_fac = self.fit_canvas_wrkarea(self.dtop_canvas_px)
-        self.display_rel_sizes = self.displays_on_canvas(self.display_data, self.dtop_canvas_pos, scaling_fac)
+        self.staged = staged
+        self.display_data = self.staged.layout.real_areas()
+        self.dtop_canvas_px = canvas.desktop_extent(self.display_data)
+        self.dtop_canvas_relsz, self.dtop_canvas_pos, scaling_fac = canvas.fit_to_panel(
+            self.dtop_canvas_px, self.GetSize()
+        )
+        self.display_rel_sizes = canvas.place_displays(self.display_data, self.dtop_canvas_pos, scaling_fac)
 
         # bitmaps to be shown
-        self.use_multi_image = use_multi_image
+        self.use_multi_image = False
         self.current_preview_images = []
         self.preview_img_list = []
         self.bmp_list = []
@@ -68,8 +74,7 @@ class WallpaperPreviewPanel(wx.Panel):
         # Image zoom & positioning (whole-viewport, applied in resize_to_fill)
         self.zoom = 1.0
         self.offset = (0.0, 0.0)
-        self._last_use_ppi = use_ppi_px
-        self._last_use_multi = use_multi_image
+        self._last_span_mode: SpanMode = "single"
         self._last_spangroups = None
 
         # Draw preview
@@ -103,8 +108,7 @@ class WallpaperPreviewPanel(wx.Panel):
                 self.bmp_list.append(bmp)
                 st_bmp = wx.StaticBitmap(self, wx.ID_ANY, wx.BitmapBundle(bmp))
                 st_bmp.Hide()
-                # st_bmp.SetScaleMode(wx.Scale_AspectFill)  # New in wxpython 4.1
-                st_bmp.SetPosition(offs)
+                st_bmp.SetPosition(wx.Point(*offs))
                 self.preview_img_list.append(st_bmp)
         else:
             # previews exist and should be blanked
@@ -112,7 +116,6 @@ class WallpaperPreviewPanel(wx.Panel):
 
             self.st_bmp_canvas.SetBitmap(wx.BitmapBundle(bmp_canv))
             self.st_bmp_canvas.SetPosition(wx.Point(self.dtop_canvas_pos))
-            # self.st_bmp_canvas.Hide()
 
             # blank monitor previews
             for disp, st_bmp in zip(self.display_rel_sizes, self.preview_img_list):
@@ -121,7 +124,6 @@ class WallpaperPreviewPanel(wx.Panel):
                 bmp = wx.Bitmap.FromRGBA(size[0], size[1], red=0, green=0, blue=0, alpha=255)
                 st_bmp.SetBitmap(bmp)
                 st_bmp.SetPosition(offs)
-                # st_bmp.Hide()
         self.draw_monitor_numbers(use_ppi_px)
         self.Refresh()
 
@@ -167,13 +169,13 @@ class WallpaperPreviewPanel(wx.Panel):
         font = wx.Font(24, wx.FONTFAMILY_SWISS, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_LIGHT)
         font_clr = wx.Colour(60, 60, 60, alpha=wx.ALPHA_OPAQUE)
 
-        for st_bmp, img_sz, dsp in zip(self.preview_img_list, self.img_rel_sizes, self.display_sys.disp_list):
+        diagonals = self.staged.layout.diagonal_inches()
+        for st_bmp, img_sz, diagonal in zip(self.preview_img_list, self.img_rel_sizes, diagonals):
             bmp = st_bmp.GetBitmap()
             dc = wx.MemoryDC(bmp)
-            text = str(dsp.diagonal_size()[1]) + '"'
+            text = str(diagonal) + '"'
             dc.SetTextForeground(font_clr)
             dc.SetFont(font)
-            # bmp_w, bmp_h = dc.GetSize()
             bmp_w, bmp_h = img_sz
             text_w, text_h = dc.GetTextExtent(text)
             pos_w = bmp_w - text_w - 5
@@ -182,60 +184,60 @@ class WallpaperPreviewPanel(wx.Panel):
             del dc
             st_bmp.SetBitmap(bmp)
 
-    def refresh_preview(self, use_ppi_px=False, force_refresh=False):
-        if force_refresh or (not self.layout_editor.config_mode or not self.layout_editor.bezel_conifg_mode):
-            self.dtop_canvas_px = self.get_canvas(self.display_data, use_ppi_px)
-            self.dtop_canvas_relsz, self.dtop_canvas_pos, scaling_fac = self.fit_canvas_wrkarea(self.dtop_canvas_px)
-            self.st_bmp_canvas.SetPosition(wx.Point(self.dtop_canvas_pos))
-            self.st_bmp_canvas.SetSize(wx.Size(*self.dtop_canvas_relsz))
+    def refresh_preview(self, use_ppi_px=False):
+        if use_ppi_px:
+            self.dtop_canvas_px = canvas.desktop_extent_with_bezels(self.display_data)
+        else:
+            self.dtop_canvas_px = canvas.desktop_extent(self.display_data)
+        self.dtop_canvas_relsz, self.dtop_canvas_pos, scaling_fac = canvas.fit_to_panel(
+            self.dtop_canvas_px, self.GetSize()
+        )
+        self.st_bmp_canvas.SetPosition(wx.Point(self.dtop_canvas_pos))
+        self.st_bmp_canvas.SetSize(wx.Size(*self.dtop_canvas_relsz))
 
-            if use_ppi_px:
-                (self.display_rel_sizes, self.img_rel_sizes, self.bz_rel_sizes) = self.displays_on_canvas(
-                    self.display_data, self.dtop_canvas_pos, scaling_fac, use_ppi_px
-                )
-            else:
-                self.display_rel_sizes = self.displays_on_canvas(self.display_data, self.dtop_canvas_pos, scaling_fac)
-            for disp, st_bmp in zip(self.display_rel_sizes, self.preview_img_list):
-                size = disp[0]
-                offs = disp[1]
-                st_bmp.SetPosition(offs)
-                st_bmp.SetSize(size)
-        # if self.layout_editor.bezel_conifg_mode:
-        # pass
-        # self.st_bmp_canvas.Hide()
+        if use_ppi_px:
+            placed = canvas.place_displays_with_bezels(self.display_data, self.dtop_canvas_pos, scaling_fac)
+            self.display_rel_sizes = [(display.size, display.position) for display in placed]
+            self.img_rel_sizes = [display.image_size for display in placed]
+            self.bz_rel_sizes = [display.bezel_rects for display in placed]
+        else:
+            self.display_rel_sizes = canvas.place_displays(self.display_data, self.dtop_canvas_pos, scaling_fac)
+        for disp, st_bmp in zip(self.display_rel_sizes, self.preview_img_list):
+            size = disp[0]
+            offs = disp[1]
+            st_bmp.SetPosition(offs)
+            st_bmp.SetSize(size)
 
         self.layout_editor.move_buttons()
         self.layout_editor.move_bezel_buttons()
 
-    def full_refresh_preview(self, is_resized, use_ppi_px, use_multi_image, spangroups=None):
-        self.use_multi_image = use_multi_image
+    def full_refresh_preview(self, is_resized, span_mode, spangroups=None):
+        self.use_multi_image = span_mode == "multi"
+        use_ppi_px = span_mode == "advanced"
         if is_resized and not self.layout_editor.config_mode:
-            dtop_canvas_relsz, dtop_canvas_pos, scaling_fac = self.fit_canvas_wrkarea(self.dtop_canvas_px)
-            # if (self.current_preview_images and dtop_canvas_relsz is not self.dtop_canvas_relsz):
             if self.current_preview_images:
-                self.preview_wallpaper(self.current_preview_images, use_ppi_px, use_multi_image, spangroups=spangroups)
+                self.preview_wallpaper(self.current_preview_images, span_mode, spangroups=spangroups)
                 self.layout_editor.move_bezel_buttons()
-                # self.st_bmp_canvas.Hide()
             else:
                 self.refresh_preview(use_ppi_px)
                 self.resize_displays(use_ppi_px)
                 self.layout_editor.move_bezel_buttons()
                 self.Refresh()
-                # self.st_bmp_canvas.Hide()
 
     def preview_wallpaper(
         self,
         image_list,
-        use_ppi_px=False,
-        use_multi_image=False,
+        span_mode: SpanMode,
         display_data=None,
-        spangroups=None,
+        spangroups: tuple[tuple[int, ...], ...] | None = None,
     ):
-        self.use_multi_image = use_multi_image
+        """Show ``image_list`` on the displays as ``span_mode`` spans it; ``spangroups``, the
+        displays each image spans, apply to advanced spanning."""
+        use_ppi_px = span_mode == "advanced"
+        self.use_multi_image = span_mode == "multi"
         if display_data:
             self.display_data = display_data
-        self._last_use_ppi = use_ppi_px
-        self._last_use_multi = use_multi_image
+        self._last_span_mode = span_mode
         self._last_spangroups = spangroups
         self.refresh_preview(use_ppi_px)
         self.current_preview_images = image_list
@@ -251,68 +253,66 @@ class WallpaperPreviewPanel(wx.Panel):
                 rect.SetRight(bm.GetWidth() - 1)
             return bm.GetSubBitmap(rect)
 
-        if use_multi_image:
-            while len(image_list) < len(self.preview_img_list):
-                image_list.append(image_list[0])
-            for img_nm, st_bmp in zip(image_list, self.preview_img_list):
-                prev_sz = st_bmp.GetSize()
-                st_bmp.SetBitmap(self.resize_and_bitmap(img_nm, prev_sz))
-        elif use_ppi_px and spangroups:
-            self.use_multi_image = True  # disables canvas drawing
-            # for each group of displays, run span wallpaper preview
-            for grp_id, img_nm in zip(spangroups, image_list):
-                grp = spangroups[grp_id]
-                display_rel_sizes = [self.display_rel_sizes[i] for i in grp]
-                img_rel_sizes = [self.img_rel_sizes[i] for i in grp]
-                bz_rel_sizes = [self.bz_rel_sizes[i] for i in grp]
-                preview_img_list = [self.preview_img_list[i] for i in grp]
+        match span_mode:
+            case "multi":
+                while len(image_list) < len(self.preview_img_list):
+                    image_list.append(image_list[0])
+                for img_nm, st_bmp in zip(image_list, self.preview_img_list):
+                    prev_sz = st_bmp.GetSize()
+                    st_bmp.SetBitmap(self.resize_and_bitmap(img_nm, prev_sz))
+            case "advanced" if spangroups:
+                self.use_multi_image = True  # disables canvas drawing
+                # for each group of displays, run span wallpaper preview
+                for group, img_nm in zip(spangroups, image_list):
+                    display_rel_sizes = [self.display_rel_sizes[i] for i in group]
+                    img_rel_sizes = [self.img_rel_sizes[i] for i in group]
+                    bz_rel_sizes = [self.bz_rel_sizes[i] for i in group]
+                    preview_img_list = [self.preview_img_list[i] for i in group]
 
-                canv_sz, canvas_pos = self.canvas_display_group(display_rel_sizes, (0, 0))
-                bmp_clr, bmp_bw = self.resize_and_bitmap(img_nm, canv_sz, True)
+                    canv_sz, canvas_pos = canvas.group_canvas(display_rel_sizes, (0, 0))
+                    bmp_clr, bmp_bw = self.resize_and_bitmap(img_nm, canv_sz, True)
+                    for disp, img_sz, bez_szs, st_bmp in zip(
+                        display_rel_sizes, img_rel_sizes, bz_rel_sizes, preview_img_list
+                    ):
+                        sz = disp[0]
+                        pos = (disp[1][0] - canvas_pos[0], disp[1][1] - canvas_pos[1])
+                        crop = safe_sub_bitmap(bmp_clr, wx.Rect(pos, img_sz))
+                        crop_w_bez = self.bezels_to_bitmap(crop, sz, bez_szs)
+                        st_bmp.SetBitmap(crop_w_bez)
+            case "advanced":
+                img = image_list[0]
+                # set canvas to fit with keeping aspect the image, with dim/blur
+                # and crop pieces to show on monitor previews unaltered.
+                # In advanced mode any provided bezels will be drawn.
+                canv_sz = self.st_bmp_canvas.GetSize()
+                bmp_clr, bmp_bw = self.resize_and_bitmap(img, canv_sz, True)
+                self.st_bmp_canvas.SetBitmap(wx.BitmapBundle(bmp_bw))
+
+                canvas_pos = self.dtop_canvas_pos
                 for disp, img_sz, bez_szs, st_bmp in zip(
-                    display_rel_sizes, img_rel_sizes, bz_rel_sizes, preview_img_list
+                    self.display_rel_sizes, self.img_rel_sizes, self.bz_rel_sizes, self.preview_img_list
                 ):
                     sz = disp[0]
                     pos = (disp[1][0] - canvas_pos[0], disp[1][1] - canvas_pos[1])
                     crop = safe_sub_bitmap(bmp_clr, wx.Rect(pos, img_sz))
                     crop_w_bez = self.bezels_to_bitmap(crop, sz, bez_szs)
                     st_bmp.SetBitmap(crop_w_bez)
-        elif use_ppi_px and not spangroups:
-            img = image_list[0]
-            # set canvas to fit with keeping aspect the image, with dim/blur
-            # and crop pieces to show on monitor previews unaltered.
-            # With use_ppi_px any provided bezels will be drawn.
-            canv_sz = self.st_bmp_canvas.GetSize()
-            bmp_clr, bmp_bw = self.resize_and_bitmap(img, canv_sz, True)
-            self.st_bmp_canvas.SetBitmap(wx.BitmapBundle(bmp_bw))
-            # self.st_bmp_canvas.Show()
+            case "single":
+                img = image_list[0]
+                # set canvas to fit with keeping aspect the image, with dim/blur
+                # and crop pieces to show on monitor previews unaltered.
+                canv_sz = self.st_bmp_canvas.GetSize()
+                bmp_clr, bmp_bw = self.resize_and_bitmap(img, canv_sz, True)
+                self.st_bmp_canvas.SetBitmap(wx.BitmapBundle(bmp_bw))
 
-            canvas_pos = self.dtop_canvas_pos
-            for disp, img_sz, bez_szs, st_bmp in zip(
-                self.display_rel_sizes, self.img_rel_sizes, self.bz_rel_sizes, self.preview_img_list
-            ):
-                sz = disp[0]
-                pos = (disp[1][0] - canvas_pos[0], disp[1][1] - canvas_pos[1])
-                crop = safe_sub_bitmap(bmp_clr, wx.Rect(pos, img_sz))
-                crop_w_bez = self.bezels_to_bitmap(crop, sz, bez_szs)
-                st_bmp.SetBitmap(crop_w_bez)
-                # st_bmp.Show()
-        else:
-            img = image_list[0]
-            # set canvas to fit with keeping aspect the image, with dim/blur
-            # and crop pieces to show on monitor previews unaltered.
-            canv_sz = self.st_bmp_canvas.GetSize()
-            bmp_clr, bmp_bw = self.resize_and_bitmap(img, canv_sz, True)
-            self.st_bmp_canvas.SetBitmap(wx.BitmapBundle(bmp_bw))
-            # self.st_bmp_canvas.Show()
-
-            canvas_pos = self.dtop_canvas_pos
-            for disp, st_bmp in zip(self.display_rel_sizes, self.preview_img_list):
-                sz = disp[0]
-                pos = (disp[1][0] - canvas_pos[0], disp[1][1] - canvas_pos[1])
-                crop = safe_sub_bitmap(bmp_clr, wx.Rect(pos, sz))
-                st_bmp.SetBitmap(crop)
-                # st_bmp.Show()
+                canvas_pos = self.dtop_canvas_pos
+                for disp, st_bmp in zip(self.display_rel_sizes, self.preview_img_list):
+                    sz = disp[0]
+                    pos = (disp[1][0] - canvas_pos[0], disp[1][1] - canvas_pos[1])
+                    crop = safe_sub_bitmap(bmp_clr, wx.Rect(pos, sz))
+                    st_bmp.SetBitmap(crop)
+            case _:
+                assert_never(span_mode)
         self.draw_monitor_numbers(use_ppi_px)
         self.Refresh()
 
@@ -324,8 +324,7 @@ class WallpaperPreviewPanel(wx.Panel):
             return
         self.preview_wallpaper(
             list(self.current_preview_images),
-            self._last_use_ppi,
-            self._last_use_multi,
+            self._last_span_mode,
             self.display_data,
             self._last_spangroups,
         )
@@ -340,7 +339,7 @@ class WallpaperPreviewPanel(wx.Panel):
         try:
             pil = resize_to_fill(open_preview_image(fname), size, quality="fast", zoom=self.zoom, offset=self.offset)
         except SourceImageError as error:  # unreadable, truncated, too large, or no longer there
-            sp_logging.G_LOGGER.info("Cannot preview image '%s': %s", fname, error)
+            logger.info("Cannot preview image '%s': %s", fname, error)
             black_bmp = wx.Bitmap.FromRGBA(size[0], size[1], red=0, green=0, blue=0, alpha=255)
             if enhance_color:
                 return (black_bmp, black_bmp)
@@ -359,7 +358,6 @@ class WallpaperPreviewPanel(wx.Panel):
 
     def bezels_to_bitmap(self, bmp, disp_sz, bez_rects):
         """Add bezel rectangles ( right_bez , bottom_bez ) to given bitmap."""
-        # sp_logging.G_LOGGER.info("bezels_to_bitmap: bez_rects: %s", bez_rects)
         right_bez, bottom_bez = bez_rects
         if right_bez == (0, 0) and bottom_bez == (0, 0):
             return bmp
@@ -385,131 +383,10 @@ class WallpaperPreviewPanel(wx.Panel):
         # Convert Image back to wx.Bitmap
         return img_out.ConvertToBitmap()
 
-    def update_display_data(self, display_data, use_ppi_px, use_multi_image, spangroups=None):
+    def update_display_data(self, display_data, span_mode, spangroups=None):
         self.display_data = display_data
         self.refresh_preview()
-        self.full_refresh_preview(True, use_ppi_px, use_multi_image, spangroups=spangroups)
-
-    #
-    # Data analysis methods
-    #
-    def get_canvas(self, disp_data, use_ppi_px=False):
-        """Returns a size tuple for the desktop are in pixels or millimeters."""
-        if use_ppi_px:
-            rightmost_edge = max(
-                [disp.resolution[0] + disp.digital_offset[0] + disp.ppi_norm_bezels[0] for disp in disp_data]
-            )
-            bottommost_edge = max(
-                [disp.resolution[1] + disp.digital_offset[1] + disp.ppi_norm_bezels[1] for disp in disp_data]
-            )
-        else:
-            rightmost_edge = max([disp.resolution[0] + disp.digital_offset[0] for disp in disp_data])
-            bottommost_edge = max([disp.resolution[1] + disp.digital_offset[1] for disp in disp_data])
-        return (rightmost_edge, bottommost_edge)
-
-    def fit_canvas_wrkarea(self, canvas_px):
-        """Compute canvas size relative to the background panel size.
-
-        Returns a size tuple in so that along the longer
-        edge of the canvas, at most 90% of the panel dimensions are used.
-
-        Input is either canvas size in true pixels or in PPI normalized
-        pixels."""
-        rel_factor = 0.9
-        rel_achor_gap = (1 - rel_factor) / 2
-        work_sz = self.GetSize()
-        w2h_ratio_worksz = work_sz[0] / work_sz[1]
-        w2h_ratio = canvas_px[0] / canvas_px[1]
-        if w2h_ratio > w2h_ratio_worksz:
-            # canvas is wider than working area
-            # limit width to 90% of working area
-            new_width = rel_factor * work_sz[0]
-            scaling_fac = new_width / canvas_px[0]
-            new_height = scaling_fac * canvas_px[1]
-            anchor_left = rel_achor_gap * work_sz[0]
-            anchor_top = (work_sz[1] - new_height) / 2
-        else:
-            # canvas is taller than working area
-            new_height = rel_factor * work_sz[1]
-            scaling_fac = new_height / canvas_px[1]
-            new_width = scaling_fac * canvas_px[0]
-            anchor_left = (work_sz[0] - new_width) / 2
-            anchor_top = rel_achor_gap * work_sz[1]
-        canvas_rel = (round(new_width), round(new_height))
-        canvas_rel_pos = (round(anchor_left), round(anchor_top))
-        return (canvas_rel, canvas_rel_pos, scaling_fac)
-
-    def displays_on_canvas(self, disp_data, canvas_pos, scaling_fac, use_ppi_px=False):
-        """Return sizes and positions of displays in disp_data on the working area.
-
-        if use_ppi_px == True, returned display sizes contain bezels and lists of
-        image sizes and bezel rectangles are returned separately.
-        bz_szs is a list of size tuples pairs, each in pair for each possible bezel.
-        """
-        if use_ppi_px:
-            display_szs_pos = []
-            image_szs = []
-            bz_szs = []
-            for disp in disp_data:
-                res = disp.resolution
-                doff = disp.digital_offset
-                off = canvas_pos
-                bez = disp.ppi_norm_bezels
-                display_szs_pos.append(
-                    (
-                        # tuple 1: size = res + bez
-                        (
-                            round(scaling_fac * (res[0] + bez[0])),
-                            round(scaling_fac * (res[1] + bez[1])),
-                        ),
-                        # tuple 2: pos
-                        (
-                            round(scaling_fac * doff[0]) + off[0],
-                            round(scaling_fac * doff[1]) + off[1],
-                        ),
-                    )
-                )
-                image_szs.append((round(scaling_fac * res[0]), round(scaling_fac * res[1])))
-                if bez[0] != 0:
-                    right_bez = (
-                        round(scaling_fac * bez[0]),
-                        round(scaling_fac * (res[1] + bez[1])),
-                    )
-                else:
-                    right_bez = (0, 0)
-                if bez[1] != 0:
-                    bottom_bez = (round(scaling_fac * res[0]), round(scaling_fac * bez[1]))
-                else:
-                    bottom_bez = (0, 0)
-                bz_szs.append((right_bez, bottom_bez))
-            return [display_szs_pos, image_szs, bz_szs]
-        else:
-            display_szs_pos = []
-            for disp in disp_data:
-                doff = disp.digital_offset
-                off = canvas_pos
-                display_szs_pos.append(
-                    (
-                        tuple([round(px * scaling_fac) for px in disp.resolution]),
-                        (
-                            round(doff[0] * scaling_fac) + off[0],
-                            round(doff[1] * scaling_fac) + off[1],
-                        ),
-                    )
-                )
-            return display_szs_pos
-
-    def canvas_display_group(self, disp_szs_pos, major_canv_pos):
-        """Compute canvas size and positions for a subset of displays."""
-        canv_pos = (
-            round(min([sz_pos[1][0] for sz_pos in disp_szs_pos]) + major_canv_pos[0]),
-            round(min([sz_pos[1][1] for sz_pos in disp_szs_pos]) + major_canv_pos[1]),
-        )
-        canv_sz = (
-            round(max([sz_pos[0][0] + sz_pos[1][0] for sz_pos in disp_szs_pos]) - canv_pos[0]),
-            round(max([sz_pos[0][1] + sz_pos[1][1] for sz_pos in disp_szs_pos]) - canv_pos[1]),
-        )
-        return (canv_sz, canv_pos)
+        self.full_refresh_preview(True, span_mode, spangroups=spangroups)
 
     def draw_canvas(self, dc, draw=True):
         if self.st_bmp_canvas:
@@ -521,7 +398,6 @@ class WallpaperPreviewPanel(wx.Panel):
             op = wx.COPY
             if bmp.IsOk():
                 memDC = wx.MemoryDC()
-                # memDC.SelectObject(wx.NullBitmap)
                 memDC.SelectObject(bmp)
 
                 dc.Blit(pos[0], pos[1], bmp_sz[0], bmp_sz[1], memDC, 0, 0, op, True)
@@ -550,9 +426,6 @@ class WallpaperPreviewPanel(wx.Panel):
 
     def OnPaint(self, evt):
         dc = wx.PaintDC(self)
-        # Hiding bitmap widgets, probably unnecessary
-        # for st_bmp in self.preview_img_list:
-        # st_bmp.Hide()
 
         # Canvas drawing
         if not self.layout_editor.config_mode and not self.use_multi_image and self.current_preview_images:

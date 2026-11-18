@@ -1,35 +1,38 @@
 """The editor's display settings band: the displays' diagonal sizes and bezels, which apply
 to every profile, with their own Save and Revert."""
 
-import wx  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-import]
+import wx  # ty:ignore[unresolved-import]
 
-from superpaper.ui.help import HelpPopup
+from superpaper.ui.help import show_help_popup
+from superpaper.user_input import parse_float
 
 
 class DisplayBand(wx.CollapsiblePane):
     """The collapsible band above the profile row: the display-wide settings (diagonal
     sizes, bezels) that every profile shares, with a dedicated Save and Revert.
 
-    Edits apply at once to the editor's staged layout ``display_sys``, so the preview can
+    Edits apply at once to the editor's ``staged`` layout, so the preview can
     be used to dial in values, but they are only written to disk when Save is pressed;
     Revert restores the last saved state. Collapsed by default: set it once and forget it.
 
     ``layout_editor`` sets the bezels in the preview. The editor provides the
     rest: ``relayout()`` lays the editor out again, ``refresh_preview()`` shows the staged
     layout in the preview, ``enable_profile_editing(enable)`` locks the profile settings
-    while bezels are being set, and ``on_saved()`` is called once the layout is saved.
+    while bezels are being set, ``save_layout(layout)`` writes a layout to disk, and
+    ``on_saved()`` is called once the layout is saved.
     """
 
     def __init__(
         self,
         parent,
-        display_sys,
+        staged,
         layout_editor,
         *,
         field_width,
         relayout,
         refresh_preview,
         enable_profile_editing,
+        save_layout,
         on_saved,
     ):
         super().__init__(
@@ -37,11 +40,12 @@ class DisplayBand(wx.CollapsiblePane):
             label="Display system settings  (apply to all profiles)",
             style=wx.CP_DEFAULT_STYLE | wx.CP_NO_TLW_RESIZE,
         )
-        self.display_sys = display_sys
+        self.staged = staged
         self._layout_editor = layout_editor
         self._relayout = relayout
         self._refresh_preview = refresh_preview
         self._enable_profile_editing = enable_profile_editing
+        self._save_layout = save_layout
         self._on_saved = on_saved
         # The settings as last saved or loaded: Save and Revert are enabled only while
         # the staged layout differs from them.
@@ -90,13 +94,13 @@ class DisplayBand(wx.CollapsiblePane):
         self.st_diaginch = wx.StaticText(parent, -1, "Display diagonal sizes (inches):")
         self.sizer_setting_diaginch.Add(self.cb_diaginch, 0, wx.ALIGN_LEFT | wx.BOTTOM, 5)
         self.sizer_setting_diaginch.Add(self.st_diaginch, 0, wx.ALIGN_LEFT | wx.LEFT, 10)
-        diags = [str(dsp.diagonal_size()[1]) for dsp in self.display_sys.disp_list]
+        layout = self.staged.layout
+        diags = [str(diagonal) for diagonal in layout.diagonal_inches()]
         tc_list_sizer_diag = wx.WrapSizer(wx.HORIZONTAL)
         self.tc_list_diaginch = [
-            wx.TextCtrl(parent, -1, size=wx.Size(field_width, -1), style=wx.TE_RIGHT)
-            for _ in self.display_sys.disp_list
+            wx.TextCtrl(parent, -1, size=wx.Size(field_width, -1), style=wx.TE_RIGHT) for _ in layout.displays
         ]
-        use_user_diags = self.display_sys.use_user_diags
+        use_user_diags = layout.uses_user_diagonals
         for tc, diag in zip(self.tc_list_diaginch, diags):
             tc_list_sizer_diag.Add(tc, 0, wx.ALIGN_LEFT | wx.ALL, 5)
             tc.ChangeValue(diag)
@@ -138,34 +142,33 @@ class DisplayBand(wx.CollapsiblePane):
     #
     def _snapshot(self):
         """Capture the display-wide settings as a comparable structure."""
-        ds = self.display_sys
+        layout = self.staged.layout
         return {
-            "bezels": tuple((round(b[0], 2), round(b[1], 2)) for b in ds.bezels_in_mm()),
-            "offsets": tuple((o[0], o[1]) for o in ds.get_ppinorm_offsets()),
-            "use_user_diags": ds.use_user_diags,
-            "diags": tuple(round(dsp.diagonal_size()[1], 2) for dsp in ds.disp_list),
+            "bezels": tuple((round(b[0], 2), round(b[1], 2)) for b in layout.bezels_in_mm()),
+            "offsets": tuple((o[0], o[1]) for o in layout.ppi_norm_offsets),
+            "use_user_diags": layout.uses_user_diagonals,
+            "diags": tuple(round(diagonal, 2) for diagonal in layout.diagonal_inches()),
         }
 
     def _restore(self, snap):
         """Restore the staged layout to a previously captured snapshot."""
-        ds = self.display_sys
-        ds.update_bezels([tuple(b) for b in snap["bezels"]])
+        layout = self.staged.layout.with_bezels([tuple(b) for b in snap["bezels"]])
         if snap["use_user_diags"]:
-            ds.update_display_diags(list(snap["diags"]), reset_offsets=False)
+            layout = layout.with_diagonals(list(snap["diags"]))
         else:
-            ds.update_display_diags("auto")
-        # Positions are restored last; the diag/bezel updates above recompute
-        # initial offsets, so the saved offsets must be written afterwards.
-        ds.update_ppinorm_offsets([tuple(o) for o in snap["offsets"]])
+            layout = layout.with_detected_sizes()
+        # Positions are restored last: the bezel update above may rearrange the displays.
+        self.staged.layout = layout.with_offsets([tuple(o) for o in snap["offsets"]])
         self._refresh_preview()
 
     def _show_diagonals(self):
         """Sync the diagonal-size text fields and checkbox to the staged layout."""
-        self.cb_diaginch.SetValue(self.display_sys.use_user_diags)
-        diags = [str(dsp.diagonal_size()[1]) for dsp in self.display_sys.disp_list]
+        layout = self.staged.layout
+        self.cb_diaginch.SetValue(layout.uses_user_diagonals)
+        diags = [str(diagonal) for diagonal in layout.diagonal_inches()]
         for tc, diag in zip(self.tc_list_diaginch, diags):
             tc.ChangeValue(diag)
-            tc.Enable(self.display_sys.use_user_diags)
+            tc.Enable(layout.uses_user_diagonals)
 
     def set_baseline(self):
         """Record the current display-wide settings as the saved, clean baseline."""
@@ -189,22 +192,17 @@ class DisplayBand(wx.CollapsiblePane):
         handler (display sizes are system-wide, not part of a profile).
         """
         if not self._reverting and self.cb_diaginch.GetValue():
-            inches = []
-            for tc in self.tc_list_diaginch:
-                val = _diagonal(tc.GetValue())
-                if not val:
-                    # Mid-edit / invalid entry: don't apply, wait for valid input.
-                    inches = None
-                    break
-                inches.append(val)
-            if inches:
-                self.display_sys.update_display_diags(inches, reset_offsets=False)
+            entered = [parse_float(tc.GetValue()) for tc in self.tc_list_diaginch]
+            inches = [inch for inch in entered if inch is not None and inch > 0]
+            # Mid-edit / invalid entry: don't apply, wait for valid input.
+            if inches and len(inches) == len(entered):
+                self.staged.layout = self.staged.layout.with_diagonals(inches)
                 self._refresh_preview()
         self.update_dirty()
 
     def onSave(self, event):
         """Write the staged display-wide settings to disk."""
-        self.display_sys.save_system()
+        self._save_layout(self.staged.layout)
         self._on_saved()
         self.set_baseline()
 
@@ -235,8 +233,8 @@ class DisplayBand(wx.CollapsiblePane):
             # Apply the current field values (if valid) so the preview updates.
             self._on_diagonal_changed(None)
         else:
-            # Back to auto-detected sizes (staged only).
-            self.display_sys.update_display_diags("auto")
+            # Back to auto-detected sizes (staged only), with the displays arranged afresh.
+            self.staged.layout = self.staged.layout.with_detected_sizes().with_initial_offsets()
             self._show_diagonals()
             self._refresh_preview()
             self.update_dirty()
@@ -297,22 +295,4 @@ class DisplayBand(wx.CollapsiblePane):
             "grouped together with the gap in between to a single\n"
             "number."
         )
-        pop = HelpPopup(self.GetParent(), text)
-        btn = evt.GetEventObject()
-        pos = btn.ClientToScreen((0, 0))
-        sz = btn.GetSize()
-        pop.Position(pos, wx.Size(0, sz[1]))
-        pop.Popup()
-
-
-def _diagonal(inch_str):
-    """The diagonal size entered as ``inch_str``, in inches; False unless it is a positive
-    number."""
-    try:
-        num = float(inch_str)
-        if num > 0:
-            return num
-        else:
-            return False
-    except ValueError:
-        return False
+        show_help_popup(self.GetParent(), text, evt.GetEventObject())

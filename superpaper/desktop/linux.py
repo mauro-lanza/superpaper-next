@@ -4,12 +4,15 @@ KDE Plasma, window managers through feh, or the user's own command."""
 import logging
 import os
 import shutil
-from collections.abc import Sequence
+from typing import Literal, assert_never
 
 from superpaper.desktop import kde
 from superpaper.desktop.process import QUICK, Result, run
+from superpaper.desktop.wallpaper import Pieces, Wallpaper
 
 logger = logging.getLogger(__name__)
+
+Setter = Literal["command", "feh", "gnome", "cinnamon", "mate", "xfce", "lxqt", "kde", "unknown"]
 
 GNOME_SESSIONS = (
     "gnome",
@@ -39,9 +42,8 @@ def running_kde() -> bool:
     return bool(kde_f_ses == "true" or xdg_ses_dtop == "KDE")
 
 
-def setter(set_command: str) -> str:
-    """How the wallpaper is set here: "command" (the user's own), "feh", "gnome",
-    "cinnamon", "mate", "xfce", "lxqt", "kde", or "unknown".
+def setter(set_command: str) -> Setter:
+    """How the wallpaper is set here: "command" is the user's own.
 
     The DESKTOP_SESSION variable names the desktop. Window managers such as i3 often
     leave it unset, and then feh is used.
@@ -68,10 +70,13 @@ def setter(set_command: str) -> str:
     return "unknown"
 
 
-def set_wallpaper(image: str, pieces: Sequence[str] | None, *, set_command: str, activities: kde.Activities) -> Result:
-    """Show ``image``; KDE Plasma shows ``pieces``, one image per display, instead."""
+def set_wallpaper(wallpaper: Wallpaper, *, set_command: str, activities: kde.Activities) -> Result:
+    """Show the image of ``wallpaper``; KDE Plasma shows its pieces, one image per display,
+    instead."""
+    image = wallpaper.image
     logger.info("Setting the wallpaper on Linux to %s", image)
-    match setter(set_command):
+    kind = setter(set_command)
+    match kind:
         case "command":
             return _custom_command(set_command, image)
         case "feh":
@@ -90,11 +95,31 @@ def set_wallpaper(image: str, pieces: Sequence[str] | None, *, set_command: str,
         case "lxqt":
             return pcmanfm("-w", image)
         case "kde":
-            if not pieces:
+            if not isinstance(wallpaper, Pieces):
                 return Result("KDE Plasma needs the wallpaper cut into one image per display.")
-            return kde.set_wallpaper(pieces, activities)
-        case _:
+            return kde.set_wallpaper(wallpaper.pieces, activities)
+        case "unknown":
             return Result(UNKNOWN_DESKTOP)
+        case _:
+            assert_never(kind)
+
+
+def set_spanmode(set_command: str) -> Result:
+    """Set the desktop to span one image across the displays, where that is a setting."""
+    kind = setter(set_command)
+    match kind:
+        case "gnome":
+            return gsettings("org.gnome.desktop.background", "picture-options", "spanned")
+        case "cinnamon":
+            return gsettings("org.cinnamon.desktop.background", "picture-options", "spanned")
+        case "mate":
+            return gsettings("org.mate.background", "picture-options", "spanned")
+        case "lxqt":
+            return pcmanfm("--wallpaper-mode=stretch")
+        case "command" | "feh" | "xfce" | "kde" | "unknown":
+            return Result()  # no such setting, or the desktop sets one image per display
+        case _:
+            assert_never(kind)
 
 
 def gsettings(schema: str, key: str, value: str) -> Result:
@@ -122,13 +147,14 @@ def _custom_command(set_command: str, image: str) -> Result:
 
 def _xfce(image: str) -> Result:
     """Set the image of every XFCE backdrop of the first workspace."""
-    listed = run(["xfconf-query", "-c", "xfce4-desktop", "-p", "/backdrop", "-l"], timeout=QUICK, capture_output=True)
+    query = ["xfconf-query", "-c", "xfce4-desktop"]
+    listed = run([*query, "-p", "/backdrop", "-l"], timeout=QUICK, capture_output=True)
     if not listed.ok:
         return listed
     results = []
     for prop in listed.output.split("\n"):
         if "workspace0/image-style" in prop:
-            results.append(run(["xfconf-query", "-c", "xfce4-desktop", "-p", prop, "-s", "6"], timeout=QUICK))
+            results.append(run([*query, "-p", prop, "-s", "6"], timeout=QUICK))
         elif "workspace0/last-image" in prop:
-            results.append(run(["xfconf-query", "-c", "xfce4-desktop", "-p", prop, "-s", image], timeout=QUICK))
+            results.append(run([*query, "-p", prop, "-s", image], timeout=QUICK))
     return next((result for result in results if not result.ok), Result())

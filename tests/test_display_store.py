@@ -3,6 +3,7 @@
 import pytest
 
 from superpaper import display_store, files
+from superpaper.perspective import Perspective, Swivel, SwivelAxis, Tilt
 
 LAYOUT = display_store.SavedLayout(
     ppi_norm_offsets=[(0, 0), (1920, 0)],
@@ -11,17 +12,18 @@ LAYOUT = display_store.SavedLayout(
     use_perspective=True,
     default_perspective="desk",
 )
-DESK = {
-    "central_disp": 0,
-    "viewer_pos": [0.0, 0.0, 2000.0],
-    "swivels": [(0, 0.0, 0.0, 0.0)],
-    "tilts": [(0.0, 0.0, 0.0)],
-}
+DESK = Perspective(
+    "desk",
+    0,
+    (0.0, 0.0, 2000.0),
+    (Swivel(SwivelAxis.NONE, 0.0, 0.0, 0.0),),
+    (Tilt(0.0, 0.0, 0.0),),
+)
 
 
 def test_nothing_saved_reads_as_nothing(tmp_path):
     assert display_store.read_layout(tmp_path, "123") is None
-    assert display_store.read_perspectives(tmp_path, "123") == {}
+    assert display_store.read_perspectives(tmp_path, "123") == ()
 
 
 def test_a_layout_reads_back_as_it_was_saved(tmp_path):
@@ -50,8 +52,9 @@ def test_a_failed_save_leaves_the_saved_layouts_as_they_were(tmp_path, monkeypat
 def test_the_files_use_the_encoding_older_versions_read(tmp_path, monkeypatch):
     # Python's default text encoding, which is the ANSI code page on Windows.
     monkeypatch.setattr(display_store.locale, "getpreferredencoding", lambda do_setlocale=True: "cp1252")
+    cafe = Perspective("café", 0, (0.0, 0.0, 2000.0), DESK.swivels, DESK.tilts)
 
-    display_store.write_perspectives(tmp_path, "123", {"café": DESK})
+    display_store.write_perspectives(tmp_path, "123", [cafe])
 
     assert (tmp_path / "123.persp").read_bytes().startswith(b"[caf\xe9]\n")
-    assert display_store.read_perspectives(tmp_path, "123") == {"café": DESK}
+    assert display_store.read_perspectives(tmp_path, "123") == (cafe,)

@@ -1,6 +1,6 @@
 """The general settings window."""
 
-import wx  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-import]
+import wx  # ty:ignore[unresolved-import]
 
 
 class SettingsFrame(wx.Frame):

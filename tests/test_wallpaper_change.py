@@ -10,6 +10,7 @@ from PIL import Image
 import superpaper.session as session
 from superpaper import render
 from superpaper.desktop.process import Result
+from superpaper.desktop.wallpaper import Pieces, Spanned
 from superpaper.paths import AppPaths
 from superpaper.profile_id import ProfileId
 from superpaper.profiles import Profile
@@ -40,9 +41,10 @@ class FakeDesktop:
         self.handed = []
         self.answer = Result()
         self.takes_pieces = False
+        self.keeps_wallpaper = False
 
-    def set_wallpaper(self, image, pieces, *, set_command, activities):
-        self.handed.append((image, pieces))
+    def set_wallpaper(self, wallpaper, *, set_command, activities):
+        self.handed.append(wallpaper)
         self.activities = activities
         return self.answer
 
@@ -52,16 +54,17 @@ def desktop(monkeypatch):
     fake = FakeDesktop()
     monkeypatch.setattr(session.desktop, "set_wallpaper", fake.set_wallpaper)
     monkeypatch.setattr(session.desktop, "takes_pieces", lambda set_command: fake.takes_pieces)
+    monkeypatch.setattr(session.desktop, "keeps_wallpaper", lambda: fake.keeps_wallpaper)
     return fake
 
 
 def change(name, files, paths, layout):
     """Show the saved profile ``name``'s ``files``, as a change of the running profile does."""
-    return session.show(settings(name), files, paths, display_system=layout, profile_id=ProfileId(name), running=name)
+    return session.show(settings(name), files, paths, layout=layout, profile_id=ProfileId(name), running=name)
 
 
 def draft(profile, images, paths, layout):
-    return session.show(profile, images, paths, display_system=layout)
+    return session.show(profile, images, paths, layout=layout)
 
 
 def cached(paths):
@@ -80,7 +83,7 @@ def test_a_change_is_rendered_kept_and_shown(tmp_path, app_paths, display_layout
     assert change("simple", source, app_paths, layout) is None
 
     first, second = app_paths.cache / "simple-a.png", app_paths.cache / "simple-b.png"
-    assert desktop.handed == [(str(first), None), (str(second), None)]
+    assert desktop.handed == [Spanned(str(first)), Spanned(str(second))]
     # Once the desktop shows a render, the previous one goes.
     assert cached(app_paths) == ["simple-b.png"]
     with Image.open(second) as image:
@@ -104,7 +107,7 @@ def test_drafts_leave_the_profiles_renders_alone(tmp_path, app_paths, display_la
 
     draft(settings("simple"), [write_image(tmp_path / "source.png")], app_paths, display_layout(TINY_DISPLAYS))
 
-    assert desktop.handed == [(str(app_paths.cache / "preview" / "draft-a.png"), None)]
+    assert desktop.handed == [Spanned(str(app_paths.cache / "preview" / "draft-a.png"))]
     assert cached(app_paths) == ["preview/draft-a.png", "simple-a.png"]
 
 
@@ -185,11 +188,11 @@ def test_a_wallpaper_goes_to_the_desktop_and_then_to_the_hook(app_paths, display
     image = app_paths.cache / "p-a.png"
 
     taken = session.set_wallpaper(
-        image, ["/a.png", "/b c.png"], display_system=display_layout(), paths=app_paths, set_command="setter {image}"
+        image, ["/a.png", "/b c.png"], layout=display_layout(), paths=app_paths, set_command="setter {image}"
     )
 
     assert taken.problem == "the setter failed"
-    assert desktop.handed == [(str(image), None)]
+    assert desktop.handed == [Spanned(str(image))]
     assert hooked == [(script, str(image), ["/a.png", "/b c.png"])]
     # Failures are logged, not raised.
     assert errors(caplog) == ["the setter failed", "python3 is missing"]
@@ -200,14 +203,14 @@ def test_a_desktop_that_takes_pieces_gets_one_per_display(app_paths, display_lay
     image = app_paths.cache / "p-a.png"
     write_image(image)
 
-    assert session.set_wallpaper(image, [], display_system=display_layout(TINY_DISPLAYS), paths=app_paths).ok
+    assert session.set_wallpaper(image, [], layout=display_layout(TINY_DISPLAYS), paths=app_paths).ok
 
-    pieces = [str(app_paths.cache / "p-a-crop-0.png"), str(app_paths.cache / "p-a-crop-1.png")]
-    assert desktop.handed == [(str(image), pieces)]
+    pieces = (str(app_paths.cache / "p-a-crop-0.png"), str(app_paths.cache / "p-a-crop-1.png"))
+    assert desktop.handed == [Pieces(str(image), pieces)]
     # KDE finds them again for an activity named after the profile, by its exact name.
     write_image(app_paths.cache / "homework-a.png")
     write_image(app_paths.cache / "homework-a-crop-0.png")
-    assert desktop.activities.cached_pieces("p") == pieces
+    assert desktop.activities.cached_pieces("p") == list(pieces)
     assert desktop.activities.cached_pieces("home") == []
     assert desktop.activities.cached_pieces("an activity/with a slash") == []
 
@@ -218,7 +221,7 @@ def startup(app_paths, display_layout, desktop):
     main = SimpleNamespace(profile=settings("main"), profile_id=ProfileId("main"))
 
     def restore():
-        return session.show_again(main, app_paths, display_system=display_layout(TINY_DISPLAYS))
+        return session.show_again(main, app_paths, layout=display_layout(TINY_DISPLAYS))
 
     return restore
 
@@ -228,7 +231,7 @@ def test_startup_shows_the_last_render_again(app_paths, desktop, startup):
     write_image(app_paths.cache / "preview" / "draft-a.png", modified=1_000_000_000)
 
     assert startup() is True
-    assert desktop.handed == [(str(app_paths.cache / "main-a.png"), None)]
+    assert desktop.handed == [Spanned(str(app_paths.cache / "main-a.png"))]
     assert desktop.activities.current_profile == "main"
 
 
@@ -237,7 +240,7 @@ def test_startup_shows_a_draft_that_was_shown_after_it(app_paths, desktop, start
     write_image(app_paths.cache / "preview" / "draft-b.png", modified=2_000_000_000)
 
     assert startup() is True
-    assert desktop.handed == [(str(app_paths.cache / "preview" / "draft-b.png"), None)]
+    assert desktop.handed == [Spanned(str(app_paths.cache / "preview" / "draft-b.png"))]
 
 
 def test_startup_shows_the_pieces_in_display_order_where_the_desktop_takes_them(app_paths, desktop, startup):
@@ -246,8 +249,16 @@ def test_startup_shows_the_pieces_in_display_order_where_the_desktop_takes_them(
         write_image(app_paths.cache / name)
 
     assert startup() is True
-    pieces = [str(app_paths.cache / "main-b-crop-0.png"), str(app_paths.cache / "main-b-crop-1.png")]
-    assert desktop.handed == [(str(app_paths.cache / "main-b.png"), pieces)]
+    pieces = (str(app_paths.cache / "main-b-crop-0.png"), str(app_paths.cache / "main-b-crop-1.png"))
+    assert desktop.handed == [Pieces(str(app_paths.cache / "main-b.png"), pieces)]
+
+
+def test_a_desktop_that_keeps_its_wallpaper_isnt_given_it_again_at_startup(app_paths, desktop, startup):
+    desktop.keeps_wallpaper = True
+    write_image(app_paths.cache / "main-a.png")
+
+    assert startup() is True
+    assert desktop.handed == []
 
 
 def test_startup_without_a_render_shows_nothing(app_paths, desktop, startup):

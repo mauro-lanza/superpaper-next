@@ -1,32 +1,23 @@
-"""Telling the user something: a message dialog, printed instead when there is no GUI;
-and the end of a draft the editor asked for."""
+"""Telling the user something: a message dialog, and the end of a draft the editor asked for."""
 
-from typing import Any
+from typing import Literal
 
-# wxPython is optional (the CLI runs without it); the name stays bound either way.
-wx: Any = None
-try:
-    import wx  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-import]
-except ImportError:
-    pass
+import wx  # ty:ignore[unresolved-import]
 
 
-def show_message_dialog(message, msg_type="Info", parent=None, style="OK"):
-    """General purpose info dialog in GUI mode, falls back to print in CLI mode."""
-    # Type can be 'Info', 'Error', 'Question', 'Exclamation'
-    # In CLI mode there is no wx.App, so fall back to printing the message.
-    if wx is None or wx.App.Get() is None:
-        print(f"[{msg_type}] {message}")
-        if style == "YES_NO":
-            return False
-        return
-    if style == "OK":
-        dial = wx.MessageDialog(parent, message, msg_type, wx.OK | wx.STAY_ON_TOP | wx.CENTRE)
-        dial.ShowModal()
-    elif style == "YES_NO":
+def show_message_dialog(
+    message: str,
+    msg_type: str = "Info",
+    parent: wx.Window | None = None,
+    style: Literal["OK", "YES_NO"] = "OK",
+) -> bool:
+    """Show a modal dialog; return whether the user chose Yes (always True for an "OK" dialog)."""
+    if style == "YES_NO":
         dial = wx.MessageDialog(parent, message, msg_type, wx.YES_NO | wx.STAY_ON_TOP | wx.CENTRE)
-        res = dial.ShowModal()
-        return res == wx.ID_YES
+        return dial.ShowModal() == wx.ID_YES
+    dial = wx.MessageDialog(parent, message, msg_type, wx.OK | wx.STAY_ON_TOP | wx.CENTRE)
+    dial.ShowModal()
+    return True
 
 
 def draft_shown(problem):

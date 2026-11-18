@@ -17,16 +17,24 @@ It is intentionally self-contained and Linux-only; Windows and macOS keep using
 the wx ``TaskBarIcon``.
 """
 
-from typing import Any
+import logging
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
+from itertools import count
+from typing import Any, assert_never
 
-import superpaper.sp_logging as sp_logging
+import wx  # ty:ignore[unresolved-import]
+
 from superpaper.render import load_argb32
+from superpaper.ui.tray_menu import Check, Item, MenuEntry, Separator, Submenu
+
+logger = logging.getLogger(__name__)
 
 dbus: Any = None
 
 try:
-    import dbus  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-import]
-    import dbus.service  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-import]
+    import dbus  # ty:ignore[unresolved-import]
+    import dbus.service  # ty:ignore[unresolved-import]
 except ImportError:
     pass
 
@@ -48,7 +56,7 @@ def sni_supported():
         bus = dbus.SessionBus()
         return bool(bus.name_has_owner(WATCHER_NAME))
     except Exception as exc:
-        sp_logging.G_LOGGER.info("SNI watcher probe failed: %s", exc)
+        logger.info("SNI watcher probe failed: %s", exc)
         return False
 
 
@@ -64,124 +72,97 @@ def _load_icon_pixmap(path):
     return [(width, height, dbus.ByteArray(argb))]
 
 
-class _MenuModel:
-    """Builds the dbusmenu layout from the controller and dispatches activations.
+def _run_action(action: Callable[[], None]) -> None:
+    try:
+        action()
+    except Exception as exc:
+        logger.error("SNI menu action failed: %s", exc, exc_info=True)
 
-    The menu mirrors ``TaskBarIcon.CreatePopupMenu``. It is rebuilt on demand so
-    the profile list and pause state are always current.
+
+@dataclass(frozen=True, slots=True)
+class _Node:
+    """One dbusmenu item: its properties, what clicking it does, and the ids of its children."""
+
+    props: Mapping[str, str | int | bool]
+    action: Callable[[], None] | None
+    children: tuple[int, ...]
+
+
+def _item_node(item: Item) -> _Node:
+    return _Node({"label": item.label, "enabled": True}, item.action, ())
+
+
+class _MenuModel:
+    """Builds the dbusmenu layout from the tray's menu and dispatches activations.
+
+    It is rebuilt on demand so the profile list and pause state are always current.
     """
 
-    # Stable ids for fixed entries; profiles get ids from PROFILE_ID_BASE upward.
-    PROFILE_ID_BASE = 1000
-    PROFILES_SUBMENU_ID = 12
-
-    def __init__(self, controller):
-        self.controller = controller
+    def __init__(self, menu: Callable[[], tuple[MenuEntry, ...]]):
+        self._menu = menu
         self.revision = 1
-        # id -> dict(props=..., action=callable|None, children=[ids])
-        self._items = {}
-        # ordered list of top-level item ids
-        self._layout = []
+        self.nodes: dict[int, _Node] = {}
+        self.layout: tuple[int, ...] = ()
 
-    def rebuild(self):
-        """Recompute the menu items, returning the ordered list of top-level ids."""
-        ctrl = self.controller
-        self._items = {}
-        self._layout = []
+    def rebuild(self) -> None:
+        """Recompute the nodes and the ids of the top-level ones, in menu order."""
+        ids = count(1)
+        # The top level gets its ids first, so they stay put when the profiles come and go.
+        top = [(next(ids), entry) for entry in self._menu()]
+        nodes: dict[int, _Node] = {}
+        for node_id, entry in top:
+            match entry:
+                case Item():
+                    nodes[node_id] = _item_node(entry)
+                case Check(label, action, checked):
+                    props = {"label": label, "enabled": True, "toggle-type": "checkmark", "toggle-state": int(checked)}
+                    nodes[node_id] = _Node(props, action, ())
+                case Separator():
+                    nodes[node_id] = _Node({"type": "separator"}, None, ())
+                case Submenu(label, items):
+                    children = []
+                    for item in items:
+                        child_id = next(ids)
+                        nodes[child_id] = _item_node(item)
+                        children.append(child_id)
+                    props = {"label": label, "enabled": True, "children-display": "submenu"}
+                    nodes[node_id] = _Node(props, None, tuple(children))
+                case _:
+                    assert_never(entry)
+        self.nodes = nodes
+        self.layout = tuple(node_id for node_id, _ in top)
 
-        def add(
-            item_id,
-            label,
-            action,
-            *,
-            parent=None,
-            separator=False,
-            toggle=False,
-            toggle_state=0,
-            enabled=True,
-            submenu=False,
-        ):
-            if separator:
-                props = {"type": "separator"}
-            else:
-                props = {"label": label, "enabled": enabled}
-                if toggle:
-                    props["toggle-type"] = "checkmark"
-                    props["toggle-state"] = toggle_state
-                if submenu:
-                    props["children-display"] = "submenu"
-            self._items[item_id] = {"props": props, "action": action, "children": []}
-            if parent is None:
-                self._layout.append(item_id)
-            else:
-                self._items[parent]["children"].append(item_id)
-
-        add(1, "Open Config Folder", ctrl.open_config)
-        add(2, "Wallpaper Configuration", ctrl.configure_wallpapers)
-        add(3, "Settings", ctrl.configure_settings)
-        add(4, "Reload Profiles", ctrl.reload_profiles)
-        add(5, None, None, separator=True)
-
-        # Profiles live in their own submenu to keep the top level tidy.
-        add(self.PROFILES_SUBMENU_ID, "Profiles", None, submenu=True)
-        next_id = self.PROFILE_ID_BASE
-        for stored in getattr(ctrl, "list_of_profiles", []) or []:
-            add(
-                next_id,
-                stored.profile.name,
-                (lambda p: lambda: ctrl.start_profile(None, p))(stored),
-                parent=self.PROFILES_SUBMENU_ID,
-            )
-            next_id += 1
-
-        add(6, None, None, separator=True)
-        add(7, "Next Wallpaper", ctrl.next_wallpaper)
-        add(8, "Pause Timer", ctrl.pause_timer, toggle=True, toggle_state=1 if getattr(ctrl, "is_paused", False) else 0)
-        add(9, None, None, separator=True)
-        add(10, "About", ctrl.on_about)
-        add(11, "Exit", ctrl.on_exit)
-        return self._layout
-
-    def activate(self, item_id):
-        """Invoke the action bound to ``item_id`` if any."""
-        entry = self._items.get(item_id)
-        if not entry or entry["action"] is None:
+    def activate(self, item_id: int) -> None:
+        """Run the action of the item ``item_id``, if it has one, on the wx main loop."""
+        node = self.nodes.get(item_id)
+        if node is None or node.action is None:
             return
-        action = entry["action"]
-        # Actions are wx GUI calls; marshal onto the main loop to be safe.
-        try:
-            import wx  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-import]
-
-            wx.CallAfter(self._safe_call, action)
-        except Exception:
-            self._safe_call(action)
-
-    @staticmethod
-    def _safe_call(action):
-        try:
-            # Controller methods are bound with an ``event`` first arg; pass None.
-            try:
-                action(None)
-            except TypeError:
-                action()
-        except Exception as exc:
-            sp_logging.G_LOGGER.error("SNI menu action failed: %s", exc, exc_info=True)
+        wx.CallAfter(_run_action, node.action)
 
 
-def build_tray(controller, bus_name, icon_path, title, tooltip):
+def build_tray(
+    *,
+    menu: Callable[[], tuple[MenuEntry, ...]],
+    activate: Callable[[], None],
+    secondary_activate: Callable[[], None],
+    bus_name: str,
+    icon_path: str,
+    title: str,
+    tooltip: str,
+):
     """Create and register the SNI tray. Returns the SNITray or None on failure.
 
-    ``controller`` must provide the action methods used by ``_MenuModel`` plus
-    ``configure_wallpapers`` (used for left-click Activate).
+    ``menu`` gives the entries of the context menu as they are now; ``activate`` and
+    ``secondary_activate`` are what a left and a middle click do.
     """
     if dbus is None:
-        sp_logging.G_LOGGER.info("dbus-python not available; cannot use native SNI tray.")
+        logger.info("dbus-python not available; cannot use native SNI tray.")
         return None
     try:
-        tray = SNITray(controller, bus_name, icon_path, title, tooltip)
+        tray = SNITray(menu, activate, secondary_activate, bus_name, icon_path, title, tooltip)
         tray.register()
     except Exception as exc:
-        sp_logging.G_LOGGER.info("Failed to start native SNI tray: %s", exc)
+        logger.info("Failed to start native SNI tray: %s", exc)
         return None
     return tray
 
@@ -211,14 +192,14 @@ if dbus is not None:
         # --- com.canonical.dbusmenu methods --------------------------------
         def _build_node(self, item_id, recursion_depth, property_names):
             """Recursively build a dbusmenu (id, props, children) struct."""
-            entry = self.model._items[item_id]
+            node = self.model.nodes[item_id]
             children = dbus.Array(signature="v")
-            if recursion_depth != 0 and entry["children"]:
+            if recursion_depth != 0 and node.children:
                 depth = recursion_depth - 1 if recursion_depth > 0 else -1
-                for child_id in entry["children"]:
+                for child_id in node.children:
                     children.append(self._build_node(child_id, depth, property_names))
             return dbus.Struct(
-                (dbus.Int32(item_id), self._props_variant(entry["props"], property_names), children),
+                (dbus.Int32(item_id), self._props_variant(node.props, property_names), children),
                 signature="ia{sv}av",
             )
 
@@ -228,7 +209,7 @@ if dbus is not None:
             if parentId == 0:
                 children = dbus.Array(signature="v")
                 depth = recursionDepth - 1 if recursionDepth > 0 else -1
-                for item_id in self.model._layout:
+                for item_id in self.model.layout:
                     children.append(self._build_node(item_id, depth, propertyNames))
                 root_props = self._props_variant({"children-display": "submenu"}, propertyNames)
                 root = dbus.Struct((dbus.Int32(0), root_props, children), signature="ia{sv}av")
@@ -240,12 +221,12 @@ if dbus is not None:
         def GetGroupProperties(self, ids, propertyNames):
             self.model.rebuild()
             result = dbus.Array(signature="(ia{sv})")
-            wanted = set(ids) if ids else set(self.model._items)
-            for item_id, entry in self.model._items.items():
+            wanted = set(ids) if ids else set(self.model.nodes)
+            for item_id, node in self.model.nodes.items():
                 if item_id in wanted:
                     result.append(
                         dbus.Struct(
-                            (dbus.Int32(item_id), self._props_variant(entry["props"], propertyNames)),
+                            (dbus.Int32(item_id), self._props_variant(node.props, propertyNames)),
                             signature="ia{sv}",
                         )
                     )
@@ -254,9 +235,9 @@ if dbus is not None:
         @dbus.service.method(MENU_IFACE, in_signature="is", out_signature="v")
         def GetProperty(self, id, name):
             self.model.rebuild()
-            entry = self.model._items.get(id)
-            if entry and name in entry["props"]:
-                value = entry["props"][name]
+            node = self.model.nodes.get(id)
+            if node and name in node.props:
+                value = node.props[name]
                 return dbus.Int32(value) if name == "toggle-state" else dbus.String(value)
             return dbus.String("")
 
@@ -312,15 +293,16 @@ if dbus is not None:
     class SNITray(dbus.service.Object):
         """``org.kde.StatusNotifierItem`` implementation."""
 
-        def __init__(self, controller, bus_name, icon_path, title, tooltip):
+        def __init__(self, menu, activate, secondary_activate, bus_name, icon_path, title, tooltip):
             self.bus = dbus.SessionBus()
             self._bus_name = dbus.service.BusName(bus_name, self.bus)
             super().__init__(self.bus, SNI_OBJECT_PATH)
-            self.controller = controller
+            self._on_activate = activate
+            self._on_secondary_activate = secondary_activate
             self.title = title
             self.tooltip = tooltip
             self.icon_pixmap = _load_icon_pixmap(icon_path)
-            self.model = _MenuModel(controller)
+            self.model = _MenuModel(menu)
             self.menu = _DBusMenu(self.bus, self.model)
 
         def register(self):
@@ -328,7 +310,7 @@ if dbus is not None:
             watcher = self.bus.get_object(WATCHER_NAME, WATCHER_PATH)
             iface = dbus.Interface(watcher, WATCHER_NAME)
             iface.RegisterStatusNotifierItem(self._bus_name.get_name())
-            sp_logging.G_LOGGER.info("Registered native SNI tray item: %s", self._bus_name.get_name())
+            logger.info("Registered native SNI tray item: %s", self._bus_name.get_name())
 
         def remove(self):
             """Tear down the exported D-Bus objects (best-effort, on exit)."""
@@ -344,13 +326,13 @@ if dbus is not None:
         # --- org.kde.StatusNotifierItem methods ----------------------------
         @dbus.service.method(SNI_IFACE, in_signature="ii", out_signature="")
         def Activate(self, x, y):
-            sp_logging.G_LOGGER.info("SNI tray Activate (left-click).")
-            self.model._safe_call(self.controller.configure_wallpapers)
+            logger.info("SNI tray Activate (left-click).")
+            _run_action(self._on_activate)
 
         @dbus.service.method(SNI_IFACE, in_signature="ii", out_signature="")
         def SecondaryActivate(self, x, y):
-            sp_logging.G_LOGGER.info("SNI tray SecondaryActivate (middle-click).")
-            self.model._safe_call(self.controller.next_wallpaper)
+            logger.info("SNI tray SecondaryActivate (middle-click).")
+            _run_action(self._on_secondary_activate)
 
         @dbus.service.method(SNI_IFACE, in_signature="ii", out_signature="")
         def ContextMenu(self, x, y):

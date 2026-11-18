@@ -1,22 +1,18 @@
-"""The displays and their layout: detection, and the pixel-density, bezel, offset and
-diagonal geometry that lines a wallpaper up across them.
+"""The displays and their layout, as values: the pixel-density, bezel, offset and diagonal
+geometry that lines a wallpaper up across them.
 
-A layout is saved with display_store, under a key derived from the displays.
+Nothing here detects displays or touches a file: display_detection finds the displays and
+display_store keeps the layout. A Layout never changes; an edit is a new Layout, so one can
+be handed to another thread as it is.
 """
 
-import copy
-import logging
 import math
-import threading
-import time
-from dataclasses import replace
-from pathlib import Path
+from collections.abc import Sequence
+from dataclasses import dataclass, replace
+from typing import assert_never
 
-from screeninfo import get_monitors
-
-from superpaper import display_store
-
-logger = logging.getLogger(__name__)
+from superpaper.canvas import Crop, DisplayArea, Point, canvas_size
+from superpaper.perspective import Default, Disabled, Named, Perspective, PerspectiveChoice
 
 SIZE_HINT = (
     "Detection of the diagonal size of a display has failed. It will show up as a 23 inch "
@@ -24,652 +20,329 @@ SIZE_HINT = (
     "Sizes tool."
 )
 
-
-class DisplayDetectionError(RuntimeError):
-    """Raised when monitor enumeration cannot produce a usable display list."""
-
-    def __init__(self, attempts):
-        super().__init__(f"Unable to detect any displays after {attempts} attempts.")
-        self.attempts = attempts
+MM_PER_INCH = 25.4
 
 
+@dataclass(frozen=True, slots=True)
 class Display:
+    """A display as detected: where it is on the desktop, in pixels, and its physical size.
+
+    ``digital_offset`` is non-negative. ``phys_size_failed`` is set when the size is a guess.
     """
-    Stores refined data of a display.
 
-    Computes PPI if data is available. Stores non-negative translated offsets.
-    """
+    resolution: tuple[int, int]
+    digital_offset: tuple[int, int]
+    detected_phys_size_mm: tuple[float, float]
+    phys_size_failed: bool
+    name: str | None
 
-    def __init__(self, monitor):
-        self.resolution = (monitor.width, monitor.height)
-        self.digital_offset = (monitor.x, monitor.y)
-        if monitor.width_mm and monitor.height_mm:
-            self.phys_size_mm = tuple(
-                sorted(
-                    [monitor.width_mm, monitor.height_mm],
-                    reverse=bool(self.resolution[0] > self.resolution[1]),
-                )
-            )  # Take care that physical rotation matches resolution.
-            self.phys_size_failed = False
-        else:
-            # if physical size detection has failed, assume display is 23" diagonal
-            # to have it stand out
-            self.phys_size_mm = tuple(
-                sorted([509, 286], reverse=bool(self.resolution[0] > self.resolution[1]))
-            )  # Take care that physical rotation matches resolution.
-            self.phys_size_failed = True
-        self.detected_phys_size_mm = self.phys_size_mm
-        self.ppi = None
-        self.ppi_norm_resolution = None
-        self.ppi_norm_offset = None
-        self.bezel_mm = (0.0, 0.0)
-        self.ppi_norm_bezels = (0, 0)
-        self.perspective_angles = (0, 0)
-        self.name = monitor.name
-        if self.resolution and self.phys_size_mm:
-            self.ppi = self.compute_ppi()
-
-    def __str__(self):
-        return (
-            f"Display("
-            f"resolution={self.resolution}, "
-            f"digital_offset={self.digital_offset}, "
-            f"phys_size_mm={self.phys_size_mm}, "
-            f"detected_phys_size_mm={self.detected_phys_size_mm}, "
-            f"ppi={self.ppi}, "
-            f"ppi_norm_resolution={self.ppi_norm_resolution}, "
-            f"ppi_norm_offset={self.ppi_norm_offset}, "
-            f"ppi_norm_bezels={self.ppi_norm_bezels}, "
-            f"perspective_angles={self.perspective_angles}, "
-            f"name={self.name!r}"
-            f")"
-        )
-
-    def __eq__(self, other):
-        return bool(
-            self.resolution == other.resolution
-            and self.digital_offset == other.digital_offset
-            and self.detected_phys_size_mm == other.detected_phys_size_mm
-        )
-
-    def __hash__(self):
-        # Part of the key the layout is saved under (DisplaySystem.key): ints only.
+    def __hash__(self) -> int:
+        # Part of the key a layout is saved under (Layout.key): ints only, never the name.
         return hash((self.resolution, self.digital_offset, self.detected_phys_size_mm))
 
-    def diagonal_size(self):
-        diag_mm = math.sqrt(self.phys_size_mm[0] ** 2 + self.phys_size_mm[1] ** 2)
-        diag_in = round(diag_mm / 25.4, 1)
-        return (round(diag_mm), diag_in)
 
-    def compute_ppi(self):
-        if self.phys_size_mm[0]:
-            ppmm_horiz = self.resolution[0] / self.phys_size_mm[0]
-        else:
-            logger.info("Display.compute_ppi: self.phys_size_mm[0] was 0.")
-            return None
-        if self.phys_size_mm[1]:
-            ppmm_vert = self.resolution[1] / self.phys_size_mm[1]
-        else:
-            logger.info("Display.compute_ppi: self.phys_size_mm[1] was 0.")
-            return None
-        if abs(ppmm_horiz / ppmm_vert - 1) > 0.01:
-            logger.info(
-                "WARNING: Horizontal and vertical PPI do not match! hor: %s, ver: %s",
-                ppmm_horiz * 25.4,
-                ppmm_vert * 25.4,
-            )
-            logger.info(str(self))
-        return ppmm_horiz * 25.4  # inch has 25.4 times the pixels of a millimeter.
+@dataclass(frozen=True, slots=True)
+class Layout:
+    """The displays with what the user set for them.
 
-    def translate_offset(self, translate_tuple):
-        """Move offset point by subtracting the input point.
-
-        This takes the top left most corner of the canvas to (0,0)
-        and retains relative offsets between displays as they should be.
-        """
-        old_offsets = self.digital_offset
-        self.digital_offset = (
-            old_offsets[0] - translate_tuple[0],
-            old_offsets[1] - translate_tuple[1],
-        )
-
-    def ppi_and_physsize_from_diagonal_inch(self, diag_inch):
-        """
-        If physical size detection fails, it can be computed by
-        asking the user to enter the diagonal dimension of the monitor
-        in inches.
-        """
-        height_to_width_ratio = self.resolution[1] / self.resolution[0]
-        phys_width_inch = diag_inch / math.sqrt(1 + height_to_width_ratio**2)
-        phys_height_inch = height_to_width_ratio * phys_width_inch
-
-        self.phys_size_mm = (phys_width_inch * 25.4, phys_height_inch * 25.4)
-        self.ppi = self.resolution[0] / phys_width_inch
-
-        logger.info(
-            "Updated PPI = %s and phys_size_mm = %s based on diagonal size: %s inches",
-            self.ppi,
-            self.phys_size_mm,
-            diag_inch,
-        )
-        logger.info(str(self))
-
-
-class DisplayLight:
-    """Small class to store resolution and position data a kin to full Display."""
-
-    def __init__(self, res, off, bez):
-        self.resolution = res
-        self.digital_offset = off
-        if bez:
-            self.ppi_norm_bezels = bez
-        else:
-            self.ppi_norm_bezels = (0, 0)
-
-    def __str__(self):
-        return (
-            f"DisplayLight("
-            f"resolution={self.resolution}, "
-            f"digital_offset={self.digital_offset}, "
-            f"ppi_norm_bezels={self.ppi_norm_bezels} "
-            f")"
-        )
-
-
-class DisplaySystem:
-    """
-    Handle the display system as a whole, applying user data such as
-    bezel corrections, offsets, physical layout, and produces
-    resolutions and offsets that are used to set the wallpaper
-    in advanced mode.
+    ``ppi_norm_offsets`` are the displays' positions on the canvas where every display has
+    the pixel density of the densest one, bezels included. ``user_diagonal_inches`` replaces
+    the detected sizes when the user entered them. Bezels are kept in millimetres and their
+    pixels follow the current densities.
     """
 
-    def __init__(self, config_dir: Path, *, max_attempts=3, retry_delay=0.25):
-        """Detect the displays and load the layout saved for them from ``config_dir``.
+    displays: tuple[Display, ...]
+    ppi_norm_offsets: tuple[Point, ...]
+    bezels_mm: tuple[Point, ...]
+    user_diagonal_inches: tuple[float, ...] | None
+    use_perspective: bool
+    default_perspective: str | None
+    perspectives: tuple[Perspective, ...]
 
-        A wallpaper change is given the layout it renders for, so replacing the layout
-        a running slideshow uses never touches one that a change is still using.
-        """
-        # display_systems.dat and the .persp files that hold the user's layout live here.
-        self.config_dir = config_dir
-        self.disp_list = get_display_data(max_attempts=max_attempts, retry_delay=retry_delay)
-        self.compute_ppinorm_resolutions()
+    def __post_init__(self) -> None:
+        count = len(self.displays)
+        sizes = [len(self.ppi_norm_offsets), len(self.bezels_mm)]
+        if self.user_diagonal_inches is not None:
+            sizes.append(len(self.user_diagonal_inches))
+        if count == 0 or any(size != count for size in sizes):
+            message = f"A layout needs the same number of values for each of its {count} displays: {sizes}"
+            raise ValueError(message)
 
-        # Data
-        self.use_user_diags = False
-        self.use_perspective = True
-        self.default_perspective = None
-
-        saved = display_store.read_layout(config_dir, self.key)
-        if saved is None:
-            self.compute_initial_preview_offsets()
-        else:
-            self._apply(saved)
-        self.perspective_dict = display_store.read_perspectives(config_dir, self.key)
-
-    def __eq__(self, other):
-        # return bool(tuple(self.disp_list) == tuple(other.disp_list))
-        for dsp_1, dsp_2 in zip(self.disp_list, other.disp_list):
-            if dsp_1 == dsp_2:
-                continue
-            else:
-                return False
-        return len(self.disp_list) == len(other.disp_list)
-
-    def __hash__(self):
-        return hash(tuple(self.disp_list))
+    @classmethod
+    def initial(cls, displays: tuple[Display, ...]) -> Layout:
+        """The layout of ``displays`` before anything is set: detected sizes, no bezels, and
+        the displays arranged by their positions on the desktop."""
+        offsets = ((0, 0),) * len(displays)
+        bezels = ((0.0, 0.0),) * len(displays)  # saved as 0.0, as earlier versions wrote them
+        return cls(displays, offsets, bezels, None, True, None, ()).with_initial_offsets()
 
     @property
     def key(self) -> str:
         """What the layout is saved under. It is CPython's hash of the displays'
         resolutions, positions and detected sizes, all ints, so it is the same in every
         run. It must never change: every user's saved layouts would be lost."""
-        return str(hash(self))
+        return str(hash(self.displays))
+
+    @property
+    def uses_user_diagonals(self) -> bool:
+        return self.user_diagonal_inches is not None
 
     def size_hint(self) -> str | None:
         """What to tell the user when a display's physical size wasn't detected and no
         diagonal they entered replaces the guess."""
-        if not self.use_user_diags and any(display.phys_size_failed for display in self.disp_list):
+        if not self.uses_user_diagonals and any(display.phys_size_failed for display in self.displays):
             return SIZE_HINT
         return None
 
-    def resolutions(self):
+    def resolutions(self) -> list[tuple[int, int]]:
         """Each display's resolution in pixels, in desktop order."""
-        return [display.resolution for display in self.disp_list]
+        return [display.resolution for display in self.displays]
 
-    def digital_offsets(self):
+    def digital_offsets(self) -> list[tuple[int, int]]:
         """Each display's top-left corner on the desktop, in desktop order."""
-        return [display.digital_offset for display in self.disp_list]
+        return [display.digital_offset for display in self.displays]
 
-    def max_ppi(self):
-        """Return maximum pixel density."""
-        return max([disp.ppi for disp in self.disp_list])
+    def desktop_size(self) -> tuple[int, int]:
+        """The size of the desktop, in pixels."""
+        crops = [
+            (left, top, left + width, top + height)
+            for (width, height), (left, top) in zip(self.resolutions(), self.digital_offsets())
+        ]
+        return canvas_size(crops)
 
-    def get_normalized_ppis(self):
-        """Return list of PPI values normalized to the max_ppi."""
+    def diagonal_inches(self) -> list[float]:
+        """Each display's diagonal in inches, to a tenth."""
+        return [round(math.sqrt(width**2 + height**2) / MM_PER_INCH, 1) for width, height in self._phys_sizes_mm()]
+
+    def max_ppi(self) -> float:
+        """The highest pixel density of the displays."""
+        return max(self._ppis())
+
+    def ppi_norm_resolutions(self) -> list[tuple[int, int]]:
+        """Each display's resolution scaled to the pixel density of the densest display."""
         max_ppi = self.max_ppi()
-        return [disp.ppi / max_ppi for disp in self.disp_list]
+        sizes = []
+        for display, ppi in zip(self.displays, self._ppis()):
+            relative_ppi = ppi / max_ppi
+            sizes.append((round(display.resolution[0] / relative_ppi), round(display.resolution[1] / relative_ppi)))
+        return sizes
 
-    def compute_ppinorm_resolutions(self):
-        """Update disp_list PPI density normalized sizes of the real resolutions."""
-        rel_ppis = self.get_normalized_ppis()
-        for r_ppi, dsp in zip(rel_ppis, self.disp_list):
-            dsp.ppi_norm_resolution = (
-                round(dsp.resolution[0] / r_ppi),
-                round(dsp.resolution[1] / r_ppi),
-            )
-        # Unset bezels keep their integer pixels, so a fresh layout saves byte-identically.
-        if any(dsp.bezel_mm != (0, 0) for dsp in self.disp_list):
-            self._derive_bezel_px()
+    def bezels_in_mm(self) -> list[Point]:
+        """Each display's (right, bottom) bezel in millimetres."""
+        return [(round(bezel[0], 2), round(bezel[1], 2)) for bezel in self.bezels_mm]
 
-    def _derive_bezel_px(self):
-        """Bezels are kept in millimetres; their ppi norm pixels follow the densest display."""
-        max_ppmm = self.max_ppi() / 25.4
-        for dsp in self.disp_list:
-            dsp.ppi_norm_bezels = (dsp.bezel_mm[0] * max_ppmm, dsp.bezel_mm[1] * max_ppmm)
+    def ppi_norm_bezels(self) -> list[Point]:
+        """Each display's (right, bottom) bezel in pixels of the densest display."""
+        # Unset bezels stay integers, so a fresh layout saves byte-identically.
+        if all(bezel == (0, 0) for bezel in self.bezels_mm):
+            return [(0, 0)] * len(self.displays)
+        px_per_mm = self.max_ppi() / MM_PER_INCH
+        return [(bezel[0] * px_per_mm, bezel[1] * px_per_mm) for bezel in self.bezels_mm]
 
-    def get_ppi_norm_crops(self, manual_offsets):
-        """Returns list of ppi_norm crop tuples to cut from ppi_norm canvas.
-
-        A valid crop is a 4-tuple: (left, top, right, bottom).
-        """
+    def ppi_norm_crops(self, manual_offsets: Sequence[Point]) -> list[Crop]:
+        """Each display's (left, top, right, bottom) to cut from the density-normalised
+        canvas, moved by ``manual_offsets``; a display without one isn't moved."""
         crops = []
-        for dsp in self.disp_list:
-            try:
-                off = manual_offsets[self.disp_list.index(dsp)]
-            except IndexError:
-                off = (0, 0)
-            left_top = (
-                round(dsp.ppi_norm_offset[0] + off[0]),
-                round(dsp.ppi_norm_offset[1] + off[1]),
-            )
-            right_btm = (
-                round(dsp.ppi_norm_resolution[0]) + left_top[0],
-                round(dsp.ppi_norm_resolution[1]) + left_top[1],
-            )
-            crops.append(left_top + right_btm)
-        logger.info("get_ppi_norm_offsets: %s", self.get_ppinorm_offsets())
-        logger.info("get_ppi_norm_crops: %s", crops)
+        for index, (offset, size) in enumerate(zip(self.ppi_norm_offsets, self.ppi_norm_resolutions())):
+            manual = manual_offsets[index] if index < len(manual_offsets) else (0, 0)
+            left_top = (round(offset[0] + manual[0]), round(offset[1] + manual[1]))
+            crops.append((*left_top, round(size[0]) + left_top[0], round(size[1]) + left_top[1]))
         return crops
 
-    def fits_in_column(self, disp, col):
-        """Test if IN DEKSTOP RES the horiz center of disp is below the last disp in the col."""
-        col_last_disp = col[-1]
-        disp_cntr = (disp.digital_offset[0] + disp.digital_offset[0] + disp.resolution[0]) / 2  # (left+right)/2
-        col_last_left = col_last_disp.digital_offset[0]
-        col_last_right = col_last_disp.digital_offset[0] + col_last_disp.resolution[0]
-        return bool(disp_cntr > col_last_left and disp_cntr < col_last_right)
+    def real_areas(self) -> list[DisplayArea]:
+        """The displays as they are on the desktop, in real pixels."""
+        return [DisplayArea(display.resolution, display.digital_offset, (0, 0)) for display in self.displays]
 
-    def column_size(self, col):
-        width = max([dsp.ppi_norm_resolution[0] + dsp.ppi_norm_bezels[0] for dsp in col])
-        height = sum([dsp.ppi_norm_resolution[1] + dsp.ppi_norm_bezels[1] for dsp in col])
-        return (width, height)
-
-    def compute_initial_preview_offsets(self):
-        """
-        Uses desktop layout data to arrange the displays in their
-        physical dimensions in to horizontally centered columns and
-        then concatenating these columns horizontally centered, with
-        each columns width being that of the widest display in the
-        column. Display list needs to be sorted so that displays in
-        a column are together and then the columns progress left
-        to right.
-
-        Column composition is TESTED with resolution but column SIZES
-        are in PPI normalized resolutions to reflect the physical sizes
-        of the displays.
-        """
-        # Construct columns from disp_list
-        columns = []
-        work_col = []
-        for dsp in self.disp_list:
-            if work_col == []:
-                work_col.append(dsp)
-                if dsp == self.disp_list[-1]:
-                    columns.append(work_col)
-            else:
-                if self.fits_in_column(dsp, work_col):
-                    work_col.append(dsp)
-                else:
-                    columns.append(work_col)
-                    work_col = [dsp]
-                if dsp == self.disp_list[-1]:
-                    columns.append(work_col)
-
-        col_ids = [list(range(len(col))) for col in columns]
-        # sort columns in place vertically in digital offset
-        sorted_ids = []
-        sorted_columns = []
-        for ids, col in zip(col_ids, columns):
-            # col.sort(key=lambda x: x.digital_offset[1])
-            srt_id, srt_col = (list(t) for t in zip(*sorted(zip(ids, col), key=lambda pair: pair[1].digital_offset[1])))
-            sorted_ids.append(srt_id)
-            sorted_columns.append(srt_col)
-        columns = sorted_columns
-
-        if columns == []:
-            logger.info("DisplaySystem column recostruction has failed completely. Trigger fallback.")
-            columns = [[dsp] for dsp in self.disp_list]
-
-        # Tile columns on to the plane with vertical centering
-        col_sizes = []
-        try:
-            col_sizes = [self.column_size(col) for col in columns]
-        except ValueError, IndexError:
-            logger.info("Problem with column sizes. col_sizes: %s", col_sizes)
-        max_col_h = 0
-        try:
-            max_col_h = max([sz[1] for sz in col_sizes])
-        except ValueError:
-            logger.info("There are no column sizes? col_sizes: %s", col_sizes)
-        col_left_tops = []
-        current_left = 0
-        for sz in col_sizes:
-            col_left_tops.append((current_left, round((max_col_h - sz[1]) / 2)))
-            current_left += sz[0]
-
-        # Tile displays in columns onto the plane with horizontal centering
-        # within the column. Anchor columns to col_left_tops.
-        for col, col_anchor in zip(columns, col_left_tops):
-            current_top = 0
-            max_dsp_w = max([dsp.ppi_norm_resolution[0] + dsp.ppi_norm_bezels[0] for dsp in col])
-            for dsp in col:
-                dsp_w = dsp.ppi_norm_resolution[0] + dsp.ppi_norm_bezels[0]
-                dsp.ppi_norm_offset = (
-                    col_anchor[0] + round((max_dsp_w - dsp_w) / 2),
-                    col_anchor[1] + current_top,
-                )
-                current_top += dsp.ppi_norm_resolution[1] + dsp.ppi_norm_bezels[1]
-        # Restore column order to the original order that matches self.disp_list and other sorts (kde).
-        restored_columns = []
-        for ids, col in zip(sorted_ids, columns):
-            srt_id, srt_col = (list(t) for t in zip(*sorted(zip(ids, col), key=lambda pair: pair[0])))
-            restored_columns.append(srt_col)
-        columns = restored_columns
-
-        # Update offsets to disp_list
-        flattened_cols = [dsp for col in columns for dsp in col]
-        for scope_dsp, dsp in zip(flattened_cols, self.disp_list):
-            dsp.ppi_norm_offset = scope_dsp.ppi_norm_offset
-
-    def get_disp_list(self, use_ppi_norm=False):
-        if use_ppi_norm:
-            disp_l = []
-            for dsp in self.disp_list:
-                disp_l.append(DisplayLight(dsp.ppi_norm_resolution, dsp.ppi_norm_offset, dsp.ppi_norm_bezels))
-            return disp_l
-        else:
-            disp_l = self.disp_list
-            return disp_l
-
-    def get_ppinorm_offsets(self):
-        """Return ppi norm offsets."""
-        pnoffs = []
-        for dsp in self.disp_list:
-            pnoffs.append(dsp.ppi_norm_offset)
-        return pnoffs
-
-    def get_persp_data(self, persp_name):
-        """Return a dict of perspective settings."""
-        if persp_name == "default":
-            get_id = self.default_perspective
-        else:
-            get_id = persp_name
-        if not get_id or get_id == "disabled" or get_id not in self.perspective_dict:
-            return None
-        return self.perspective_dict[get_id]
-
-    def update_ppinorm_offsets(self, offsets, bezels_included=False):
-        """Write ppi_norm resolution offsets as determined
-        in the GUI into Displays."""
-        for dsp, offs in zip(self.disp_list, offsets):
-            dsp.ppi_norm_offset = offs
-
-    def update_bezels(self, bezels_mm):
-        """Update displays with new bezel sizes, in millimetres; they can't be negative."""
-        if any(bez < 0 for bez_pair in bezels_mm for bez in bez_pair):
-            message = f"Bezel thicknesses can't be negative: {bezels_mm}"
-            raise ValueError(message)
-        keep_layout = self._layout_is_valid()
-        old_cells = self._cells() if keep_layout else []
-        old_bezels = [dsp.ppi_norm_bezels for dsp in self.disp_list]
-        for bz_mm, dsp in zip(bezels_mm, self.disp_list):
-            dsp.bezel_mm = tuple(bz_mm)
-        self._derive_bezel_px()
-        bezels_ppi_norm = [dsp.ppi_norm_bezels for dsp in self.disp_list]
-        logger.info("update_bezels: %s", bezels_ppi_norm)
-        if not keep_layout:
-            self.compute_initial_preview_offsets()
-            return
-        # Offsets are cell origins and the bezel is part of the cell, so a hand-arranged
-        # layout keeps its gaps only if every display moves by the growth of the bezels
-        # before it in the same row or column.
-        shifts = []
-        for i, (left, top, _, _) in enumerate(old_cells):
-            dx = dy = 0.0
-            for j, (o_left, o_top, o_right, o_bottom) in enumerate(old_cells):
-                if j == i:
-                    continue
-                delta = (bezels_ppi_norm[j][0] - old_bezels[j][0], bezels_ppi_norm[j][1] - old_bezels[j][1])
-                if o_right <= left + 1 and self._spans_overlap(top, old_cells[i][3], o_top, o_bottom):
-                    dx += delta[0]
-                if o_bottom <= top + 1 and self._spans_overlap(left, old_cells[i][2], o_left, o_right):
-                    dy += delta[1]
-            shifts.append((dx, dy))
-        for (dx, dy), dsp in zip(shifts, self.disp_list):
-            dsp.ppi_norm_offset = (dsp.ppi_norm_offset[0] + dx, dsp.ppi_norm_offset[1] + dy)
-        # Corner-touching displays share no row or column, so nothing shifts them apart.
-        if not self._layout_is_valid():
-            self.compute_initial_preview_offsets()
-
-    def _cells(self):
-        """Each display with its bezel as (left, top, right, bottom) in ppi norm pixels."""
+    def ppi_norm_areas(self) -> list[DisplayArea]:
+        """The displays as they are placed on the density-normalised canvas."""
         return [
-            (
-                dsp.ppi_norm_offset[0],
-                dsp.ppi_norm_offset[1],
-                dsp.ppi_norm_offset[0] + dsp.ppi_norm_resolution[0] + dsp.ppi_norm_bezels[0],
-                dsp.ppi_norm_offset[1] + dsp.ppi_norm_resolution[1] + dsp.ppi_norm_bezels[1],
-            )
-            for dsp in self.disp_list
+            DisplayArea(size, offset, bezels)
+            for size, offset, bezels in zip(self.ppi_norm_resolutions(), self.ppi_norm_offsets, self.ppi_norm_bezels())
         ]
 
-    @staticmethod
-    def _spans_overlap(start_a, end_a, start_b, end_b):
-        return min(end_a, end_b) - max(start_a, start_b) > 1
+    def with_offsets(self, offsets: Sequence[Point]) -> Layout:
+        """The layout with the displays at ``offsets`` on the density-normalised canvas."""
+        return replace(self, ppi_norm_offsets=tuple((offset[0], offset[1]) for offset in offsets))
 
-    def _layout_is_valid(self):
-        """Whether every display has a position and no two displays overlap."""
-        if any(dsp.ppi_norm_offset is None for dsp in self.disp_list):
-            return False
+    def with_initial_offsets(self) -> Layout:
+        """The layout with its displays arranged from their positions on the desktop.
+
+        Displays that overlap horizontally form a column; columns are tiled left to right,
+        centred vertically on each other, and the displays of a column top to bottom,
+        centred horizontally. Column membership is decided in desktop pixels, but sizes are
+        the density-normalised ones, so the arrangement reflects the physical sizes. The
+        displays must be listed so that those of a column are together.
+        """
+        sizes = self.ppi_norm_resolutions()
+        bezels = self.ppi_norm_bezels()
+        cells = [(size[0] + bezel[0], size[1] + bezel[1]) for size, bezel in zip(sizes, bezels)]
+
+        columns: list[list[int]] = []
+        for index, display in enumerate(self.displays):
+            if columns and _fits_in_column(display, self.displays[columns[-1][-1]]):
+                columns[-1].append(index)
+            else:
+                columns.append([index])
+        for column in columns:
+            column.sort(key=lambda index: self.displays[index].digital_offset[1])
+
+        column_widths = [max(cells[index][0] for index in column) for column in columns]
+        column_heights = [sum(cells[index][1] for index in column) for column in columns]
+        tallest = max(column_heights)
+
+        offsets: dict[int, Point] = {}
+        left = 0
+        for column, width, height in zip(columns, column_widths, column_heights):
+            top = round((tallest - height) / 2)
+            current_top = 0
+            for index in column:
+                offsets[index] = (left + round((width - cells[index][0]) / 2), top + current_top)
+                current_top += sizes[index][1] + bezels[index][1]
+            left += width
+        return self.with_offsets([offsets[index] for index in range(len(self.displays))])
+
+    def with_bezels(self, bezels_mm: Sequence[Point]) -> Layout:
+        """The layout with new bezels, in millimetres; they can't be negative.
+
+        Offsets are cell origins and the bezel is part of the cell, so a hand-arranged
+        layout keeps its gaps only if every display moves by the growth of the bezels
+        before it in the same row or column. A layout that overlaps afterwards, such as
+        corner-touching displays that share no row or column, is arranged afresh.
+        """
+        if any(bezel < 0 for pair in bezels_mm for bezel in pair):
+            message = f"Bezel thicknesses can't be negative: {bezels_mm}"
+            raise ValueError(message)
+        changed = replace(self, bezels_mm=tuple((pair[0], pair[1]) for pair in bezels_mm))
+        if not self._is_valid():
+            return changed.with_initial_offsets()
+        old_cells = self._cells()
+        old_bezels = self.ppi_norm_bezels()
+        new_bezels = changed.ppi_norm_bezels()
+        shifted = []
+        for i, (left, top, right, bottom) in enumerate(old_cells):
+            dx = dy = 0.0
+            for j, (other_left, other_top, other_right, other_bottom) in enumerate(old_cells):
+                if j == i:
+                    continue
+                growth = (new_bezels[j][0] - old_bezels[j][0], new_bezels[j][1] - old_bezels[j][1])
+                if other_right <= left + 1 and _spans_overlap(top, bottom, other_top, other_bottom):
+                    dx += growth[0]
+                if other_bottom <= top + 1 and _spans_overlap(left, right, other_left, other_right):
+                    dy += growth[1]
+            shifted.append((self.ppi_norm_offsets[i][0] + dx, self.ppi_norm_offsets[i][1] + dy))
+        moved = changed.with_offsets(shifted)
+        return moved if moved._is_valid() else moved.with_initial_offsets()
+
+    def with_diagonals(self, diagonal_inches: Sequence[float]) -> Layout:
+        """The layout with the diagonal sizes the user entered; positions are kept."""
+        return replace(self, user_diagonal_inches=tuple(diagonal_inches))
+
+    def with_detected_sizes(self) -> Layout:
+        """The layout with the detected display sizes; positions are kept."""
+        return replace(self, user_diagonal_inches=None)
+
+    def with_use_perspective(self, use_perspective: bool) -> Layout:
+        return replace(self, use_perspective=use_perspective)
+
+    def with_perspectives_of(self, other: Layout) -> Layout:
+        """The layout with the perspective choice of ``other``: whether they are used, which
+        is the default, and the perspectives."""
+        return replace(
+            self,
+            use_perspective=other.use_perspective,
+            default_perspective=other.default_perspective,
+            perspectives=other.perspectives,
+        )
+
+    def with_perspective(self, perspective: Perspective, *, use_perspective: bool, is_default: bool) -> Layout:
+        """The layout with ``perspective`` added, or replacing the one of its name, and
+        whether it is the default."""
+        default = self.default_perspective
+        if is_default and default != perspective.name:
+            default = perspective.name
+        elif not is_default and default == perspective.name:
+            default = None
+        if self.perspective(perspective.name) is None:
+            perspectives = (*self.perspectives, perspective)
+        else:
+            perspectives = tuple(
+                perspective if existing.name == perspective.name else existing for existing in self.perspectives
+            )
+        return replace(self, use_perspective=use_perspective, default_perspective=default, perspectives=perspectives)
+
+    def without_perspective(self, name: str) -> Layout:
+        """The layout without the perspective ``name``, which also stops being the default."""
+        default = None if self.default_perspective == name else self.default_perspective
+        perspectives = tuple(perspective for perspective in self.perspectives if perspective.name != name)
+        return replace(self, default_perspective=default, perspectives=perspectives)
+
+    def perspective(self, name: str) -> Perspective | None:
+        return next((perspective for perspective in self.perspectives if perspective.name == name), None)
+
+    def perspective_names(self) -> list[str]:
+        return [perspective.name for perspective in self.perspectives]
+
+    def perspective_for(self, choice: PerspectiveChoice) -> Perspective | None:
+        """The perspective a profile's ``choice`` means for this layout, if there is one."""
+        match choice:
+            case Default():
+                name = self.default_perspective
+            case Disabled():
+                return None
+            case Named(chosen):
+                name = chosen
+            case _:
+                assert_never(choice)
+        return None if not name else self.perspective(name)
+
+    def _phys_sizes_mm(self) -> list[Point]:
+        if self.user_diagonal_inches is None:
+            return [display.detected_phys_size_mm for display in self.displays]
+        sizes = []
+        for display, diagonal in zip(self.displays, self.user_diagonal_inches):
+            width_inch = _width_inches(display.resolution, diagonal)
+            height_inch = display.resolution[1] / display.resolution[0] * width_inch
+            sizes.append((width_inch * MM_PER_INCH, height_inch * MM_PER_INCH))
+        return sizes
+
+    def _ppis(self) -> list[float]:
+        if self.user_diagonal_inches is None:
+            return [display.resolution[0] / display.detected_phys_size_mm[0] * MM_PER_INCH for display in self.displays]
+        return [
+            display.resolution[0] / _width_inches(display.resolution, diagonal)
+            for display, diagonal in zip(self.displays, self.user_diagonal_inches)
+        ]
+
+    def _cells(self) -> list[tuple[float, float, float, float]]:
+        """Each display with its bezel as (left, top, right, bottom) in ppi norm pixels."""
+        return [
+            (offset[0], offset[1], offset[0] + size[0] + bezel[0], offset[1] + size[1] + bezel[1])
+            for offset, size, bezel in zip(self.ppi_norm_offsets, self.ppi_norm_resolutions(), self.ppi_norm_bezels())
+        ]
+
+    def _is_valid(self) -> bool:
+        """Whether no two displays overlap."""
         cells = self._cells()
         return not any(
-            self._spans_overlap(a[0], a[2], b[0], b[2]) and self._spans_overlap(a[1], a[3], b[1], b[3])
+            _spans_overlap(a[0], a[2], b[0], b[2]) and _spans_overlap(a[1], a[3], b[1], b[3])
             for i, a in enumerate(cells)
             for b in cells[i + 1 :]
         )
 
-    def bezels_in_mm(self):
-        """Return list of bezel thicknesses in millimeters."""
-        return [(round(dsp.bezel_mm[0], 2), round(dsp.bezel_mm[1], 2)) for dsp in self.disp_list]
 
-    def bezels_in_px(self):
-        """Return list of bezel thicknesses in ppi norm px."""
-        bezels = []
-        for dsp in self.disp_list:
-            bezels.append((dsp.ppi_norm_bezels[0], dsp.ppi_norm_bezels[1]))
-        return bezels
-
-    def update_display_diags(self, diag_inches, reset_offsets=True):
-        """Overwrite detected display sizes with user input."""
-        if diag_inches == "auto":
-            self.use_user_diags = False
-            for dsp in self.disp_list:
-                dsp.phys_size_mm = dsp.detected_phys_size_mm
-                dsp.ppi = dsp.compute_ppi()
-            self.compute_ppinorm_resolutions()
-            self.compute_initial_preview_offsets()
-        else:
-            self.use_user_diags = True
-            for dsp, diag in zip(self.disp_list, diag_inches):
-                dsp.ppi_and_physsize_from_diagonal_inch(diag)
-            self.compute_ppinorm_resolutions()
-            if reset_offsets:
-                self.compute_initial_preview_offsets()
-
-    def save_system(self):
-        """Save the user's settings for these displays in display_systems.dat: where they
-        are placed (bezels included), the bezels, any diagonal sizes entered, and the
-        perspective choice. The layouts of other displays are kept."""
-        display_store.write_layout(self.config_dir, self.key, self._as_saved())
-
-    def save_perspective_choice(self):
-        """Save the perspectives in their <key>.persp file, and which one is the default
-        and whether they are used in display_systems.dat. The rest of the saved layout is
-        left as it is, whatever has been changed in this object since. A display_systems.dat
-        that can't be read changes nothing."""
-        saved = display_store.read_layout(self.config_dir, self.key)
-        if saved is None:
-            # Nothing is saved yet, so the layout in use is the one of a fresh system.
-            fresh = copy.deepcopy(self)
-            fresh.update_display_diags("auto")
-            fresh.update_bezels([(0.0, 0.0)] * len(fresh.disp_list))
-            fresh.compute_initial_preview_offsets()
-            saved = fresh._as_saved()
-        self.save_perspectives()
-        display_store.write_layout(
-            self.config_dir,
-            self.key,
-            replace(saved, use_perspective=self.use_perspective, default_perspective=self.default_perspective),
-        )
-
-    def _as_saved(self) -> display_store.SavedLayout:
-        diagonal_inches = [display.diagonal_size()[1] for display in self.disp_list] if self.use_user_diags else None
-        return display_store.SavedLayout(
-            ppi_norm_offsets=self.get_ppinorm_offsets(),
-            bezel_mms=self.bezels_in_mm(),
-            user_diagonal_inches=diagonal_inches,
-            use_perspective=self.use_perspective,
-            default_perspective=self.default_perspective,
-        )
-
-    def _apply(self, saved: display_store.SavedLayout):
-        """Apply a layout saved for these displays."""
-        # Diagonal overrides first: the bezels were saved in millimetres using the pixel
-        # densities they imply, so converting with the detected densities would make
-        # every save drift the bezels a little further.
-        if saved.user_diagonal_inches:
-            logger.info("Updating diagonal_inches")
-            self.update_display_diags(saved.user_diagonal_inches, reset_offsets=False)
-        if any(bez < 0 for bez_pair in saved.bezel_mms for bez in bez_pair):
-            logger.warning("Ignoring the saved bezels, which can't be negative: %s", saved.bezel_mms)
-        else:
-            self.update_bezels(saved.bezel_mms)
-        self.update_ppinorm_offsets(saved.ppi_norm_offsets)  # Bezels & user diagonals always included.
-        self.use_perspective = saved.use_perspective
-        self.default_perspective = saved.default_perspective
-
-    def update_perspectives(self, persp_name, use_persp_master, is_ds_def, viewer_data, swivels, tilts):
-        """Update perspective data.
-
-        Common data across all profiles:
-            - master toggle for perspective corrections
-
-        Data types in a profile are:
-            - index of central display
-            - viewer's position relative to the center of the central display
-                - lateral, vertical, depth
-            - swivel data as a list over each display
-                - axis in ["left", "right"]
-                    - points up
-                - angle
-                    - sign with right hand rule
-                - axis offset: (lateral, depth)
-            - tilt data as a list over each display
-                - angle (axis is the equator line of the display)
-                    - axis points left
-                    - sign with right hand rule
-                - axis offset: (vertical, depth)
-        """
-        centr_disp, viewer_pos = viewer_data
-        self.use_perspective = use_persp_master
-        if is_ds_def and self.default_perspective != persp_name:
-            self.default_perspective = persp_name
-        elif not is_ds_def and self.default_perspective == persp_name:
-            self.default_perspective = None
-        if persp_name is not None:
-            if persp_name not in self.perspective_dict:
-                self.perspective_dict[persp_name] = {}
-            self.perspective_dict[persp_name]["central_disp"] = centr_disp
-            self.perspective_dict[persp_name]["viewer_pos"] = viewer_pos
-            self.perspective_dict[persp_name]["swivels"] = swivels
-            self.perspective_dict[persp_name]["tilts"] = tilts
-        # The perspective dialog saves the layout once the user has accepted the settings.
-
-    def save_perspectives(self):
-        """Save all the perspectives of these displays, in their <key>.persp file."""
-        display_store.write_perspectives(self.config_dir, self.key, self.perspective_dict)
-
-    # End DisplaySystem
+def _width_inches(resolution: tuple[int, int], diagonal_inch: float) -> float:
+    height_to_width_ratio = resolution[1] / resolution[0]
+    return diagonal_inch / math.sqrt(1 + height_to_width_ratio**2)
 
 
-def get_display_data(*, max_attempts=3, retry_delay=0.25):
-    """
-    Detect the displays: a list of Display objects, one for each monitor, sorted by
-    their position on the desktop. Offsets are sanitized so that they are always
-    non-negative.
+def _fits_in_column(display: Display, last_in_column: Display) -> bool:
+    """Whether, in desktop pixels, the horizontal centre of ``display`` is within the last display of a column."""
+    left = display.digital_offset[0]
+    centre = (left + left + display.resolution[0]) / 2
+    column_left = last_in_column.digital_offset[0]
+    column_right = column_left + last_in_column.resolution[0]
+    return column_left < centre < column_right
 
-    Only on the main thread: on Linux, screeninfo detects displays with libXrandr, which
-    corrupts memory when two threads use it at once, and GTK uses it on the main thread.
-    """
-    # https://github.com/rr-/screeninfo
-    if threading.current_thread() is not threading.main_thread():
-        message = "Displays can only be detected on the main thread."
-        raise RuntimeError(message)
-    if max_attempts < 1:
-        message = "max_attempts must be at least 1"
-        raise ValueError(message)
-    if retry_delay < 0:
-        message = "retry_delay cannot be negative"
-        raise ValueError(message)
 
-    monitors = None
-    last_error = None
-    for attempt in range(1, max_attempts + 1):
-        try:
-            monitors = get_monitors()
-        except Exception as error:
-            last_error = error
-            logger.warning("Display detection attempt %d/%d failed: %s", attempt, max_attempts, error)
-        if monitors:
-            break
-        if attempt < max_attempts:
-            logger.info("Display detection returned no displays; retrying.")
-            time.sleep(retry_delay)
-    else:
-        error = DisplayDetectionError(max_attempts)
-        if last_error is not None:
-            raise error from last_error
-        raise error
-
-    display_list = []
-    for monitor in monitors:
-        display_list.append(Display(monitor))
-    # Check that there are no negative offsets and fix if any are found.
-    leftmost_offset = min([disp.digital_offset[0] for disp in display_list])
-    topmost_offset = min([disp.digital_offset[1] for disp in display_list])
-    if leftmost_offset < 0 or topmost_offset < 0:
-        for disp in display_list:
-            disp.translate_offset((leftmost_offset, topmost_offset))
-    # sort display list by digital offsets
-    display_list.sort(key=lambda x: x.digital_offset)
-
-    logger.info(
-        "get_display_data output: %s displays, resolutions %s, offsets %s",
-        len(display_list),
-        [disp.resolution for disp in display_list],
-        [disp.digital_offset for disp in display_list],
-    )
-    for disp in display_list:
-        logger.info(str(disp))
-    return display_list
+def _spans_overlap(start_a: float, end_a: float, start_b: float, end_b: float) -> bool:
+    return min(end_a, end_b) - max(start_a, start_b) > 1

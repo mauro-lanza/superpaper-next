@@ -11,7 +11,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from superpaper import displays
+from superpaper import display_detection
 from superpaper import session as session_module
 from superpaper.profile_id import ProfileId
 from superpaper.profiles import Profile
@@ -72,7 +72,7 @@ class Runtime:
         monkeypatch.setattr(session_module, "show_again", self.show_again)
         self.session = Session(paths, "layout 0", set_command=lambda: self.set_command, clock=self.clock)
 
-    def show(self, profile, files, paths, *, display_system, set_command="", profile_id=None, running=None):
+    def show(self, profile, files, paths, *, layout, set_command="", profile_id=None, running=None):
         if self.hold is not None:
             self.holding.set()
             assert self.hold.wait(10)
@@ -80,14 +80,14 @@ class Runtime:
             SimpleNamespace(
                 image=files[0],
                 profile_id=profile_id,
-                layout=display_system,
+                layout=layout,
                 set_command=set_command,
                 running=running,
             )
         )
         return self.problem
 
-    def show_again(self, stored, paths, *, display_system, set_command=""):
+    def show_again(self, stored, paths, *, layout, set_command=""):
         self.restored.append(stored.profile.name)
         return self.has_render
 
@@ -330,6 +330,22 @@ def test_a_renamed_profile_keeps_running_under_its_new_name(runtime):
     assert runtime.shown == ["A-1.png", "B-2.png"]
 
 
+@pytest.mark.parametrize(
+    ("saved_as", "new_name", "renames"),
+    [("A", "B", True), ("A", "A", False), ("Other", "B", False), (None, "B", False)],
+)
+def test_only_renaming_the_running_profile_is_a_rename_of_it(runtime, saved_as, new_name, renames):
+    runtime.session.activate(saved("A"))
+    runtime.settle()
+
+    profile_id = ProfileId(saved_as) if saved_as else None
+    assert runtime.session.renames_running(profile_id, new_name) is renames
+
+
+def test_nothing_is_renamed_when_no_profile_runs(runtime):
+    assert runtime.session.renames_running(ProfileId("A"), "B") is False
+
+
 def test_a_deleted_profile_stops(runtime):
     runtime.session.activate(saved("A"))
     runtime.session.toggle_pause()
@@ -387,7 +403,7 @@ def test_a_profile_without_a_complete_selection_is_left_alone(runtime, caplog):
 def test_drafts_are_shown_for_the_layout_given(runtime):
     outcomes = []
     runtime.session.activate(saved("A"))
-    runtime.session.apply_draft(Profile(name="unsaved"), ["draft.png"], display_system="the editor's layout")
+    runtime.session.apply_draft(Profile(name="unsaved"), ["draft.png"], layout="the editor's layout")
     runtime.session.apply_draft(Profile(name="align test"), ["test.png"], on_done=outcomes.append)
     runtime.settle()
 
@@ -456,13 +472,13 @@ def test_changes_use_the_settings_and_displays_current_at_the_time(runtime):
         ("first {image}", "layout 0"),
         ("second {image}", "layout 1"),
     ]
-    assert runtime.session.display_system == "layout 1"
+    assert runtime.session.layout == "layout 1"
 
 
 def test_the_worker_never_detects_displays(runtime, monkeypatch):
-    # Detecting displays off the main thread would corrupt memory (see get_display_data).
+    # Detecting displays off the main thread would corrupt memory (see detect_displays).
     detections = []
-    monkeypatch.setattr(displays, "get_display_data", lambda **options: detections.append(options) or [])
+    monkeypatch.setattr(display_detection, "detect_displays", lambda **options: detections.append(options) or [])
     runtime.session.restore(saved("A"))
     runtime.session.activate(saved("B"))
     runtime.session.next()

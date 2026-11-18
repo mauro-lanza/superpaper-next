@@ -9,6 +9,8 @@ import pytest
 from PIL import Image
 
 from superpaper import render
+from superpaper.canvas import canvas_size_with_bezels
+from superpaper.perspective import Named, Perspective, Swivel, SwivelAxis, Tilt
 from tests.conftest import monitor
 
 
@@ -73,12 +75,14 @@ def test_an_unusable_image_is_reported_by_its_path(tmp_path):
         assert str(path) in str(raised.value)
 
 
-def test_compute_canvas_with_vertical_offset():
-    assert render.compute_canvas([(1920, 1080), (1280, 1024)], [(0, 0), (1920, 200)]) == [3200, 1224]
-
-
 def test_working_canvas_includes_outer_bezels():
-    assert render.compute_working_canvas([(0, 0, 100, 80), (100, 10, 200, 90)], [(5, 4), (12, 8)]) == [212, 98]
+    assert canvas_size_with_bezels([(0, 0, 100, 80), (100, 10, 200, 90)], [(5, 4), (12, 8)]) == (212, 98)
+
+
+def test_the_canvas_of_displays_with_a_vertical_offset_holds_them_all(display_layout):
+    layout = display_layout([monitor(0, 0, 1920, 1080), monitor(1920, 200, 1280, 1024)])
+
+    assert layout.desktop_size() == (3200, 1224)
 
 
 def test_resize_to_fill_alignment():
@@ -173,11 +177,16 @@ ADVANCED_GOLDENS = {
     ],
 )
 def test_advanced_spanning_golden(tmp_path, display_layout, case, spangroups, perspective, manual_offsets):
-    layout = display_layout(SMALL_MONITORS, config_dir=tmp_path)
-    layout.update_bezels([(6.0, 0.0), (0.0, 0.0)])
+    layout = display_layout(SMALL_MONITORS, config_dir=tmp_path).with_bezels([(6.0, 0.0), (0.0, 0.0)])
     # The second screen swivels 25 degrees towards the viewer, who sits 200 px from the first.
-    swivels = [(0, 0.0, 0.0, 0.0), (1, -25.0, 0.0, 0.0)]
-    layout.update_perspectives("desk", True, False, (0, [0.0, 0.0, 200.0]), swivels, [(0.0, 0.0, 0.0)] * 2)
+    desk = Perspective(
+        "desk",
+        0,
+        (0.0, 0.0, 200.0),
+        (Swivel(SwivelAxis.NONE, 0.0, 0.0, 0.0), Swivel(SwivelAxis.LEFT, -25.0, 0.0, 0.0)),
+        (Tilt(0.0, 0.0, 0.0),) * 2,
+    )
+    layout = layout.with_perspective(desk, use_perspective=True, is_default=False)
     landscape = write_image(
         tmp_path / "landscape.png", (160, 90), lambda x, y: (x * 255 // 159, y * 255 // 89, (x + y) % 256)
     )
@@ -188,7 +197,7 @@ def test_advanced_spanning_golden(tmp_path, display_layout, case, spangroups, pe
         layout,
         manual_offsets=manual_offsets,
         spangroups=spangroups,
-        perspective=layout.get_persp_data(perspective) if perspective else None,
+        perspective=layout.perspective_for(Named(perspective)) if perspective else None,
     )
 
     assert image.size == (112, 36)

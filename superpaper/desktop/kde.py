@@ -8,6 +8,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from string import Template
+from typing import Any
 
 from superpaper.desktop.process import Result, run
 from superpaper.files import write_atomically
@@ -147,19 +148,15 @@ def wallpaper_script(images_by_desktop: Mapping[int, Sequence[str]], default_ima
 
 def activity_names() -> dict[str, str]:
     """The KDE activities, id to name; empty when they can't be listed."""
-    qdbus = _qdbus()
-    if not qdbus:
-        logger.error("Neither qdbus6 nor qdbus found")
+    listed = _list_activities()
+    if listed is None:
         return {}
-    listed = _activity_manager(qdbus, "ListActivities")
-    if not listed.ok:
-        return {}
+    qdbus, activity_ids = listed
     names = {}
-    for activity_id in listed.output.strip().split("\n"):
-        if activity_id:
-            named = _activity_manager(qdbus, "ActivityName", activity_id)
-            if named.ok:
-                names[activity_id] = named.output.strip()
+    for activity_id in activity_ids:
+        named = _activity_manager(qdbus, "ActivityName", activity_id)
+        if named.ok:
+            names[activity_id] = named.output.strip()
     logger.info("KDE Activities found: %s", names)
     return names
 
@@ -172,14 +169,10 @@ def desktop_activities(state_dir: Path) -> dict[int, str]:
     other activities' desktops are taken to follow each other, one per screen.
     """
     desktop_to_activity = _load_mapping(state_dir)
-    qdbus = _qdbus()
-    if not qdbus:
-        logger.error("Neither qdbus6 nor qdbus found")
+    listed = _list_activities()
+    if listed is None:
         return desktop_to_activity
-    listed = _activity_manager(qdbus, "ListActivities")
-    if not listed.ok:
-        return desktop_to_activity
-    activity_ids = [line.strip() for line in listed.output.strip().split("\n") if line.strip()]
+    qdbus, activity_ids = listed
     current = _activity_manager(qdbus, "CurrentActivity")
     current_activity_id = current.output.strip() if current.ok else None
     try:
@@ -248,6 +241,18 @@ def _evaluate(script: str) -> Result:
     return Result()
 
 
+def _list_activities() -> tuple[str, list[str]] | None:
+    """The qdbus command and the ids of the KDE activities; None when they can't be listed."""
+    qdbus = _qdbus()
+    if not qdbus:
+        logger.error("Neither qdbus6 nor qdbus found")
+        return None
+    listed = _activity_manager(qdbus, "ListActivities")
+    if not listed.ok:
+        return None
+    return qdbus, [line.strip() for line in listed.output.splitlines() if line.strip()]
+
+
 def _qdbus() -> str | None:
     """The available qdbus command (qdbus6 for Plasma 6, qdbus otherwise)."""
     return next((command for command in ("qdbus6", "qdbus") if shutil.which(command)), None)
@@ -261,7 +266,7 @@ def _activity_manager(qdbus: str, method: str, *arguments: str) -> Result:
     )
 
 
-def _plasma_shell():
+def _plasma_shell() -> Any:
     """Return the PlasmaShell D-Bus interface that evaluates wallpaper scripts.
 
     dbus-python is optional and builds from source, so it is imported here, at the
@@ -269,7 +274,7 @@ def _plasma_shell():
     fails, with an explanation.
     """
     try:
-        import dbus  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-import]
+        import dbus  # ty:ignore[unresolved-import]
     except ImportError as error:
         message = (
             "Setting the wallpaper on KDE Plasma needs dbus-python. Install your distribution's "

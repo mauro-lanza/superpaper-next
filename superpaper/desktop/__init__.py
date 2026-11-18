@@ -1,7 +1,7 @@
 """Hand a finished wallpaper to the desktop.
 
-desktop/ is the only place that runs host programs or talks to D-Bus, AppKit or win32.
-What goes wrong comes back as a Result, never as an exception, an exit or a dialog.
+desktop/ is the only place that runs host programs or talks to D-Bus, AppKit, the registry
+or win32. What goes wrong comes back as a Result, never as an exception, an exit or a dialog.
 """
 
 import os
@@ -11,6 +11,7 @@ from pathlib import Path
 
 from superpaper.desktop import kde, linux
 from superpaper.desktop.process import Result, run
+from superpaper.desktop.wallpaper import Wallpaper
 
 
 def takes_pieces(set_command: str) -> bool:
@@ -20,6 +21,11 @@ def takes_pieces(set_command: str) -> bool:
     return sys.platform == "linux" and linux.setter(set_command) == "kde"
 
 
+def keeps_wallpaper() -> bool:
+    """Whether the desktop shows the last wallpaper again after a restart by itself."""
+    return sys.platform == "win32"
+
+
 def setter_problem(set_command: str) -> str | None:
     """Why Superpaper can't set the wallpaper on this desktop, if it can't."""
     if sys.platform == "linux" and linux.setter(set_command) == "unknown":
@@ -27,22 +33,36 @@ def setter_problem(set_command: str) -> str | None:
     return None
 
 
-def set_wallpaper(image: str, pieces: Sequence[str] | None, *, set_command: str, activities: kde.Activities) -> Result:
-    """Show ``image`` as the wallpaper, or ``pieces``, one image per display in Superpaper's
-    display order, on desktops that take those (see takes_pieces).
+def set_spanmode(set_command: str) -> Result:
+    """Make the desktop span one wallpaper image across all displays, where that is a setting.
 
     ``set_command`` is the user's own setter command, if any (Linux only).
     """
     if sys.platform == "win32":
         from superpaper.desktop import windows
 
-        return windows.set_wallpaper(image)
+        return windows.set_spanmode()
+    if sys.platform == "linux":
+        return linux.set_spanmode(set_command)
+    return Result()
+
+
+def set_wallpaper(wallpaper: Wallpaper, *, set_command: str, activities: kde.Activities) -> Result:
+    """Show ``wallpaper``: its pieces, one image per display, on desktops that take those
+    (see takes_pieces), else its image.
+
+    ``set_command`` is the user's own setter command, if any (Linux only).
+    """
+    if sys.platform == "win32":
+        from superpaper.desktop import windows
+
+        return windows.set_wallpaper(wallpaper.image)
     if sys.platform == "darwin":
         from superpaper.desktop import macos
 
-        return macos.set_wallpaper(pieces or [])
+        return macos.set_wallpaper(wallpaper)
     if sys.platform == "linux":
-        return linux.set_wallpaper(image, pieces, set_command=set_command, activities=activities)
+        return linux.set_wallpaper(wallpaper, set_command=set_command, activities=activities)
     return Result(f"Unknown platform: {sys.platform}")
 
 
@@ -56,7 +76,7 @@ def open_folder(folder: Path) -> Result:
     """Show ``folder`` in the desktop's file manager."""
     if sys.platform == "win32":
         try:
-            os.startfile(folder)  # pyright: ignore[reportAttributeAccessIssue]
+            os.startfile(folder)
         except OSError as error:
             return Result(f"Could not open {folder}: {error}")
         return Result()
