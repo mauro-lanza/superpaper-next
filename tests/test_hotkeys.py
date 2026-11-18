@@ -4,14 +4,15 @@ system_hotkey is replaced by a recorder that refuses keys it doesn't know, as th
 library does; pressing keys calls what they were registered with.
 """
 
+import sys
 from types import SimpleNamespace
 
 import pytest
 
+from superpaper.desktop import hotkeys as hotkeys_module
 from superpaper.profiles.profile_file import Profile
 from superpaper.profiles.profile_id import ProfileId
 from superpaper.settings import Settings
-from tests.conftest import import_headless, module_stub, wx_stub
 
 KNOWN_KEYS = {"control", "super", "shift", "alt", "w", "p", "h", "x", "y"}
 
@@ -57,18 +58,16 @@ class Recorder:
 @pytest.fixture
 def setup(monkeypatch):
     recorder = Recorder()
-    stubs = {
-        **wx_stub(),
-        **module_stub("system_hotkey", SystemHotkey=FakeSystemHotkey),
-        **module_stub("superpaper.ui.message", show_message_dialog=lambda message, kind: recorder("dialog")(message)),
-    }
-    module, forget = import_headless(monkeypatch, "hotkeys", stubs)
-    monkeypatch.setattr(module, "running_kde", lambda: False)
-    hotkeys = module.Hotkeys(
-        next_wallpaper=recorder("next"), pause=recorder("pause"), start_profile=recorder("start profile")
+    monkeypatch.setitem(sys.modules, "system_hotkey", SimpleNamespace(SystemHotkey=FakeSystemHotkey))
+    monkeypatch.setattr(hotkeys_module, "running_kde", lambda: False)
+    hotkeys = hotkeys_module.Hotkeys(
+        next_wallpaper=recorder("next"),
+        pause=recorder("pause"),
+        start_profile=recorder("start profile"),
+        call_soon=lambda action: action(),
+        report=lambda message: recorder("dialog")(message),
     )
-    yield SimpleNamespace(module=module, hotkeys=hotkeys, events=recorder.events)
-    forget()
+    return SimpleNamespace(module=hotkeys_module, hotkeys=hotkeys, events=recorder.events)
 
 
 def saved(name, hotkey):

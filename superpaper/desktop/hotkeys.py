@@ -1,15 +1,13 @@
 """System-wide hotkeys: the next wallpaper, pausing the slideshow, and each profile's own.
 
 system_hotkey calls back on a listener thread of its own; every action is handed to the
-wx main loop before it runs.
+GUI's main loop with ``call_soon`` before it runs.
 """
 
 import logging
-
-import wx  # ty:ignore[unresolved-import]
+from collections.abc import Callable
 
 from superpaper.desktop.linux import running_kde
-from superpaper.ui.message import show_message_dialog
 
 logger = logging.getLogger(__name__)
 
@@ -21,14 +19,24 @@ class Hotkeys:
     """The system-wide hotkeys, and what each key combination is bound to: the next
     wallpaper, pause, or a saved profile, by its ProfileId.
 
-    ``next_wallpaper()``, ``pause()`` and ``start_profile(profile_id)`` are run on the wx
-    main loop when their keys are pressed. Raises ImportError if system_hotkey isn't
-    installed.
+    ``next_wallpaper()``, ``pause()`` and ``start_profile(profile_id)`` are run through
+    ``call_soon`` when their keys are pressed; ``report(message)`` shows the user a
+    registration problem. Raises ImportError if system_hotkey isn't installed.
     """
 
-    def __init__(self, *, next_wallpaper, pause, start_profile):
+    def __init__(
+        self,
+        *,
+        next_wallpaper,
+        pause,
+        start_profile,
+        call_soon: Callable[[Callable[[], None]], None],
+        report: Callable[[str], None],
+    ):
         from system_hotkey import SystemHotkey  # ty:ignore[unresolved-import]
 
+        self._call_soon = call_soon
+        self._show = report
         self._actions = {NEXT_WALLPAPER: next_wallpaper, PAUSE: pause}
         self._start_profile = start_profile
         self._general = SystemHotkey(check_queue_interval=0.05)
@@ -44,12 +52,12 @@ class Hotkeys:
             if keys == bound or keys is None:
                 continue
             if keys in self._owners:
-                _report_taken(keys, action)
+                self._report_taken(keys, action)
                 continue
             try:
-                self._general.register(keys, callback=lambda _event, run=self._actions[action]: wx.CallAfter(run))
+                self._general.register(keys, callback=lambda _event, run=self._actions[action]: self._call_soon(run))
             except Exception:
-                _report_refused(keys)
+                self._report_refused(keys)
                 continue
             self._owners[keys] = action
             if bound is not None:
@@ -84,14 +92,14 @@ class Hotkeys:
         if owner == stored.profile_id:
             return
         if owner is not None:
-            _report_taken(keys, f"profile: '{stored.profile.name}'")
+            self._report_taken(keys, f"profile: '{stored.profile.name}'")
             return
         try:
             # Bind the identity, not the record: a profile edited later must start with its
             # current settings.
             self._profiles.register(keys, stored.profile_id, overwrite=False)
         except Exception:
-            _report_refused(keys)
+            self._report_refused(keys)
             return
         self._owners[keys] = stored.profile_id
 
@@ -106,22 +114,21 @@ class Hotkeys:
         """system_hotkey's consumer: start the profile bound to ``hotkey``. Called on its
         listener thread with the arguments the keys were registered with."""
         profile_id = bound_args[0][0]
-        wx.CallAfter(self._start_profile, profile_id)
+        self._call_soon(lambda: self._start_profile(profile_id))
 
+    def _report_taken(self, keys, wanted_for):
+        self._report(
+            f"Could not register hotkey: '{'+'.join(keys)}' for {wanted_for}.\nIt is already registered for another action."
+        )
 
-def _report_taken(keys, wanted_for):
-    _report(
-        f"Could not register hotkey: '{'+'.join(keys)}' for {wanted_for}.\nIt is already registered for another action."
-    )
+    def _report_refused(self, keys):
+        self._report(
+            f"Error: could not register hotkey {'+'.join(keys)}. Check that it is formatted properly and valid keys."
+        )
 
-
-def _report_refused(keys):
-    _report(f"Error: could not register hotkey {'+'.join(keys)}. Check that it is formatted properly and valid keys.")
-
-
-def _report(message):
-    logger.warning("%s", message)
-    # Hotkey errors have only been logged on KDE Plasma since per-activity wallpapers
-    # came in; elsewhere they are shown too.
-    if not running_kde():
-        show_message_dialog(message, "Error")
+    def _report(self, message):
+        logger.warning("%s", message)
+        # Hotkey errors have only been logged on KDE Plasma since per-activity wallpapers
+        # came in; elsewhere they are shown too.
+        if not running_kde():
+            self._show(message)

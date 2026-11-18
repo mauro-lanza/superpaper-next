@@ -16,10 +16,13 @@ HEADLESS_MODULES = (
     "superpaper.__main__",
     "superpaper.__version__",
     "superpaper.cli",
+    "superpaper.controller",
     "superpaper.desktop",
+    "superpaper.desktop.hotkeys",
     "superpaper.desktop.kde",
     "superpaper.desktop.linux",
     "superpaper.desktop.process",
+    "superpaper.desktop.sni_tray",
     "superpaper.desktop.wallpaper",
     "superpaper.files",
     "superpaper.geometry",
@@ -39,6 +42,7 @@ HEADLESS_MODULES = (
     "superpaper.rendering.render",
     "superpaper.session",
     "superpaper.settings",
+    "superpaper.tray_menu",
     "superpaper.user_input",
 )
 

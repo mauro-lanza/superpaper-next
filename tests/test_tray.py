@@ -9,7 +9,7 @@ import pytest
 from superpaper.desktop.process import Result
 from superpaper.profiles.profile_file import Profile
 from superpaper.profiles.profile_id import ProfileId
-from superpaper.ui.tray_menu import Check, Item, Separator, Submenu
+from superpaper.tray_menu import Check, Item, Separator, Submenu
 
 CONFIG_DIR = Path("/config")
 

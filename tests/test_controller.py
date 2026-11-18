@@ -1,8 +1,8 @@
 """The tray application: what starting, reloading and quitting do, what runs at startup,
 and how the session, the saved profiles, the hotkeys and the settings are kept together.
 
-The windows, the tray icon and the hotkeys are stand-ins; the store is a fake unless a
-test is about the profiles directory itself.
+The UI (windows, dialogs, tray icon) and the hotkeys are stand-ins; the store is a fake
+unless a test is about the profiles directory itself.
 """
 
 import configparser
@@ -12,6 +12,8 @@ from unittest.mock import Mock
 
 import pytest
 
+from superpaper import controller
+from superpaper.controller import Shell
 from superpaper.geometry import display_detection
 from superpaper.paths import AppPaths
 from superpaper.profiles.profile_file import Profile
@@ -78,9 +80,23 @@ class FakeSession:
         return lambda *args, **kwargs: self.requests.append((request, *args, *kwargs.values()))
 
 
-def application(app, running=None, profiles=(), active=None, settings=None):
-    """A running application, without its windows and icon."""
-    superpaper = object.__new__(app.Superpaper)
+def application(running=None, profiles=(), active=None, settings=None, **shell_actions):
+    """A running application, without its windows and icon. ``shell_actions`` replace the
+    UI actions, which otherwise record into ``superpaper.ui_events`` and answer yes."""
+    superpaper = object.__new__(controller.Superpaper)
+    events = []
+    superpaper.ui_events = events
+    actions = {
+        "notify": lambda message, title: events.append(("notify", message, title)),
+        "confirm": lambda message: events.append(("confirm", message)) or True,
+        "call_soon": lambda action: events.append(("call_soon", action)),
+        "open_editor": lambda app: events.append("editor"),
+        "open_settings": lambda app: events.append("settings"),
+        "open_help": lambda app: events.append("help"),
+        "make_tray": lambda app: None,
+        "close": lambda: superpaper.session.requests.append(("closed",)),
+    }
+    superpaper._shell = Shell(**{**actions, **shell_actions})
     superpaper.paths = PATHS
     superpaper.settings_path = PATHS.config / "general_settings"
     superpaper.settings = settings or Settings()
@@ -90,7 +106,6 @@ def application(app, running=None, profiles=(), active=None, settings=None):
     superpaper.tray = SimpleNamespace(
         clickable=True, remove=lambda: superpaper.session.requests.append(("tray removed",))
     )
-    superpaper._frame = SimpleNamespace(Close=lambda: superpaper.session.requests.append(("frame closed",)))
     return superpaper
 
 
@@ -99,8 +114,8 @@ def profile(name):
     return SimpleNamespace(profile=Profile(name=name, slideshow=True, delay=30.0), profile_id=ProfileId(name))
 
 
-def test_a_profile_starts_on_freshly_detected_displays(headless_app_module, detection):
-    superpaper = application(headless_app_module)
+def test_a_profile_starts_on_freshly_detected_displays(detection):
+    superpaper = application()
     work = profile("Work")
 
     superpaper.start_profile(work)
@@ -115,8 +130,8 @@ def test_a_profile_starts_on_freshly_detected_displays(headless_app_module, dete
     "error",
     [display_detection.DisplayDetectionError(3), configparser.Error("an unreadable display_systems.dat")],
 )
-def test_a_failed_display_detection_keeps_the_previous_layout(headless_app_module, detection, caplog, error):
-    superpaper = application(headless_app_module)
+def test_a_failed_display_detection_keeps_the_previous_layout(detection, caplog, error):
+    superpaper = application()
     detection.error = error
 
     superpaper.refresh_displays()
@@ -125,9 +140,9 @@ def test_a_failed_display_detection_keeps_the_previous_layout(headless_app_modul
     assert "Keeping the previous display layout" in caplog.text
 
 
-def test_a_profile_hotkey_starts_the_currently_loaded_profile(headless_app_module):
+def test_a_profile_hotkey_starts_the_currently_loaded_profile():
     current = profile("Work")
-    superpaper = application(headless_app_module, profiles=[current])
+    superpaper = application(profiles=[current])
 
     # The hotkey is bound to the profile's identity; it starts the record loaded now.
     superpaper.start_profile_by_id(ProfileId("Work"))
@@ -135,46 +150,43 @@ def test_a_profile_hotkey_starts_the_currently_loaded_profile(headless_app_modul
     assert superpaper.session.requests == [("use_displays", FRESH), ("activate", current)]
 
 
-def test_a_hotkey_for_a_deleted_profile_does_nothing(headless_app_module):
-    superpaper = application(headless_app_module)
+def test_a_hotkey_for_a_deleted_profile_does_nothing():
+    superpaper = application()
 
     superpaper.start_profile_by_id(ProfileId("Deleted"))
 
     assert superpaper.session.requests == []
 
 
-def test_the_windows_get_what_they_work_with(headless_app_module, monkeypatch, tmp_path):
-    app = headless_app_module
+def test_the_windows_are_opened_by_the_ui_with_the_application():
     opened = []
-    monkeypatch.setattr(app, "ConfigFrame", lambda *args, **kwargs: opened.append(("editor", args, kwargs)))
-    monkeypatch.setattr(app, "SettingsFrame", lambda *args, **kwargs: opened.append(("settings", args, kwargs)))
-    superpaper = application(app)
-    superpaper.settings_path = tmp_path / "general_settings"
+    superpaper = application(
+        open_editor=lambda app: opened.append(("editor", app)),
+        open_settings=lambda app: opened.append(("settings", app)),
+    )
 
     superpaper.open_editor()
     superpaper.open_settings()
 
-    (_, editor_args, editor_kwargs), settings_window = opened
-    get_settings = editor_args[1]
-    assert editor_args == (PATHS, get_settings, superpaper.store, superpaper.session)
-    assert editor_kwargs == {
-        "update_settings": superpaper.update_settings,
-        "refresh_displays": superpaper.refresh_displays,
-        "rebind_hotkey": superpaper.rebind_hotkey,
-    }
-    assert settings_window == ("settings", (superpaper.settings,), {"save_settings": superpaper.apply_settings})
-    # A setting saved from the settings window after the editor opened is what the editor sees.
-    superpaper.apply_settings(warn_large_img=False)
-    assert get_settings() is superpaper.settings
-    assert get_settings().warn_large_img is False
+    assert opened == [("editor", superpaper), ("settings", superpaper)]
 
 
-def test_quitting_stops_the_session_before_the_icon_goes(headless_app_module):
-    superpaper = application(headless_app_module)
+def test_an_editor_that_fails_to_open_is_logged(caplog):
+    def broken(app):
+        message = "no window"
+        raise RuntimeError(message)
+
+    application(open_editor=broken).open_editor()
+
+    assert "configure_wallpapers error: no window" in caplog.text
+
+
+def test_quitting_stops_the_session_before_the_icon_goes():
+    superpaper = application()
 
     superpaper.quit()
 
-    assert superpaper.session.requests == [("shutdown",), ("tray removed",), ("frame closed",)]
+    assert superpaper.session.requests == [("shutdown",), ("tray removed",), ("closed",)]
 
 
 @pytest.mark.parametrize(
@@ -187,16 +199,15 @@ def test_quitting_stops_the_session_before_the_icon_goes(headless_app_module):
         (False, False, ["editor later"]),
     ],
 )
-def test_the_help_and_the_configuration_open_at_start_when_they_should(
-    headless_app_module, monkeypatch, show_help, clickable, expected
-):
-    app = headless_app_module
+def test_the_help_and_the_configuration_open_at_start_when_they_should(monkeypatch, show_help, clickable, expected):
     opened = []
-    monkeypatch.setattr(app, "ConfigFrame", lambda *args, **kwargs: opened.append("editor"))
-    monkeypatch.setattr(app, "HelpFrame", lambda get_settings, update_settings: opened.append("help"))
-    monkeypatch.setattr(app.wx, "CallAfter", lambda function, *args: opened.append("editor later"))
-    monkeypatch.setattr(app.desktop, "setter_problem", lambda set_command: None)
-    superpaper = application(app, settings=Settings(show_help=show_help))
+    superpaper = application(
+        settings=Settings(show_help=show_help),
+        open_editor=lambda app: opened.append("editor"),
+        open_help=lambda app: opened.append("help"),
+        call_soon=lambda action: opened.append("editor later") if action == superpaper.open_editor else None,
+    )
+    monkeypatch.setattr(controller.desktop, "setter_problem", lambda set_command: None)
     superpaper.tray.clickable = clickable
     superpaper.session.layout = FRESH
 
@@ -205,31 +216,33 @@ def test_the_help_and_the_configuration_open_at_start_when_they_should(
     assert opened == expected
 
 
-def test_problems_with_this_desktop_are_said_once_at_start(headless_app_module, monkeypatch):
-    app = headless_app_module
+def test_problems_with_this_desktop_are_said_once_at_start(monkeypatch):
     shown = []
-    monkeypatch.setattr(app, "show_message_dialog", lambda message, *args: shown.append(message))
-    monkeypatch.setattr(app.desktop, "setter_problem", lambda set_command: "no setter here")
-    superpaper = application(app, settings=Settings(show_help=False))
+    superpaper = application(
+        settings=Settings(show_help=False),
+        notify=lambda message, title: shown.append((message, title)),
+        call_soon=lambda action: action(),
+    )
+    monkeypatch.setattr(controller.desktop, "setter_problem", lambda set_command: "no setter here")
     superpaper.session.layout = SimpleNamespace(size_hint=lambda: "enter the sizes")
 
     superpaper._show_at_start()
 
-    assert shown == ["no setter here", "enter the sizes"]
+    assert shown == [("no setter here", "Error"), ("enter the sizes", "Info")]
 
 
-def test_a_normal_start_carries_on_with_the_last_profile(headless_app_module):
+def test_a_normal_start_carries_on_with_the_last_profile():
     work = profile("Work")
-    superpaper = application(headless_app_module, profiles=[work], active=work)
+    superpaper = application(profiles=[work], active=work)
 
     superpaper._run_at_startup(None)
 
     assert superpaper.session.requests == [("restore", work)]
 
 
-def test_a_start_with_a_profile_runs_it(headless_app_module):
+def test_a_start_with_a_profile_runs_it():
     work, home = profile("Work"), profile("Home")
-    superpaper = application(headless_app_module, profiles=[work, home], active=work)
+    superpaper = application(profiles=[work, home], active=work)
 
     superpaper._run_at_startup(ProfileId("Home"))
 
@@ -237,18 +250,17 @@ def test_a_start_with_a_profile_runs_it(headless_app_module):
 
 
 @pytest.mark.parametrize("startup", [None, ProfileId("Missing")])
-def test_a_start_with_nothing_to_run_runs_nothing(headless_app_module, startup):
-    superpaper = application(headless_app_module, profiles=[profile("Work")])
+def test_a_start_with_nothing_to_run_runs_nothing(startup):
+    superpaper = application(profiles=[profile("Work")])
 
     superpaper._run_at_startup(startup)
 
     assert superpaper.session.requests == []
 
 
-def test_startup_outside_path_cannot_select_by_path(headless_app_module):
-    app = headless_app_module
+def test_startup_outside_path_cannot_select_by_path():
     managed = profile("Work")
-    superpaper = application(app, profiles=[managed])
+    superpaper = application(profiles=[managed])
 
     startup_id = ProfileId.from_path("/outside/not-the-managed-file/Work.profile")
 
@@ -258,10 +270,10 @@ def test_startup_outside_path_cannot_select_by_path(headless_app_module):
 
 
 @pytest.mark.parametrize("still_saved", [True, False])
-def test_reloading_tells_the_session_what_became_of_the_running_profile(headless_app_module, still_saved):
+def test_reloading_tells_the_session_what_became_of_the_running_profile(still_saved):
     running = profile("Work")
     edited_elsewhere = profile("Work")
-    superpaper = application(headless_app_module, running=running, profiles=[running])
+    superpaper = application(running=running, profiles=[running])
     superpaper.store.on_disk = [edited_elsewhere] if still_saved else [profile("Other")]
 
     superpaper.reload_profiles()
@@ -269,8 +281,8 @@ def test_reloading_tells_the_session_what_became_of_the_running_profile(headless
     assert superpaper.session.requests == [("update", ProfileId("Work"), edited_elsewhere if still_saved else None)]
 
 
-def test_reloading_while_nothing_runs_tells_the_session_nothing(headless_app_module):
-    superpaper = application(headless_app_module, profiles=[profile("Work")])
+def test_reloading_while_nothing_runs_tells_the_session_nothing():
+    superpaper = application(profiles=[profile("Work")])
 
     superpaper.reload_profiles()
 
@@ -288,16 +300,10 @@ def broken_profile(tmp_path):
 
 
 @pytest.mark.parametrize("answer", [True, False])
-def test_a_profile_that_cant_be_loaded_is_deleted_if_the_user_agrees(
-    headless_app_module, monkeypatch, tmp_path, answer
-):
-    app = headless_app_module
+def test_a_profile_that_cant_be_loaded_is_deleted_if_the_user_agrees(tmp_path, answer):
     paths, broken = broken_profile(tmp_path)
     questions = []
-    monkeypatch.setattr(
-        app, "show_message_dialog", lambda message, *_args, **_kwargs: questions.append(message) or answer
-    )
-    superpaper = application(app)
+    superpaper = application(confirm=lambda message: questions.append(message) or answer)
     superpaper.store = ProfileStore(paths)
 
     superpaper.reload_profiles()
@@ -308,17 +314,15 @@ def test_a_profile_that_cant_be_loaded_is_deleted_if_the_user_agrees(
     assert [stored.profile.name for stored in superpaper.store.profiles] == ["fine"]
 
 
-def test_a_profile_fixed_while_the_question_is_open_is_kept(headless_app_module, monkeypatch, tmp_path):
-    app = headless_app_module
+def test_a_profile_fixed_while_the_question_is_open_is_kept(tmp_path):
     paths, broken = broken_profile(tmp_path)
     fixed = "name=broken\ndelay=60\n"
 
-    def fix_then_agree(*_args, **_kwargs):
+    def fix_then_agree(message):
         broken.write_text(fixed, encoding="utf-8")
         return True
 
-    monkeypatch.setattr(app, "show_message_dialog", fix_then_agree)
-    superpaper = application(app)
+    superpaper = application(confirm=fix_then_agree)
     superpaper.store = ProfileStore(paths)
 
     superpaper.reload_profiles()
@@ -326,17 +330,13 @@ def test_a_profile_fixed_while_the_question_is_open_is_kept(headless_app_module,
     assert broken.read_text(encoding="utf-8") == fixed
 
 
-def test_only_profiles_that_cant_be_read_as_profiles_are_offered_for_deletion(
-    headless_app_module, monkeypatch, tmp_path
-):
-    app = headless_app_module
+def test_only_profiles_that_cant_be_read_as_profiles_are_offered_for_deletion(tmp_path):
     paths = AppPaths(config=tmp_path, profiles=tmp_path / "profiles", cache=tmp_path / "cache")
     paths.profiles.mkdir()
     (paths.profiles / "cli.profile").write_text("name=cli\n", encoding="utf-8")
     (paths.profiles / "gone.profile").symlink_to(tmp_path / "missing")
     (paths.profiles / "folder.profile").mkdir()
-    monkeypatch.setattr(app, "show_message_dialog", lambda *_args, **_kwargs: pytest.fail("asked to delete"))
-    superpaper = application(app)
+    superpaper = application(confirm=lambda message: pytest.fail("asked to delete"))
     superpaper.store = ProfileStore(paths)
 
     superpaper.reload_profiles()
@@ -345,8 +345,8 @@ def test_only_profiles_that_cant_be_read_as_profiles_are_offered_for_deletion(
     assert sorted(path.name for path in paths.profiles.iterdir()) == ["cli.profile", "folder.profile", "gone.profile"]
 
 
-def test_saved_profiles_take_their_hotkeys_along_while_hotkeys_are_on(headless_app_module):
-    superpaper = application(headless_app_module)
+def test_saved_profiles_take_their_hotkeys_along_while_hotkeys_are_on():
+    superpaper = application()
     before, after = profile("Work"), profile("Office")
 
     superpaper.rebind_hotkey(before, after)  # hotkeys off: nothing to do
@@ -357,11 +357,9 @@ def test_saved_profiles_take_their_hotkeys_along_while_hotkeys_are_on(headless_a
 
 
 @pytest.mark.parametrize(("use_hotkeys", "registered"), [(True, True), (False, False)])
-def test_saved_general_settings_apply_from_now_on(headless_app_module, monkeypatch, tmp_path, use_hotkeys, registered):
-    app = headless_app_module
+def test_saved_general_settings_apply_from_now_on(tmp_path, use_hotkeys, registered):
     shown = []
-    monkeypatch.setattr(app, "show_message_dialog", lambda message, kind: shown.append(message))
-    superpaper = application(app)
+    superpaper = application(notify=lambda message, title: shown.append((message, title)))
     superpaper.settings_path = tmp_path / "general_settings"
     superpaper.hotkeys = Mock()
     saved = Settings(use_hotkeys=use_hotkeys, logging=True, set_command="setter {image}")
@@ -372,11 +370,11 @@ def test_saved_general_settings_apply_from_now_on(headless_app_module, monkeypat
     assert superpaper.hotkeys.register_general.called is registered
     assert superpaper.settings == saved
     assert read_settings(superpaper.settings_path, "linux") == saved
-    assert shown == ["Logging is enabled after an application restart."]
+    assert shown == [("Logging is enabled after an application restart.", "Info")]
 
 
-def test_a_dialog_setting_is_written_and_kept_for_the_next_window(headless_app_module, tmp_path):
-    superpaper = application(headless_app_module, settings=Settings(show_help=True))
+def test_a_dialog_setting_is_written_and_kept_for_the_next_window(tmp_path):
+    superpaper = application(settings=Settings(show_help=True))
     superpaper.settings_path = tmp_path / "general_settings"
 
     superpaper.update_settings(browse_default_dir="/pictures")
@@ -387,8 +385,7 @@ def test_a_dialog_setting_is_written_and_kept_for_the_next_window(headless_app_m
     assert read_settings(superpaper.settings_path, "linux") == expected
 
 
-def test_hotkeys_are_bound_at_start_when_they_are_on(headless_app_module, monkeypatch):
-    app = headless_app_module
+def test_hotkeys_are_bound_at_start_when_they_are_on(monkeypatch):
     made = []
 
     class RecordingHotkeys:
@@ -402,25 +399,45 @@ def test_hotkeys_are_bound_at_start_when_they_are_on(headless_app_module, monkey
         def register_profiles(self, profiles):
             self.registered.append(("profiles", profiles))
 
-    monkeypatch.setattr(app, "Hotkeys", RecordingHotkeys)
+    monkeypatch.setattr(controller, "Hotkeys", RecordingHotkeys)
     work = profile("Work")
     settings = Settings(use_hotkeys=True)
-    superpaper = application(app, profiles=[work], settings=settings)
+    superpaper = application(profiles=[work], settings=settings)
 
     hotkeys = superpaper._start_hotkeys()
 
-    assert made == [["next_wallpaper", "pause", "start_profile"]]
+    assert made == [["call_soon", "next_wallpaper", "pause", "report", "start_profile"]]
     assert hotkeys.registered == [("general", settings), ("profiles", [work])]
 
 
-def test_no_hotkeys_when_they_are_off_or_unavailable(headless_app_module, monkeypatch):
-    app = headless_app_module
+def test_hotkey_problems_are_reported_as_errors(monkeypatch):
+    reports = []
 
+    class RecordingHotkeys:
+        def __init__(self, *, report, **actions):
+            report("taken")
+
+        def register_general(self, settings):
+            pass
+
+        def register_profiles(self, profiles):
+            pass
+
+    monkeypatch.setattr(controller, "Hotkeys", RecordingHotkeys)
+    superpaper = application(notify=lambda message, title: reports.append((message, title)))
+
+    superpaper.settings = Settings(use_hotkeys=True)
+    superpaper._start_hotkeys()
+
+    assert reports == [("taken", "Error")]
+
+
+def test_no_hotkeys_when_they_are_off_or_unavailable(monkeypatch):
     def unavailable(**actions):
         message = "No module named 'system_hotkey'"
         raise ImportError(message)
 
-    monkeypatch.setattr(app, "Hotkeys", unavailable)
+    monkeypatch.setattr(controller, "Hotkeys", unavailable)
 
-    assert application(app, settings=Settings(use_hotkeys=False))._start_hotkeys() is None
-    assert application(app, settings=Settings(use_hotkeys=True))._start_hotkeys() is None
+    assert application(settings=Settings(use_hotkeys=False))._start_hotkeys() is None
+    assert application(settings=Settings(use_hotkeys=True))._start_hotkeys() is None

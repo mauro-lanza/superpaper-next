@@ -9,12 +9,12 @@ wx icon, so the wx tray icon is visible yet completely non-interactive.
 This module talks the SNI protocol directly over D-Bus (via ``dbus-python``),
 exporting both an ``org.kde.StatusNotifierItem`` object and the
 ``com.canonical.dbusmenu`` context menu. Incoming D-Bus calls are dispatched
-through wxGTK's own GLib main loop (see ``DBusGMainLoop`` usage in the tray
-applet), so menu callbacks run on the wx main thread and may touch the GUI
-directly.
+through the GUI toolkit's GLib main loop (``DBusGMainLoop`` set as the default by
+the application), and menu actions are handed on to the GUI's main loop with
+``call_soon``, so they may touch the GUI directly.
 
 It is intentionally self-contained and Linux-only; Windows and macOS keep using
-the wx ``TaskBarIcon``.
+the toolkit's own tray icon.
 """
 
 import logging
@@ -23,10 +23,8 @@ from dataclasses import dataclass
 from itertools import count
 from typing import Any, assert_never
 
-import wx  # ty:ignore[unresolved-import]
-
 from superpaper.rendering.render import load_argb32
-from superpaper.ui.tray_menu import Check, Item, MenuEntry, Separator, Submenu
+from superpaper.tray_menu import Check, Item, MenuEntry, Separator, Submenu
 
 logger = logging.getLogger(__name__)
 
@@ -98,8 +96,9 @@ class _MenuModel:
     It is rebuilt on demand so the profile list and pause state are always current.
     """
 
-    def __init__(self, menu: Callable[[], tuple[MenuEntry, ...]]):
+    def __init__(self, menu: Callable[[], tuple[MenuEntry, ...]], call_soon: Callable[[Callable[[], None]], None]):
         self._menu = menu
+        self._call_soon = call_soon
         self.revision = 1
         self.nodes: dict[int, _Node] = {}
         self.layout: tuple[int, ...] = ()
@@ -133,16 +132,18 @@ class _MenuModel:
         self.layout = tuple(node_id for node_id, _ in top)
 
     def activate(self, item_id: int) -> None:
-        """Run the action of the item ``item_id``, if it has one, on the wx main loop."""
+        """Run the action of the item ``item_id``, if it has one, on the GUI's main loop."""
         node = self.nodes.get(item_id)
         if node is None or node.action is None:
             return
-        wx.CallAfter(_run_action, node.action)
+        action = node.action
+        self._call_soon(lambda: _run_action(action))
 
 
 def build_tray(
     *,
     menu: Callable[[], tuple[MenuEntry, ...]],
+    call_soon: Callable[[Callable[[], None]], None],
     activate: Callable[[], None],
     secondary_activate: Callable[[], None],
     bus_name: str,
@@ -152,14 +153,15 @@ def build_tray(
 ):
     """Create and register the SNI tray. Returns the SNITray or None on failure.
 
-    ``menu`` gives the entries of the context menu as they are now; ``activate`` and
-    ``secondary_activate`` are what a left and a middle click do.
+    ``menu`` gives the entries of the context menu as they are now, whose actions run
+    through ``call_soon``; ``activate`` and ``secondary_activate`` are what a left and a
+    middle click do.
     """
     if dbus is None:
         logger.info("dbus-python not available; cannot use native SNI tray.")
         return None
     try:
-        tray = SNITray(menu, activate, secondary_activate, bus_name, icon_path, title, tooltip)
+        tray = SNITray(menu, call_soon, activate, secondary_activate, bus_name, icon_path, title, tooltip)
         tray.register()
     except Exception as exc:
         logger.info("Failed to start native SNI tray: %s", exc)
@@ -293,7 +295,7 @@ if dbus is not None:
     class SNITray(dbus.service.Object):
         """``org.kde.StatusNotifierItem`` implementation."""
 
-        def __init__(self, menu, activate, secondary_activate, bus_name, icon_path, title, tooltip):
+        def __init__(self, menu, call_soon, activate, secondary_activate, bus_name, icon_path, title, tooltip):
             self.bus = dbus.SessionBus()
             self._bus_name = dbus.service.BusName(bus_name, self.bus)
             super().__init__(self.bus, SNI_OBJECT_PATH)
@@ -302,7 +304,7 @@ if dbus is not None:
             self.title = title
             self.tooltip = tooltip
             self.icon_pixmap = _load_icon_pixmap(icon_path)
-            self.model = _MenuModel(menu)
+            self.model = _MenuModel(menu, call_soon)
             self.menu = _DBusMenu(self.bus, self.model)
 
         def register(self):
