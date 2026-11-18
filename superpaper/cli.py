@@ -270,6 +270,7 @@ def _set_images(request: SetImages, paths: AppPaths) -> int:
     if request.debug:
         logger.info("Command line request: %s", request)
     ensure_dirs(paths)
+    set_command = request.set_command or read_settings(paths.config / SETTINGS_FILE, sys.platform).set_command
     layout = None
     if request.perspective:
         layout = _detect_displays(paths)
@@ -277,14 +278,14 @@ def _set_images(request: SetImages, paths: AppPaths) -> int:
         if request.perspective not in perspectives:
             message = f"Valid perspective profile names are: {perspectives}"
             raise CliError(message)
-    problem = desktop.setter_problem(request.set_command)
+    problem = desktop.setter_problem(set_command)
     if problem:
         raise CliError(problem)
     if layout is None:  # the perspective check above already detected them
         layout = _detect_displays(paths)
     if request.advanced and (hint := layout.size_hint()):
         logger.warning("%s", hint)
-    _span_desktop(request.set_command)
+    _span_desktop(set_command)
     images = [os.path.realpath(image) for image in request.images]
     if request.advanced:
         spanmode = "advanced"
@@ -300,4 +301,4 @@ def _set_images(request: SetImages, paths: AppPaths) -> int:
         offsets=request.offsets,
     )
     # What went wrong, if anything, is logged where it happened.
-    return 1 if show(profile, images, paths, layout=layout, set_command=request.set_command) is not None else 0
+    return 1 if show(profile, images, paths, layout=layout, set_command=set_command) is not None else 0

@@ -7,7 +7,7 @@ Superpaper supports the following arguments, display specific values are given s
 - `--perspective`, optional, accepts a valid perspective profile name. Perspective profiles are configured in the GUI.
 - `--spangroups`, optional, takes a list of spanning groups formatted as: 0 123 46 5.
 - `-o`, `--offsets`, optional, image alignment adjustment with pixel offsets (advanced mode).
-- `-c`, `--command`, optional, a custom command to set the wallpaper, in quotes (Linux).
+- `-c`, `--command`, optional, a custom command to set the wallpaper, in quotes (Linux). Without it, the "Set command" saved in Settings is used.
 - `-p`, `--profile`, start the tray applet running a pre-configured wallpaper profile. Cannot be combined with `--setimages`.
 - `-d`, `--debug`, debugging flag. Alone, it runs the full application with debugging.
 
