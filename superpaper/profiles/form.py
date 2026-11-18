@@ -21,6 +21,7 @@ from superpaper.profiles.profile_id import NEW_PROFILE_LABEL, ProfileId, Profile
 from superpaper.profiles.profile_store import ProfileStore, StoredProfile, validate_managed_profile_id
 from superpaper.profiles.selection import Selection, is_file
 from superpaper.session import Session
+from superpaper.settings import format_hotkey, parse_hotkey
 from superpaper.user_input import Offset, OffsetError, parse_offsets
 
 logger = logging.getLogger(__name__)
@@ -175,7 +176,7 @@ def form_from(profile: Profile, layout: Layout) -> ProfileForm:
         delay_minutes=str(profile.delay / 60) if profile.slideshow else "",
         sort_label=sort_label if profile.slideshow else None,
         hotkey_enabled=bool(profile.hotkey),
-        hotkey="+".join(profile.hotkey or ()),
+        hotkey=format_hotkey(profile.hotkey),
         offsets_applied=bool(profile.offsets),
         offsets=offsets,
         spangroups_enabled=bool(spangroups),
@@ -208,10 +209,7 @@ def parse_form(form: ProfileForm) -> tuple[Profile, list[str]]:
                 problems.append(f"The slideshow delay must be a number of minutes, not '{form.delay_minutes}'.")
         if form.sort_label is not None:
             sortmode = form.sort_label.lower().replace(" ", "_")
-    hotkey = None
-    if form.hotkey_enabled:
-        hotkey_text = form.hotkey.strip()
-        hotkey = tuple(hotkey_text.split("+")) if hotkey_text else None
+    hotkey = parse_hotkey(form.hotkey) if form.hotkey_enabled else None
 
     # manual offsets; an empty field means no offset
     corrections = ()
