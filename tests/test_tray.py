@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from superpaper.desktop.process import Result
-from superpaper.desktop.tray_menu import Check, Item, Separator, Submenu
+from superpaper.desktop.tray_menu import Check, Item, Notice, Separator, Submenu, failure_notice
 from superpaper.profiles.profile_file import Profile
 from superpaper.profiles.profile_id import ProfileId
 
@@ -33,13 +33,14 @@ def recorder():
     return Recorder()
 
 
-def icon(tray, recorder, *, profiles=(), paused=False):
+def icon(tray, recorder, *, profiles=(), paused=False, failure=None):
     """A tray icon, built as the application builds it, with the wx icon."""
     store = SimpleNamespace(profiles=list(profiles))
     session = SimpleNamespace(paused=paused, next=recorder("next"), toggle_pause=recorder("pause"))
     return tray.TaskBarIcon(
         store,
         session,
+        last_failure=lambda: failure,
         config_dir=CONFIG_DIR,
         open_editor=recorder("editor"),
         open_settings=recorder("settings"),
@@ -97,6 +98,22 @@ def test_the_menu_lists_the_saved_profiles_and_shows_pause(tray, recorder):
     assert [item.label for item in profiles.items] == ["Work", "Home"]
     assert [entry.checked for entry in entries if isinstance(entry, Check)] == [True]
     assert sum(isinstance(entry, Separator) for entry in entries) == 3
+
+
+def test_a_failed_change_is_the_first_line_of_the_menu_until_cleared(tray, recorder):
+    assert not any(isinstance(entry, Notice) for entry in icon(tray, recorder).menu())
+
+    entries = icon(tray, recorder, failure="Image missing").menu()
+
+    assert entries[0] == Notice("Last change failed: Image missing")
+    assert isinstance(entries[1], Separator)
+
+
+def test_a_long_reason_is_cut_to_its_first_line(tray, recorder):
+    entries = icon(tray, recorder, failure="first line\n" + "x" * 200).menu()
+
+    assert entries[0].label == "Last change failed: first line"
+    assert len(failure_notice("y" * 200).label) < 120
 
 
 def test_a_left_click_opens_the_editor(tray, recorder):

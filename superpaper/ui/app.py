@@ -145,6 +145,7 @@ def _make_tray(app: Superpaper) -> TaskBarIcon:
     return TaskBarIcon(
         app.store,
         app.session,
+        last_failure=lambda: app.last_failure,
         config_dir=app.paths.config,
         open_editor=app.open_editor,
         open_settings=app.open_settings,

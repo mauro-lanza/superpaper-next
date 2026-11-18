@@ -66,6 +66,8 @@ class Session:
     each other: a change under way keeps the layout it began with.
     ``set_command`` gives the user's own wallpaper setter command as currently set, so a
     changed setting applies from the next change on. ``clock`` times the slideshow.
+    ``on_change(problem)`` is called on the worker thread after each change of the running
+    profile (slideshow, next, start), with what went wrong, or None.
 
     ``running``, ``paused`` and ``layout`` say how things stand once the requests
     made so far are handled; only the worker changes them.
@@ -76,10 +78,12 @@ class Session:
         paths: AppPaths,
         layout: Layout,
         *,
+        on_change: Callable[[str | None], None],
         set_command: Callable[[], str] = lambda: "",
         clock: Callable[[], float] = time.monotonic,
     ):
         self._paths = paths
+        self._on_change = on_change
         self._set_command = set_command
         self._clock = clock
         self._requests: queue.SimpleQueue[Callable[[], None] | _Next | None] = queue.SimpleQueue()
@@ -273,9 +277,11 @@ class Session:
             selection.advance()
         files = selection.advance() if steps or not selection.is_complete() else selection.current()
         if not files:
-            logger.error("Wallpaper change skipped: profile '%s' has no complete selection.", stored.profile.name)
+            problem = f"profile '{stored.profile.name}' has no complete selection."
+            logger.error("Wallpaper change skipped: %s", problem)
+            self._on_change(problem)
             return
-        show(
+        problem = show(
             stored.profile,
             files,
             self._paths,
@@ -284,6 +290,7 @@ class Session:
             profile_id=stored.profile_id,
             running=stored.profile.name,
         )
+        self._on_change(problem)
 
     def _arm(self) -> None:
         """Set when the slideshow changes next: one delay from now, or never while it is

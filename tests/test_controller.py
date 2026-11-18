@@ -103,6 +103,7 @@ def application(running=None, profiles=(), active=None, settings=None, **shell_a
     superpaper.settings = settings or Settings()
     superpaper.store = FakeStore(profiles, active)
     superpaper.session = FakeSession(running)
+    superpaper.last_failure = None
     superpaper.hotkeys = None
     superpaper.tray = SimpleNamespace(
         clickable=True, remove=lambda: superpaper.session.requests.append(("tray removed",))
@@ -113,6 +114,28 @@ def application(running=None, profiles=(), active=None, settings=None, **shell_a
 def profile(name):
     """A saved slideshow profile, as the application holds it."""
     return SimpleNamespace(profile=Profile(name=name, slideshow=True, delay=30.0), profile_id=ProfileId(name))
+
+
+def test_the_last_failed_change_is_kept_until_a_change_succeeds():
+    superpaper = application(call_soon=lambda action: action())
+
+    superpaper._report_change("Image missing")
+    failed = superpaper.last_failure
+    superpaper._report_change(None)
+
+    assert failed == "Image missing"
+    assert superpaper.last_failure is None
+
+
+def test_a_change_reported_from_the_worker_is_handed_to_the_ui_thread():
+    superpaper = application()
+
+    superpaper._report_change("Image missing")
+
+    assert superpaper.last_failure is None
+    (_, remember) = superpaper.ui_events[0]
+    remember()
+    assert superpaper.last_failure == "Image missing"
 
 
 def test_a_profile_starts_on_freshly_detected_displays(detection):

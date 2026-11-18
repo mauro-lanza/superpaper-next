@@ -56,8 +56,12 @@ class Superpaper:
         self.settings = settings
         # The running profile, its slideshow and every wallpaper change, starting with the
         # displays as they are now. Wallpaper changes use the custom command as last saved.
+        self.last_failure: str | None = None
         self.session = Session(
-            paths, display_detection.detect_layout(paths.config), set_command=lambda: self.settings.set_command
+            paths,
+            display_detection.detect_layout(paths.config),
+            on_change=self._report_change,
+            set_command=lambda: self.settings.set_command,
         )
         self.store = ProfileStore(paths)
         self._load_profiles()
@@ -68,6 +72,15 @@ class Superpaper:
         self.hotkeys = self._start_hotkeys()
         self.tray = shell.make_tray(self)
         self._show_at_start()
+
+    def _report_change(self, problem: str | None) -> None:
+        """Remember how the session's last change went, for the tray menu; called on the
+        session's worker thread, so it is handed to the UI's."""
+
+        def remember() -> None:
+            self.last_failure = problem
+
+        self._shell.call_soon(remember)
 
     def _run_at_startup(self, startup_profile: ProfileId | None) -> None:
         """Run the profile asked for on the command line, or carry on with the one that ran

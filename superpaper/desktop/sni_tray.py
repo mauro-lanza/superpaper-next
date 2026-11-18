@@ -26,7 +26,7 @@ from typing import Any, assert_never
 
 from PIL import Image
 
-from superpaper.desktop.tray_menu import Check, Item, MenuEntry, Separator, Submenu
+from superpaper.desktop.tray_menu import Check, Item, MenuEntry, Notice, Separator, Submenu
 
 logger = logging.getLogger(__name__)
 
@@ -136,6 +136,8 @@ class _MenuModel:
                 case Check(label, action, checked):
                     props = {"label": label, "enabled": True, "toggle-type": "checkmark", "toggle-state": int(checked)}
                     nodes[node_id] = _Node(props, action, ())
+                case Notice(label):
+                    nodes[node_id] = _Node({"label": label, "enabled": False}, None, ())
                 case Separator():
                     nodes[node_id] = _Node({"type": "separator"}, None, ())
                 case Submenu(label, items):

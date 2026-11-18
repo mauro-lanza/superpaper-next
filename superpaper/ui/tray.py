@@ -18,7 +18,7 @@ import superpaper.desktop as desktop
 from superpaper.__version__ import __version__
 from superpaper.desktop.linux import running_kde
 from superpaper.desktop.sni_tray import build_tray, sni_supported
-from superpaper.desktop.tray_menu import Check, Item, MenuEntry, Separator, Submenu
+from superpaper.desktop.tray_menu import Check, Item, MenuEntry, Notice, Separator, Submenu, failure_notice
 from superpaper.paths import resource
 from superpaper.ui.message import show_message_dialog
 
@@ -34,6 +34,8 @@ def _append_entries(menu: wx.Menu, entries: tuple[MenuEntry, ...]) -> None:
                 _append_item(menu, label, action, wx.ITEM_NORMAL)
             case Check(label, action, checked):
                 _append_item(menu, label, action, wx.ITEM_CHECK).Check(checked)
+            case Notice(label):
+                menu.Append(-1, label).Enable(False)
             case Separator():
                 menu.AppendSeparator()
             case Submenu(label, items):
@@ -54,17 +56,31 @@ def _append_item(menu: wx.Menu, label: str, action: Callable[[], None], kind: in
 class TaskBarIcon(wx.adv.TaskBarIcon):
     """The tray icon: the native StatusNotifierItem where it can be registered, the wx
     one otherwise. Its menu lists the saved profiles in ``store`` and whether
-    ``session``'s slideshow is paused.
+    ``session``'s slideshow is paused, and first why the last wallpaper change failed, if
+    ``last_failure()`` gives a reason.
 
     The application provides what the menu does beyond the session: ``open_editor()``,
     ``open_settings()``, ``reload_profiles()``, ``start_profile(stored)`` and ``quit()``;
     ``config_dir`` is the folder "Open Config Folder" opens.
     """
 
-    def __init__(self, store, session, *, config_dir, open_editor, open_settings, reload_profiles, start_profile, quit):
+    def __init__(
+        self,
+        store,
+        session,
+        *,
+        last_failure,
+        config_dir,
+        open_editor,
+        open_settings,
+        reload_profiles,
+        start_profile,
+        quit,
+    ):
         super().__init__()
         self._store = store
         self._session = session
+        self._last_failure = last_failure
         self._config_dir = config_dir
         self._open_editor = open_editor
         self._open_settings = open_settings
@@ -109,7 +125,10 @@ class TaskBarIcon(wx.adv.TaskBarIcon):
         profiles = tuple(
             Item(stored.profile.name, partial(self._start_profile, stored)) for stored in self._store.profiles
         )
+        failure = self._last_failure()
+        failed = (failure_notice(failure), Separator()) if failure is not None else ()
         return (
+            *failed,
             Item("Open Config Folder", self.open_config),
             Item("Wallpaper Configuration", self._open_editor),
             Item("Settings", self._open_settings),
