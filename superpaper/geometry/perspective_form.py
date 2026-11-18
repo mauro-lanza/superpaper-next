@@ -95,7 +95,7 @@ def form_from(perspective: Perspective, layout: Layout) -> PerspectiveForm:
                 mm(tilt.vertical_offset),
                 mm(tilt.depth_offset),
             )
-            for swivel, tilt in zip(perspective.swivels, perspective.tilts)
+            for swivel, tilt in zip(perspective.swivels, perspective.tilts, strict=True)
         ),
     )
 

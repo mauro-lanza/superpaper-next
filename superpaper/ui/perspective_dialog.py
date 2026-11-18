@@ -144,7 +144,7 @@ class PerspectiveConfig(wx.Dialog):
         szr_stlist = [(item, 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5) for item in self.stlist_vieweroffs]
         szr_tclist = [(item, 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5) for item in self.tclist_vieweroffs]
         sizer_viewer_off.Add(st_vwroffs, 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5)
-        for st, tc in zip(szr_stlist, szr_tclist):
+        for st, tc in zip(szr_stlist, szr_tclist, strict=True):
             sizer_viewer_off.Add(st[0], st[1], st[2], st[3])
             sizer_viewer_off.Add(tc[0], tc[1], tc[2], tc[3])
 
@@ -278,12 +278,14 @@ class PerspectiveConfig(wx.Dialog):
         self.tc_name.SetValue(form.name)
         self.cb_dispsys_def.SetValue(form.is_default)
         self.choice_centr_disp.SetSelection(form.central_display)
-        for tc, text in zip(self.tclist_vieweroffs, form.viewer_offsets):
+        for tc, text in zip(self.tclist_vieweroffs, form.viewer_offsets, strict=True):
             tc.SetValue(text)
-        for index, (row, axis, cells) in enumerate(zip(self.grid_rows, form.swivel_axes, form.rotation_cells)):
+        for index, (row, axis, cells) in enumerate(
+            zip(self.grid_rows, form.swivel_axes, form.rotation_cells, strict=True)
+        ):
             row[0].SetLabel(str(index))
             row[1].SetSelection(axis)
-            for tc, text in zip(row[2:], cells):
+            for tc, text in zip(row[2:], cells, strict=True):
                 tc.SetValue(text)
 
     def update_choiceprofile(self):

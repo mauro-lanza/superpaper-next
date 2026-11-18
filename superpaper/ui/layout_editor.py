@@ -151,7 +151,7 @@ class LayoutEditor:
         display_data = self.preview.staged.layout.with_initial_offsets().ppi_norm_areas()
         positions = canvas.initial_shape_positions(display_data, self.preview.GetSize())
         # Move display preview draggable_shapes
-        for shp, position in zip(self.draggable_shapes, positions):
+        for shp, position in zip(self.draggable_shapes, positions, strict=True):
             shp.pos = position
         self.positions_dragged = True
         self.preview.Refresh()
@@ -396,7 +396,7 @@ class LayoutEditor:
         self.toggle_buttons(True, False)
         staged = self.preview.staged
         self.state, staged.layout = layout_edit.cancel_bezels(self.state, staged.layout)
-        for pops, bez_mms in zip(self.bezel_popups, staged.layout.bezels_in_mm()):
+        for pops, bez_mms in zip(self.bezel_popups, staged.layout.bezels_in_mm(), strict=True):
             pops[0].set_bezel_value(bez_mms[0])
             pops[1].set_bezel_value(bez_mms[1])
         self.preview.display_data = staged.layout.ppi_norm_areas()
@@ -432,7 +432,7 @@ class LayoutEditor:
     def create_bezel_popups(self):
         self.bezel_popups = []
         bezel_mm = self.preview.staged.layout.bezels_in_mm()
-        for butts, bez_mm in zip(self.bez_buttons, bezel_mm):
+        for butts, bez_mm in zip(self.bez_buttons, bezel_mm, strict=True):
             pop_rb = self.popup_at_button(butts[0])
             pop_rb.set_bezel_value(bez_mm[0])
             pop_bb = self.popup_at_button(butts[1])
@@ -480,14 +480,14 @@ class LayoutEditor:
 
     def move_bezel_buttons(self):
         """Move bezel buttons after a resize."""
-        for butts, st_bmp in zip(self.bez_buttons, self.preview.preview_img_list):
+        for butts, st_bmp in zip(self.bez_buttons, self.preview.preview_img_list, strict=True):
             pos_rb, pos_bb = self.bezel_button_positions(st_bmp)
             butts[0].SetPosition((pos_rb[0], pos_rb[1]))
             butts[1].SetPosition((pos_bb[0], pos_bb[1]))
 
     def move_bezel_popups(self):
         """Move bezel popups to their respective buttons."""
-        for butts, pops in zip(self.bez_buttons, self.bezel_popups):
+        for butts, pops in zip(self.bez_buttons, self.bezel_popups, strict=True):
             self.move_popup_to_button(pops[0], butts[0])
             self.move_popup_to_button(pops[1], butts[1])
 

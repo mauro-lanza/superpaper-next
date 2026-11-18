@@ -132,7 +132,7 @@ class Profile:
             match correction:
                 case OffsetsCorrection(values):
                     ppimode = True
-                    offsets = list(values) + (count - len(values)) * [(0, 0)]
+                    offsets = (list(values) + count * [(0, 0)])[:count]
                 case PpiCorrection(values):
                     ppimode = True
                     ppi_array = list(values)
@@ -144,7 +144,10 @@ class Profile:
                     ppi_array = count * [100]
                 case DiagonalCorrection(inches):
                     ppimode = True
-                    ppi_array = [math.sqrt(res[0] ** 2 + res[1] ** 2) / inch for inch, res in zip(inches, resolutions)]
+                    ppi_array = [
+                        math.sqrt(res[0] ** 2 + res[1] ** 2) / inch
+                        for inch, res in zip(inches[:count], resolutions, strict=True)
+                    ]
                 case _:
                     assert_never(correction)
         if ppimode and self.bezels:

@@ -145,7 +145,7 @@ def advanced(
             logger.info("Back-projected canvas size: %s", canvas_tuple_proj)
             img_workingsize = resize_to_fill(img, canvas_tuple_proj, zoom=zoom, offset=pan)
             for _crop_tup, coeffs, ppin_crop, (i_res, res) in zip(
-                proj_plane_crops, persp_coeffs, grp_crops, enumerate(grp_res_arr)
+                proj_plane_crops, persp_coeffs, grp_crops, enumerate(grp_res_arr), strict=True
             ):
                 # Whole image needs to be transformed for each display separately
                 # since the coeffs live between the full back-projected plane
@@ -172,7 +172,7 @@ def advanced(
             img_workingsize = resize_to_fill(img, canvas_tuple_eff, zoom=zoom, offset=pan)
             # Simultaneously make crops at working size and then resize down to actual
             # display resolution as needed.
-            for crop_tup, (i_res, res) in zip(grp_crops, enumerate(grp_res_arr)):
+            for crop_tup, (i_res, res) in zip(grp_crops, enumerate(grp_res_arr), strict=True):
                 crop_img = img_workingsize.crop(crop_tup)
                 if crop_img.size != res:
                     crop_img = crop_img.resize(res, resample=Image.Resampling.LANCZOS)

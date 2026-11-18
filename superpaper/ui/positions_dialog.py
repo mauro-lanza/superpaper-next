@@ -258,7 +258,7 @@ class DisplayPositionEntry(wx.Frame):
         """Populate config fields from the staged layout's offsets."""
         layout = self.staged.layout
         edges = positions.edges_in_unit(layout, use_px=self.cb_use_px.GetValue())
-        for index, (row, (left, top, right, bottom)) in enumerate(zip(self.grid_rows, edges)):
+        for index, (row, (left, top, right, bottom)) in enumerate(zip(self.grid_rows, edges, strict=True)):
             row[0].SetLabel(str(index))
             row[1].SetValue(str(left))
             row[2].SetValue(str(top))

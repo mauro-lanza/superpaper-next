@@ -38,7 +38,7 @@ def parse_offset_args(args: Sequence[str]) -> tuple[Offset, ...]:
     except ValueError:
         message = f"The offsets must be whole numbers of pixels: {' '.join(args)}"
         raise OffsetError(message) from None
-    return tuple(zip(pixels[::2], pixels[1::2]))
+    return tuple(zip(pixels[::2], pixels[1::2], strict=True))
 
 
 class CliError(Exception):

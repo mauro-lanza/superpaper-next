@@ -89,7 +89,7 @@ def cut_pieces(image: Path, layout: Layout) -> list[Path]:
     in the layout's display order."""
     pieces = []
     with Image.open(image) as desktop:
-        for index, (res, offset) in enumerate(zip(layout.resolutions(), layout.digital_offsets())):
+        for index, (res, offset) in enumerate(zip(layout.resolutions(), layout.digital_offsets(), strict=True)):
             piece = desktop.crop((offset[0], offset[1], offset[0] + res[0], offset[1] + res[1]))
             path = image.with_name(f"{image.stem}-crop-{index}.png")
             write_atomically(path, _encode(piece, "PNG"))
