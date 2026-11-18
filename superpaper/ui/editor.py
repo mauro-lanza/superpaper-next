@@ -76,6 +76,8 @@ class WallpaperSettingsPanel(wx.Panel):
     profile's hotkey along with it.
     """
 
+    span_mode: SpanMode
+
     def __init__(
         self, parent, paths, get_settings, store, session, *, update_settings, refresh_displays, rebind_hotkey
     ):
