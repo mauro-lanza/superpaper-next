@@ -27,7 +27,7 @@ def source_icon(path, size):
 class BrowsePaths(wx.Dialog):
     """Path picker dialog class."""
 
-    def __init__(self, parent, use_multi_image, defdir, update_settings, num_span_groups=None):
+    def __init__(self, parent, use_multi_image, defdir, remember_default_dir, num_span_groups=None):
         wx.Dialog.__init__(
             self,
             parent,
@@ -55,7 +55,7 @@ class BrowsePaths(wx.Dialog):
         sizer_buttons = wx.BoxSizer(wx.HORIZONTAL)
 
         self.defdir = defdir
-        self._update_settings = update_settings  # remembers the default directory
+        self._remember_default_dir = remember_default_dir
         self.dir3 = wx.GenericDirCtrl(
             self,
             -1,
@@ -176,13 +176,13 @@ class BrowsePaths(wx.Dialog):
         sel_path = self.dir3.GetPath()
         if is_folder(sel_path):
             self.defdir = sel_path
-            self._update_settings(browse_default_dir=self.defdir.strip())
+            self._remember_default_dir(self.defdir.strip())
         else:
             pass
 
     def onClrDefDir(self, event):
         self.defdir = ""
-        self._update_settings(browse_default_dir="")
+        self._remember_default_dir("")
 
     def onCheckboxShowHidden(self, event):
         self.dir3.ShowHidden(self.cb_showhidden.GetValue())

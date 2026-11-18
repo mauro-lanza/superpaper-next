@@ -4,6 +4,9 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from functools import partial
 
+from superpaper.profiles.profile_store import ProfileStore, StoredProfile
+from superpaper.session import Session
+
 
 @dataclass(frozen=True, slots=True)
 class Item:
@@ -33,14 +36,14 @@ MenuEntry = Item | Check | Separator | Submenu
 
 
 def build_menu(
-    store,
-    session,
+    store: ProfileStore,
+    session: Session,
     *,
     open_config: Callable[[], None],
     open_editor: Callable[[], None],
     open_settings: Callable[[], None],
     reload_profiles: Callable[[], None],
-    start_profile: Callable[[object], None],
+    start_profile: Callable[[StoredProfile], None],
     about: Callable[[], None],
     quit: Callable[[], None],
 ) -> tuple[MenuEntry, ...]:

@@ -1,5 +1,7 @@
 """Help: the help window, and the help popups of the editor and its dialogs."""
 
+from dataclasses import replace
+
 import wx  # ty:ignore[unresolved-import]
 
 from superpaper.paths import resource
@@ -98,7 +100,7 @@ Tips:
         """Closes help dialog. Saves checkbox state as needed."""
         show_help = self.cb_show_at_start.GetValue()
         if self._get_settings().show_help != show_help:
-            self._update_settings(show_help=show_help)
+            self._update_settings(replace(self._get_settings(), show_help=show_help))
         self.frame.Close(True)
 
 

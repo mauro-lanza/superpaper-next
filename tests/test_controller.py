@@ -6,6 +6,7 @@ unless a test is about the profiles directory itself.
 """
 
 import configparser
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -364,7 +365,7 @@ def test_saved_general_settings_apply_from_now_on(tmp_path, use_hotkeys, registe
     superpaper.hotkeys = Mock()
     saved = Settings(use_hotkeys=use_hotkeys, logging=True, set_command="setter {image}")
 
-    superpaper.apply_settings(use_hotkeys=use_hotkeys, logging=True, set_command="setter {image}")
+    superpaper.apply_settings(saved)
 
     # Hotkeys turned off apply after a restart; nothing new is bound meanwhile.
     assert superpaper.hotkeys.register_general.called is registered
@@ -377,8 +378,8 @@ def test_a_dialog_setting_is_written_and_kept_for_the_next_window(tmp_path):
     superpaper = application(settings=Settings(show_help=True))
     superpaper.settings_path = tmp_path / "general_settings"
 
-    superpaper.update_settings(browse_default_dir="/pictures")
-    superpaper.update_settings(show_help=False)
+    superpaper.update_settings(replace(superpaper.settings, browse_default_dir="/pictures"))
+    superpaper.update_settings(replace(superpaper.settings, show_help=False))
 
     expected = Settings(browse_default_dir="/pictures", show_help=False)
     assert superpaper.settings == expected
