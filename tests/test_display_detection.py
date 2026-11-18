@@ -3,7 +3,7 @@ import threading
 
 import pytest
 
-from superpaper import display_detection, display_store, displays
+from superpaper.geometry import display_detection, display_store, displays
 from tests.conftest import monitor
 
 

@@ -6,9 +6,9 @@ from pathlib import Path
 
 import pytest
 
-from superpaper import profile_store
-from superpaper.profile_id import ProfileId, ProfileIdError
-from superpaper.profiles import Profile
+from superpaper.profiles import profile_store
+from superpaper.profiles.profile_file import Profile
+from superpaper.profiles.profile_id import ProfileId, ProfileIdError
 from tests.conftest import load_profile
 
 

@@ -120,7 +120,7 @@ def test_first_run_creates_missing_parents_and_seeds_the_examples(tmp_path):
     ensure_dirs(paths)
 
     assert paths.cache.is_dir()
-    examples = sorted(path.name for path in (install_dir() / "superpaper" / "profiles").iterdir())
+    examples = sorted(path.name for path in (install_dir() / "superpaper" / "resources" / "example_profiles").iterdir())
     assert examples
     assert sorted(path.name for path in paths.profiles.iterdir()) == examples
 

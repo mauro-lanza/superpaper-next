@@ -41,8 +41,8 @@ Name: "startupicon"; Description: "Start application with Windows"; GroupDescrip
 
 [Files]
 Source: "..\dist\superpaper.exe"; DestDir: "{app}\superpaper"; Flags: ignoreversion
-Source: "..\releases\innostub\profiles\*"; DestDir: "{app}\superpaper\profiles"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "..\releases\innostub\superpaper\*"; DestDir: "{app}\superpaper"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\releases\innostub\profiles\*"; DestDir: "{app}\superpaper\resources\example_profiles"; Flags: ignoreversion recursesubdirs createallsubdirs
 ; NOTE: Don't use "Flags: ignoreversion" on any shared system files
 
 [Icons]

@@ -21,10 +21,10 @@ from typing import TYPE_CHECKING
 from PIL import Image
 
 from superpaper.files import write_atomically
-from superpaper.profile_id import ProfileId
+from superpaper.profiles.profile_id import ProfileId
 
 if TYPE_CHECKING:
-    from superpaper.displays import Layout
+    from superpaper.geometry.displays import Layout
 
 logger = logging.getLogger(__name__)
 

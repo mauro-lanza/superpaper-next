@@ -3,8 +3,8 @@ when the sources are listed."""
 
 import pytest
 
-from superpaper import selection
-from superpaper.selection import Selection
+from superpaper.profiles import selection
+from superpaper.profiles.selection import Selection
 
 
 def test_first_image_of_a_folder_is_first_by_name_among_supported(tmp_path):

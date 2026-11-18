@@ -84,7 +84,6 @@ cp -a dist/superpaper/. "${APPDIR}/usr/bin/"
 echo "==> Staging application resources"
 mkdir -p "${APPDIR}/usr/superpaper"
 cp -a superpaper/resources "${APPDIR}/usr/superpaper/"
-cp -a superpaper/profiles "${APPDIR}/usr/superpaper/" 2>/dev/null || true
 
 echo "==> Bundling gsettings schemas"
 cp -a /usr/share/glib-2.0/schemas/*.xml "${APPDIR}/usr/share/glib-2.0/schemas/" 2>/dev/null || true

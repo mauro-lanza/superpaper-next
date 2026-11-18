@@ -3,8 +3,8 @@ loading a profile doesn't list its sources."""
 
 import pytest
 
-from superpaper import selection
-from superpaper.profile_store import ProfileStore
+from superpaper.profiles import selection
+from superpaper.profiles.profile_store import ProfileStore
 from tests.conftest import load_profile, write_profile
 
 

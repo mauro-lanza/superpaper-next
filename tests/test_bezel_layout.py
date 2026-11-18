@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from superpaper import display_detection
+from superpaper.geometry import display_detection
 
 MONITORS = [
     SimpleNamespace(x=0, y=0, width=1920, height=1080, width_mm=527, height_mm=296, name="A"),

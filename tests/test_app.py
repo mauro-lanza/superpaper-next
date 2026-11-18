@@ -12,11 +12,11 @@ from unittest.mock import Mock
 
 import pytest
 
-from superpaper import display_detection
+from superpaper.geometry import display_detection
 from superpaper.paths import AppPaths
-from superpaper.profile_id import ProfileId
-from superpaper.profile_store import ProfileStore
-from superpaper.profiles import Profile
+from superpaper.profiles.profile_file import Profile
+from superpaper.profiles.profile_id import ProfileId
+from superpaper.profiles.profile_store import ProfileStore
 from superpaper.settings import Settings, read_settings
 
 PATHS = AppPaths(config=Path("/config"), profiles=Path("/config/profiles"), cache=Path("/cache"))

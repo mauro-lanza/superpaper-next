@@ -4,9 +4,9 @@ import os
 
 import pytest
 
-from superpaper import profile_store
-from superpaper.profile_id import ProfileId, ProfileIdError
-from superpaper.profile_store import ProfileStore
+from superpaper.profiles import profile_store
+from superpaper.profiles.profile_id import ProfileId, ProfileIdError
+from superpaper.profiles.profile_store import ProfileStore
 from tests.conftest import write_profile
 
 

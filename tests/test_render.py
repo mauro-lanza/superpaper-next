@@ -8,9 +8,9 @@ import PIL
 import pytest
 from PIL import Image
 
-from superpaper import render
-from superpaper.canvas import canvas_size_with_bezels
-from superpaper.perspective import Named, Perspective, Swivel, SwivelAxis, Tilt
+from superpaper.geometry.canvas import canvas_size_with_bezels
+from superpaper.geometry.perspective import Named, Perspective, Swivel, SwivelAxis, Tilt
+from superpaper.rendering import render
 from tests.conftest import monitor
 
 

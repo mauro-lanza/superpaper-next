@@ -8,8 +8,8 @@ from pathlib import Path
 
 from screeninfo import Monitor, get_monitors
 
-from superpaper import display_store
-from superpaper.displays import Display, Layout
+from superpaper.geometry import display_store
+from superpaper.geometry.displays import Display, Layout
 
 logger = logging.getLogger(__name__)
 

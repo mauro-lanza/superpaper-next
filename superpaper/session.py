@@ -11,7 +11,7 @@ the layout over. The X library that display detection uses on Linux (libXrandr) 
 memory when two threads use it at once, and GTK uses it on the main thread.
 
 One wallpaper change is show(), which the command line runs directly: it renders images
-for the display layout (superpaper.render), keeps the render (superpaper.render_cache)
+for the display layout (superpaper.rendering.render), keeps the render (superpaper.rendering.render_cache)
 and hands it to the desktop (superpaper.desktop).
 """
 
@@ -24,22 +24,22 @@ from pathlib import Path
 from typing import TYPE_CHECKING, assert_never
 
 import superpaper.desktop as desktop
-import superpaper.render as render
-import superpaper.render_cache as render_cache
+import superpaper.rendering.render as render
 from superpaper.desktop.kde import Activities
 from superpaper.desktop.process import Result
 from superpaper.desktop.wallpaper import Pieces, Spanned, Wallpaper
+from superpaper.geometry.perspective import Default, Disabled, Named
 from superpaper.paths import AppPaths
-from superpaper.perspective import Default, Disabled, Named
-from superpaper.profile_id import ProfileId, ProfileIdError
-from superpaper.profile_store import write_active_profile
-from superpaper.profiles import Profile
+from superpaper.profiles.profile_file import Profile
+from superpaper.profiles.profile_id import ProfileId, ProfileIdError
+from superpaper.profiles.profile_store import write_active_profile
+from superpaper.rendering import render_cache
 
 if TYPE_CHECKING:
     from PIL import Image
 
-    from superpaper.displays import Layout
-    from superpaper.profile_store import StoredProfile
+    from superpaper.geometry.displays import Layout
+    from superpaper.profiles.profile_store import StoredProfile
 
 logger = logging.getLogger(__name__)
 

@@ -10,11 +10,11 @@ from dataclasses import replace
 import wx  # ty:ignore[unresolved-import]
 
 import superpaper.desktop as desktop
-import superpaper.display_detection as display_detection
-import superpaper.profile_store as profile_store
+import superpaper.geometry.display_detection as display_detection
 from superpaper.paths import AppPaths
-from superpaper.profile_id import ProfileId, ProfileIdError
-from superpaper.profile_store import ProfileDiagnosticKind, ProfileStore
+from superpaper.profiles import profile_store
+from superpaper.profiles.profile_id import ProfileId, ProfileIdError
+from superpaper.profiles.profile_store import ProfileDiagnosticKind, ProfileStore
 from superpaper.session import Session
 from superpaper.settings import SETTINGS_FILE, Settings, write_settings
 from superpaper.ui.editor import ConfigFrame

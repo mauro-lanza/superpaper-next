@@ -89,7 +89,6 @@ ENV PATH="${VIRTUAL_ENV}/bin:${PATH}"
 COPY pyproject.toml README.md LICENSE /tmp/superpaper-deps/
 COPY superpaper/__init__.py superpaper/__version__.py /tmp/superpaper-deps/superpaper/
 COPY superpaper/resources /tmp/superpaper-deps/superpaper/resources
-COPY superpaper/profiles /tmp/superpaper-deps/superpaper/profiles
 RUN python3.14 -m venv "${VIRTUAL_ENV}" \
     && pip install --no-cache-dir --upgrade pip wheel \
     && wget -q -O /tmp/wxPython-4.2.5-cp314-cp314-linux_x86_64.whl \

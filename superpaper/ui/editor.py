@@ -7,14 +7,15 @@ from typing import assert_never
 
 import wx  # ty:ignore[unresolved-import]
 
-from superpaper import canvas, display_store, profiles
-from superpaper.displays import Layout
+from superpaper.geometry import canvas, display_store
+from superpaper.geometry.displays import Layout
+from superpaper.geometry.perspective import Default, Disabled, choice_label, parse_choice
 from superpaper.paths import resource
-from superpaper.perspective import Default, Disabled, choice_label, parse_choice
-from superpaper.profile_id import NEW_PROFILE_LABEL, ProfileId, ProfileIdError
-from superpaper.profile_store import validate_managed_profile_id
-from superpaper.profiles import SPAN_MODES, Profile, SpanMode
-from superpaper.selection import Selection, first_image, is_file, is_folder
+from superpaper.profiles import profile_file
+from superpaper.profiles.profile_file import SPAN_MODES, Profile, SpanMode
+from superpaper.profiles.profile_id import NEW_PROFILE_LABEL, ProfileId, ProfileIdError
+from superpaper.profiles.profile_store import validate_managed_profile_id
+from superpaper.profiles.selection import Selection, first_image, is_file, is_folder
 from superpaper.ui.browse_dialog import BrowsePaths, source_icon
 from superpaper.ui.display_band import DisplayBand
 from superpaper.ui.help import HelpFrame, image_quality_advice, show_help_popup
@@ -659,7 +660,7 @@ class WallpaperSettingsPanel(wx.Panel):
         be read yet (typing in progress) count through their problems, which quote them.
         """
         profile, problems = self._collect_profile()
-        return profiles.serialize(profile) + "\n".join(problems)
+        return profile_file.serialize(profile) + "\n".join(problems)
 
     def _set_clean_baseline(self):
         """Record the current field state as the saved/clean baseline."""
@@ -1098,7 +1099,7 @@ class WallpaperSettingsPanel(wx.Panel):
         profile are left untouched. Use Save to persist the changes.
         """
         profile, problems = self._collect_profile()
-        problems += profiles.validate(profile)
+        problems += profile_file.validate(profile)
         if problems:
             self._show_problems(problems)
             logger.info("onApply: validation failed, nothing applied.")
@@ -1258,7 +1259,7 @@ class WallpaperSettingsPanel(wx.Panel):
                 validate_managed_profile_id(self.paths.profiles, profile.name, current_profile_id)
             except (OSError, ProfileIdError, ValueError) as error:
                 problems.insert(0, str(error))
-        problems += profiles.validate(profile)
+        problems += profile_file.validate(profile)
         if problems:
             logger.info("The profile was not saved: %s", problems)
             self._show_problems(problems)
@@ -1371,7 +1372,7 @@ class WallpaperSettingsPanel(wx.Panel):
         wx.BeginBusyCursor()
         # With the saved display settings, detected again before the draft is rendered.
         self.refresh_displays()
-        profile = profiles.draft(testimage, spanmode="advanced", perspective=perspective, offsets=offsets)
+        profile = profile_file.draft(testimage, spanmode="advanced", perspective=perspective, offsets=offsets)
         self.session.apply_draft(profile, testimage, on_done=lambda problem: wx.CallAfter(draft_shown, problem))
 
     def onPerspectives(self, event):

@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from superpaper.profile_id import (
+from superpaper.profiles.profile_id import (
     NEW_PROFILE_LABEL,
     ManagedPathError,
     ProfileId,

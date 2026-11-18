@@ -2,8 +2,8 @@
 
 import wx  # ty:ignore[unresolved-import]
 
-from superpaper.render import source_icon_image
-from superpaper.selection import is_folder
+from superpaper.profiles.selection import is_folder
+from superpaper.rendering.render import source_icon_image
 
 
 def source_icon(path, size):

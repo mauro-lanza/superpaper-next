@@ -18,8 +18,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from superpaper import display_detection, display_store
-from superpaper.perspective import Default, Disabled, Named, Perspective, Swivel, SwivelAxis, Tilt
+from superpaper.geometry import display_detection, display_store
+from superpaper.geometry.perspective import Default, Disabled, Named, Perspective, Swivel, SwivelAxis, Tilt
 
 
 def monitor(x, y, width, height, width_mm, height_mm, name):

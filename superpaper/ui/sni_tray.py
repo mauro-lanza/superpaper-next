@@ -25,7 +25,7 @@ from typing import Any, assert_never
 
 import wx  # ty:ignore[unresolved-import]
 
-from superpaper.render import load_argb32
+from superpaper.rendering.render import load_argb32
 from superpaper.ui.tray_menu import Check, Item, MenuEntry, Separator, Submenu
 
 logger = logging.getLogger(__name__)
