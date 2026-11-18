@@ -5,8 +5,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from superpaper.files import SaveFailed
 from superpaper.geometry import canvas, display_detection, display_store
+from superpaper.geometry.display_store import SaveFailed
 from superpaper.geometry.perspective import Perspective, Swivel, SwivelAxis, Tilt
 from superpaper.geometry.perspective_form import (
     NeedsConfirm,
@@ -71,7 +71,7 @@ def test_a_valid_form_is_saved_into_the_layout_and_its_file(layout, tmp_path):
     assert result.layout.default_perspective == "desk"
     assert result.layout.perspective("desk").central_display == 0
     assert result.layout.perspective("desk").viewer_pos[2] == pytest.approx(600 * layout.max_ppi() / 25.4)
-    assert display_store.read_perspectives(tmp_path, layout.key)[0].name == "desk"
+    assert display_store.load(tmp_path, layout.displays).perspectives[0].name == "desk"
 
 
 def test_a_form_without_a_name_is_a_problem_and_saves_nothing(layout, tmp_path):

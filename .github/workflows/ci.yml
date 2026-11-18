@@ -1,24 +1,20 @@
 name: CI
 
-# Lint, format, type-check and headless tests on the dev group only.
-
 on:
   push:
     branches: [master]
   pull_request:
 
-# Least-privilege: the lint job only needs to read the repo.
 permissions:
   contents: read
 
-# Cancel superseded runs on the same ref to save CI minutes.
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   lint:
-    name: Lint, format & type-check
+    name: Lint, type-check & test
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository

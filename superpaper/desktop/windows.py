@@ -70,9 +70,12 @@ def enable_activedesktop() -> None:
 def set_wallpaper_win(image_path: str) -> None:
     enable_activedesktop()
     pythoncom.CoInitialize()
-    iad = pythoncom.CoCreateInstance(
-        shell.CLSID_ActiveDesktop, None, pythoncom.CLSCTX_INPROC_SERVER, shell.IID_IActiveDesktop
-    )
-    iad.SetWallpaper(str(image_path), 0)
-    iad.ApplyChanges(shellcon.AD_APPLY_ALL)
-    force_refresh_syspar()
+    try:
+        iad = pythoncom.CoCreateInstance(
+            shell.CLSID_ActiveDesktop, None, pythoncom.CLSCTX_INPROC_SERVER, shell.IID_IActiveDesktop
+        )
+        iad.SetWallpaper(str(image_path), 0)
+        iad.ApplyChanges(shellcon.AD_APPLY_ALL)
+        force_refresh_syspar()
+    finally:
+        pythoncom.CoUninitialize()

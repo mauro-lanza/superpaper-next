@@ -4,8 +4,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from superpaper.files import SaveFailed
 from superpaper.geometry import display_detection, display_store, layout_edit
+from superpaper.geometry.display_store import SaveFailed
 from superpaper.geometry.layout_edit import ConfiguringBezels, ConfiguringPositions, Idle
 from superpaper.user_input import Problems
 
@@ -174,7 +174,7 @@ def test_cancelling_the_position_entry_restores_the_offsets_it_opened_with(layou
 
 def test_saving_display_settings_writes_them_to_the_config_directory(layout, tmp_path):
     assert layout_edit.save_display_settings(tmp_path, layout) is None
-    assert display_store.read_layout(tmp_path, layout.key) is not None
+    assert display_store.load(tmp_path, layout.displays).ppi_norm_offsets == layout.ppi_norm_offsets
 
 
 def test_display_settings_that_cant_be_written_come_back_as_a_failure(layout, tmp_path):

@@ -20,7 +20,7 @@ from superpaper.profiles.profile_file import Correction, OffsetsCorrection, Prof
 from superpaper.profiles.profile_store import StoredProfile
 from superpaper.profiles.selection import Selection, SortMode, is_file
 from superpaper.settings import format_hotkey, parse_hotkey
-from superpaper.user_input import Offset, OffsetError, Problems, parse_offsets
+from superpaper.user_input import Offset, OffsetError, Problems, parse_float, parse_offsets
 
 logger = logging.getLogger(__name__)
 
@@ -186,16 +186,18 @@ def parse_form(form: ProfileForm) -> tuple[Profile, list[str]]:
     delay that isn't a number. Never raises on partial input, so it is safe to call on
     every field edit."""
     problems = []
-    delay = 600.0
-    sortmode: SortMode = "shuffle"
+    defaults = Profile(name=form.name)
+    delay = defaults.delay
+    sortmode = defaults.sortmode
     if form.slideshow:
         if not form.delay_minutes.strip():
             problems.append("When using slideshow you need to enter a delay.")
         else:
-            try:
-                delay = 60 * float(form.delay_minutes)  # minutes here, seconds in the file
-            except ValueError:
+            minutes = parse_float(form.delay_minutes)
+            if minutes is None or minutes <= 0:
                 problems.append(f"The slideshow delay must be a number of minutes, not '{form.delay_minutes}'.")
+            else:
+                delay = 60 * minutes  # minutes here, seconds in the file
         if form.sort_label is not None:
             sortmode = _SORT_MODE_OF_LABEL[form.sort_label]
     hotkey = parse_hotkey(form.hotkey) if form.hotkey_enabled else None
@@ -256,7 +258,7 @@ def chosen_images(profile: Profile, focused_path: str | None, loaded: StoredProf
     focused in the source list, or else what the profile open in the editor shows.
 
     That profile is the one loaded, by its original name, so a rename in progress keeps
-    the selection (#158). None for one image per display, which a slideshow or the first
+    the selection. None for one image per display, which a slideshow or the first
     images of the sources provide.
     """
     if profile.spanmode == "multi":

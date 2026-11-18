@@ -132,7 +132,10 @@ def set_wallpaper(pieces: Sequence[str], activities: Activities) -> Result:
     if not names:
         return _evaluate(wallpaper_script({}, pieces))
     images = {activity: _activity_images(name, pieces, activities) for activity, name in names.items()}
-    desktops = desktop_activities(activities.state_dir)
+    try:
+        desktops = desktop_activities(activities.state_dir)
+    except PlasmaScriptingUnavailable as error:
+        return Result(str(error))
     if not desktops:
         return Result("Failed to get desktop-activity mapping, cannot set wallpapers")
     by_desktop = {desktop: images[activity] for desktop, activity in desktops.items() if activity in images}
@@ -186,7 +189,9 @@ def desktop_activities(state_dir: Path) -> dict[int, str]:
                 all_desktop_ids.append(desktop_id)
                 if screen_id != -1:
                     active_desktop_ids.append(desktop_id)
-    except Exception:  # dbus-python is missing, or Plasma answered something else
+    except PlasmaScriptingUnavailable:
+        raise
+    except Exception:  # Plasma answered something else
         logger.exception("Failed to get desktop-activity mapping")
         return {}
     if not active_desktop_ids or not current_activity_id:

@@ -72,7 +72,11 @@ class Hotkeys:
         replaces the keys it had; one that isn't set is left unbound."""
         for action, keys in ((NEXT_WALLPAPER, settings.hk_binding_next), (PAUSE, settings.hk_binding_pause)):
             bound = next((bound for bound, owner in self._owners.items() if owner == action), None)
-            if keys == bound or keys is None:
+            if keys is None:
+                if bound is not None:
+                    self._release(self._general, bound)
+                continue
+            if keys == bound:
                 continue
             if keys in self._owners:
                 self._report_taken(keys, action)
@@ -151,7 +155,5 @@ class Hotkeys:
 
     def _report(self, message: str) -> None:
         logger.warning("%s", message)
-        # Hotkey errors have only been logged on KDE Plasma since per-activity wallpapers
-        # came in; elsewhere they are shown too.
         if not running_kde():
             self._show(message)

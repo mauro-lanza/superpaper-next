@@ -5,23 +5,27 @@ into a perspective, asks first when it would need a very large intermediate imag
 saves the layout's perspective choice.
 """
 
-import configparser
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from superpaper.files import SaveFailed
 from superpaper.geometry import canvas, display_store
-from superpaper.geometry.displays import MM_PER_INCH, Layout
-from superpaper.geometry.perspective import (
-    Perspective,
-    SwivelAxis,
-    check_new_perspective_name,
-    parse_rotations_mm,
-    parse_viewer_offsets_mm,
-    perspective_from_mm,
+from superpaper.geometry.display_store import SaveFailed
+from superpaper.geometry.displays import Layout
+from superpaper.geometry.perspective import MM_PER_INCH, Perspective, Swivel, SwivelAxis, Tilt
+from superpaper.user_input import Offset, Problems, parse_float
+
+# "none" is display_store's no-default sentinel; "default" and "disabled" clash with the
+# editor's perspective choices.
+_RESERVED_PERSPECTIVE_NAMES = frozenset({"default", "disabled", "none"})
+ROTATION_CELL_NAMES = (
+    "Swivel angle",
+    "Sw. ax. lat. off.",
+    "Sw. ax. dep. off.",
+    "Tilt angle",
+    "Ti. ax. ver. off.",
+    "Ti. ax. dep. off.",
 )
-from superpaper.user_input import Offset, Problems
 
 
 @dataclass(frozen=True, slots=True)
@@ -138,11 +142,77 @@ def save_perspective(
 
 def save_choice(config_dir: Path, layout: Layout) -> SaveFailed | None:
     """Save the perspective choice of ``layout`` alone, without its unsaved layout edits."""
-    try:
-        display_store.save_perspective_choice(config_dir, layout)
-    except (OSError, configparser.Error, ValueError, KeyError) as error:
-        return SaveFailed(f"The perspective settings could not be saved: {error}")
-    return None
+    return display_store.save_or_failure(
+        display_store.save_perspective_choice, config_dir, layout, "perspective settings"
+    )
+
+
+def check_new_perspective_name(name: str) -> None:
+    """Raise ValueError if ``name`` cannot be given to a perspective being saved."""
+    if name.casefold() in _RESERVED_PERSPECTIVE_NAMES:
+        message = f"'{name}' is reserved; choose another perspective name."
+        raise ValueError(message)
+
+
+def parse_viewer_offsets_mm(texts: Sequence[str]) -> list[float]:
+    """The viewer's (horizontal, vertical, distance) offsets in millimetres, as typed.
+
+    Raises ValueError saying what is wrong with them; the distance must be positive.
+    """
+    numbers = [parse_float(text) for text in texts]
+    offsets = [number for number in numbers if number is not None]
+    if len(offsets) != len(numbers):
+        message = "Viewer offsets should be lenghts in millimeters, separate decimals with a point."
+        raise ValueError(message)
+    if offsets[2] <= 0:
+        message = "Viewer distance must be entered and positive."
+        raise ValueError(message)
+    return offsets
+
+
+def parse_rotations_mm(
+    axes: Sequence[int], cells: Sequence[Sequence[str]]
+) -> tuple[list[tuple[SwivelAxis, float, float, float]], list[tuple[float, float, float]]]:
+    """The swivels and tilts of the displays in the dialog's grid, as typed.
+
+    ``axes`` holds each display's swivel axis choice (a SwivelAxis value) and ``cells`` its
+    texts in the order of ROTATION_CELL_NAMES. Raises ValueError naming the display and
+    column of a cell that is not a number.
+    """
+    swivels = []
+    tilts = []
+    for display, (axis, row) in enumerate(zip(axes, cells, strict=True)):
+        numbers = []
+        for name, text in zip(ROTATION_CELL_NAMES, row, strict=True):
+            number = parse_float(text)
+            if number is None:
+                message = f"Display {display}, '{name}': '{text}' is not a number; separate decimals with a point."
+                raise ValueError(message)
+            numbers.append(number)
+        swivels.append((SwivelAxis(axis), numbers[0], numbers[1], numbers[2]))
+        tilts.append((numbers[3], numbers[4], numbers[5]))
+    return swivels, tilts
+
+
+def perspective_from_mm(
+    name: str,
+    max_ppi: float,
+    central_display: int,
+    viewer_offset_mm: list[float],
+    swivels_mm: list[tuple[SwivelAxis, float, float, float]],
+    tilts_mm: list[tuple[float, float, float]],
+) -> Perspective:
+    """The perspective for the dialog's lengths in millimetres, converted to pixels at
+    ``max_ppi``; angles and axes are kept."""
+    px_per_mm = max_ppi / MM_PER_INCH
+    lateral, vertical, depth = (px_per_mm * length for length in viewer_offset_mm)
+    return Perspective(
+        name,
+        central_display,
+        (lateral, vertical, depth),
+        tuple(Swivel(axis, angle, px_per_mm * lat, px_per_mm * dep) for axis, angle, lat, dep in swivels_mm),
+        tuple(Tilt(angle, px_per_mm * ver, px_per_mm * dep) for angle, ver, dep in tilts_mm),
+    )
 
 
 def _large_image_warning(size: tuple[int, int]) -> str:

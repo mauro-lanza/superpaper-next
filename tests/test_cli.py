@@ -1,3 +1,4 @@
+import configparser
 import logging
 import os
 import subprocess
@@ -6,12 +7,29 @@ from types import ModuleType, SimpleNamespace
 
 import pytest
 
-from superpaper.cli import configure_logging
+from superpaper.cli import configure_logging, parse_offset_args
 from superpaper.desktop.process import Result
+from superpaper.geometry.display_detection import DisplayDetectionError
 from superpaper.settings import read_settings
+from superpaper.user_input import OffsetError
 from tests.conftest import write_profile
 
 module_logger = logging.getLogger("superpaper.test_logging")
+
+
+def test_command_line_offsets_pair_up_x_and_y_for_each_display():
+    assert parse_offset_args(["1", "2", "-3", "4"]) == ((1, 2), (-3, 4))
+    assert parse_offset_args([]) == ()
+
+
+def test_command_line_offsets_must_come_in_pairs():
+    with pytest.raises(OffsetError, match="not even"):
+        parse_offset_args(["1", "2", "3"])
+
+
+def test_command_line_offsets_must_be_whole_numbers():
+    with pytest.raises(OffsetError, match="whole numbers of pixels: 1 x"):
+        parse_offset_args(["1", "x"])
 
 
 @pytest.fixture
@@ -482,6 +500,29 @@ def test_invalid_profile_id_fails_before_inventory_or_display_data(monkeypatch, 
     monkeypatch.setattr(cli.profile_store, "discover", lambda paths: pytest.fail("inventory was constructed"))
 
     assert cli.run(["--profile", "../invalid"], app_paths) == 1
+
+
+@pytest.mark.parametrize(
+    ("error", "message"),
+    [
+        (DisplayDetectionError(3), "No displays could be detected"),
+        (ValueError("bad"), "The saved display layout could not be read"),
+        (configparser.Error("bad"), "The saved display layout could not be read"),
+        (OSError("disk"), "Superpaper's files could not be read or written"),
+    ],
+)
+def test_profile_launch_reports_layout_failure(monkeypatch, app_paths, caplog, error, message):
+    from superpaper import cli
+
+    (app_paths.profiles / "existing.profile").write_text("name=existing\n", encoding="utf-8")
+
+    def fail(config_dir):
+        raise error
+
+    monkeypatch.setattr(cli, "detect_layout", fail)
+
+    assert cli.run(["--profile", "existing"], app_paths) == 1
+    assert message in caplog.text
 
 
 def test_profile_lookup_accepts_valid_unicode(monkeypatch, app_paths):

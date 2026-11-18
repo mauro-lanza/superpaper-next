@@ -12,15 +12,13 @@ from dataclasses import dataclass, replace
 from typing import assert_never
 
 from superpaper.geometry.canvas import Crop, DisplayArea, Point, canvas_size
-from superpaper.geometry.perspective import Default, Disabled, Named, Perspective, PerspectiveChoice
+from superpaper.geometry.perspective import MM_PER_INCH, Default, Disabled, Named, Perspective, PerspectiveChoice
 
 SIZE_HINT = (
     "Detection of the diagonal size of a display has failed. It will show up as a 23 inch "
     "display in advanced mode. Enter the correct diagonal size with the Override Detected "
     "Sizes tool."
 )
-
-MM_PER_INCH = 25.4
 
 
 @dataclass(frozen=True, slots=True)

@@ -73,6 +73,12 @@ def test_a_slideshow_needs_a_delay_that_is_a_number():
     assert wrong == ["The slideshow delay must be a number of minutes, not 'soon'."]
 
 
+@pytest.mark.parametrize("text", ["inf", "-inf", "nan", "0", "-1"])
+def test_a_slideshow_delay_must_be_a_finite_positive_number(text):
+    _, problems = parse_form(blank(slideshow=True, delay_minutes=text))
+    assert problems == [f"The slideshow delay must be a number of minutes, not '{text}'."]
+
+
 def test_the_delay_and_sort_are_ignored_without_a_slideshow():
     profile, problems = parse_form(blank(delay_minutes="soon", sort_label="Alphabetical"))
     assert (profile.delay, profile.sortmode, problems) == (600.0, "shuffle", [])

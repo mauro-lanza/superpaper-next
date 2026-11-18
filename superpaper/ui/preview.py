@@ -8,7 +8,8 @@ from PIL import Image, ImageEnhance
 
 from superpaper.geometry import canvas
 from superpaper.profiles.profile_file import SpanMode
-from superpaper.rendering.render import SourceImageError, open_preview_image, resize_to_fill
+from superpaper.rendering.render import resize_to_fill
+from superpaper.rendering.source_image import SourceImageError, open_preview_image
 from superpaper.ui.layout_editor import LayoutEditor
 
 logger = logging.getLogger(__name__)

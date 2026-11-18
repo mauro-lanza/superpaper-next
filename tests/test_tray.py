@@ -7,9 +7,9 @@ from types import SimpleNamespace
 import pytest
 
 from superpaper.desktop.process import Result
+from superpaper.desktop.tray_menu import Check, Item, Separator, Submenu
 from superpaper.profiles.profile_file import Profile
 from superpaper.profiles.profile_id import ProfileId
-from superpaper.tray_menu import Check, Item, Separator, Submenu
 
 CONFIG_DIR = Path("/config")
 

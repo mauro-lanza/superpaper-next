@@ -19,10 +19,26 @@ from superpaper.profiles import profile_file, profile_store
 from superpaper.profiles.profile_id import ProfileId, ProfileIdError
 from superpaper.session import show
 from superpaper.settings import SETTINGS_FILE, read_settings, write_settings
-from superpaper.user_input import Offset, OffsetError, parse_offset_args
+from superpaper.user_input import Offset, OffsetError
 
 logger = logging.getLogger(__name__)
 _PACKAGE_LOGGER = logging.getLogger("superpaper")
+
+
+def parse_offset_args(args: Sequence[str]) -> tuple[Offset, ...]:
+    """The offsets of command line ``args``: an x and a y in pixels for each display."""
+    if len(args) % 2:
+        message = (
+            "Number of offset pixels not even. If passing manual offsets, give width and height offset "
+            "for each display, even if not actually offsetting every display."
+        )
+        raise OffsetError(message)
+    try:
+        pixels = [int(arg) for arg in args]
+    except ValueError:
+        message = f"The offsets must be whole numbers of pixels: {' '.join(args)}"
+        raise OffsetError(message) from None
+    return tuple(zip(pixels[::2], pixels[1::2]))
 
 
 class CliError(Exception):
@@ -233,6 +249,9 @@ def _detect_displays(paths: AppPaths) -> Layout:
         raise CliError(message) from error
     except (ValueError, configparser.Error) as error:
         message = f"The saved display layout could not be read: {error}"
+        raise CliError(message) from error
+    except OSError as error:
+        message = f"Superpaper's files could not be read or written: {error}"
         raise CliError(message) from error
 
 

@@ -34,6 +34,7 @@ from superpaper.profiles.profile_file import Profile
 from superpaper.profiles.profile_id import ProfileId, ProfileIdError
 from superpaper.profiles.profile_store import write_active_profile
 from superpaper.rendering import render_cache
+from superpaper.rendering.source_image import SourceImageError
 
 if TYPE_CHECKING:
     from PIL import Image
@@ -318,7 +319,7 @@ def show(
         return _skipped(f"'{profile.name}' has no images to show.")
     try:
         image = _render(profile, files, layout)
-    except render.SourceImageError as error:
+    except SourceImageError as error:
         return _skipped(str(error))
     if image is None:
         return _skipped(f"No complete wallpaper selection is available for profile '{profile.name}'.")

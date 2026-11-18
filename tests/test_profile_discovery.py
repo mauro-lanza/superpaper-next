@@ -133,7 +133,7 @@ def test_a_name_line_never_becomes_an_identity(app_paths, tmp_path):
     assert stored.profile.hotkey == ("control", "x")
     with pytest.raises(ProfileIdError):
         ProfileId.parse("../outside")
-    profile_store.delete_managed_profile(app_paths, stored)
+    ProfileStore(app_paths).delete(stored)
     assert outside.read_bytes() == b"sentinel"
 
 
@@ -148,7 +148,7 @@ def test_delete_uses_loaded_content_and_rejects_replacement(app_paths):
     os.utime(path, ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns))
 
     with pytest.raises(profile_store.ManagedPathError):
-        profile_store.delete_managed_profile(app_paths, stored)
+        ProfileStore(app_paths).delete(stored)
 
     assert path.read_bytes() == replacement
 
@@ -160,7 +160,7 @@ def test_deleting_a_symlinked_profile_removes_only_the_link(app_paths, tmp_path)
     link = app_paths.profiles / "Work.profile"
     link.symlink_to(dotfile)
 
-    profile_store.delete_managed_profile(app_paths, load_profile(app_paths, "Work"))
+    ProfileStore(app_paths).delete(load_profile(app_paths, "Work"))
 
     assert not link.is_symlink()
     assert dotfile.read_bytes() == profile_bytes("Work")

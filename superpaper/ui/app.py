@@ -4,6 +4,7 @@ that the application in superpaper.controller opens through its Shell."""
 import configparser
 import logging
 import sys
+from collections.abc import Callable
 
 import wx  # ty:ignore[unresolved-import]
 
@@ -87,12 +88,14 @@ def start_superpaper(
     def close() -> None:
         frame.Close()
 
+    open_frames: dict[str, wx.Frame] = {}
+
     shell = Shell(
         notify=_notify,
         confirm=lambda message: show_message_dialog(message, "Error", style="YES_NO"),
         call_soon=wx.CallAfter,
-        open_editor=_open_editor,
-        open_settings=_open_settings,
+        open_editor=lambda app: _open_editor(app, open_frames),
+        open_settings=lambda app: _open_settings(app, open_frames),
         open_help=_open_help,
         make_tray=_make_tray,
         close=close,
@@ -104,20 +107,34 @@ def _notify(message: str, title: str) -> None:
     show_message_dialog(message, title)
 
 
-def _open_editor(app: Superpaper) -> None:
-    ConfigFrame(
-        app.paths,
-        lambda: app.settings,
-        app.store,
-        app.session,
-        update_settings=app.update_settings,
-        refresh_displays=app.refresh_displays,
-        rebind_hotkey=app.rebind_hotkey,
+def _open_editor(app: Superpaper, open_frames: dict[str, wx.Frame]) -> None:
+    _show_once(
+        open_frames,
+        "editor",
+        lambda: ConfigFrame(
+            app.paths,
+            lambda: app.settings,
+            app.store,
+            app.session,
+            update_settings=app.update_settings,
+            refresh_displays=app.refresh_displays,
+            rebind_hotkey=app.rebind_hotkey,
+        ),
     )
 
 
-def _open_settings(app: Superpaper) -> None:
-    SettingsFrame(lambda: app.settings, save_settings=app.apply_settings)
+def _open_settings(app: Superpaper, open_frames: dict[str, wx.Frame]) -> None:
+    _show_once(open_frames, "settings", lambda: SettingsFrame(lambda: app.settings, save_settings=app.apply_settings))
+
+
+def _show_once(open_frames: dict[str, wx.Frame], name: str, make_frame: Callable[[], wx.Frame]) -> None:
+    """Raise the window ``name`` if it is still open, else open it."""
+    frame = open_frames.get(name)
+    # A destroyed wx object is falsy.
+    if frame:
+        frame.Raise()
+    else:
+        open_frames[name] = make_frame()
 
 
 def _open_help(app: Superpaper) -> None:

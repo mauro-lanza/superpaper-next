@@ -13,7 +13,7 @@ import configparser
 import io
 import locale
 import logging
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -28,7 +28,7 @@ LAYOUTS_FILE = "display_systems.dat"
 
 
 @dataclass(frozen=True, slots=True)
-class SavedLayout:
+class _SavedLayout:
     """What display_systems.dat keeps about one layout."""
 
     ppi_norm_offsets: list[Point]
@@ -41,32 +41,34 @@ class SavedLayout:
     default_perspective: str | None
 
 
+@dataclass(frozen=True, slots=True)
+class SaveFailed:
+    """Settings that couldn't be written to disk, and why."""
+
+    message: str
+
+
 def load(config_dir: Path, displays: tuple[Display, ...]) -> Layout:
     """The layout saved for ``displays``, or the one of displays with nothing saved.
 
     Raises configparser.Error or ValueError for files that can't be read.
     """
     layout = Layout.initial(displays)
-    saved = read_layout(config_dir, layout.key)
+    saved = _read_layout(config_dir, layout.key)
     if saved is not None:
         try:
             layout = _with_saved(layout, saved)
         except ValueError as error:
             message = f"{config_dir / LAYOUTS_FILE}, layout {layout.key}: {error}"
             raise ValueError(message) from error
-    return replace(layout, perspectives=read_perspectives(config_dir, layout.key))
+    return replace(layout, perspectives=_read_perspectives(config_dir, layout.key))
 
 
 def save_layout(config_dir: Path, layout: Layout) -> None:
     """Save the user's settings for these displays in display_systems.dat: where they
     are placed (bezels included), the bezels, any diagonal sizes entered, and the
     perspective choice. The layouts of other displays are kept."""
-    write_layout(config_dir, layout.key, _as_saved(layout))
-
-
-def save_perspectives(config_dir: Path, layout: Layout) -> None:
-    """Save all the perspectives of these displays, in their <key>.persp file."""
-    write_perspectives(config_dir, layout.key, layout.perspectives)
+    _write_layout(config_dir, layout.key, _as_saved(layout))
 
 
 def save_perspective_choice(config_dir: Path, layout: Layout) -> None:
@@ -74,19 +76,30 @@ def save_perspective_choice(config_dir: Path, layout: Layout) -> None:
     and whether they are used in display_systems.dat. The rest of the saved layout is
     left as it is, whatever else ``layout`` holds. A display_systems.dat that can't be
     read changes nothing."""
-    saved = read_layout(config_dir, layout.key)
+    saved = _read_layout(config_dir, layout.key)
     if saved is None:
         # Nothing is saved yet, so the layout in use is the one of a fresh system.
         saved = _as_saved(Layout.initial(layout.displays))
-    save_perspectives(config_dir, layout)
-    write_layout(
+    _write_perspectives(config_dir, layout.key, layout.perspectives)
+    _write_layout(
         config_dir,
         layout.key,
         replace(saved, use_perspective=layout.use_perspective, default_perspective=layout.default_perspective),
     )
 
 
-def read_layout(config_dir: Path, key: str) -> SavedLayout | None:
+def save_or_failure(
+    save: Callable[[Path, Layout], None], config_dir: Path, layout: Layout, what: str
+) -> SaveFailed | None:
+    """Run ``save``; why it failed, worded for ``what`` was being saved, or None."""
+    try:
+        save(config_dir, layout)
+    except (OSError, configparser.Error, ValueError) as error:
+        return SaveFailed(f"The {what} could not be saved: {error}")
+    return None
+
+
+def _read_layout(config_dir: Path, key: str) -> _SavedLayout | None:
     """The layout saved under ``key``, or None if there is none."""
     config = _read(config_dir / LAYOUTS_FILE)
     if key not in config:
@@ -95,7 +108,7 @@ def read_layout(config_dir: Path, key: str) -> SavedLayout | None:
     section = config[key]
     try:
         default_perspective = section.get("def_perspective", "None")
-        layout = SavedLayout(
+        layout = _SavedLayout(
             ppi_norm_offsets=_str_to_points(section["ppi_norm_offsets"]),
             bezel_mms=[(round(x, 2), round(y, 2)) for x, y in _str_to_points(section["bezel_mms"])],
             user_diagonal_inches=_str_to_numbers(section["user_diagonal_inches"]),
@@ -109,7 +122,7 @@ def read_layout(config_dir: Path, key: str) -> SavedLayout | None:
     return layout
 
 
-def write_layout(config_dir: Path, key: str, layout: SavedLayout) -> None:
+def _write_layout(config_dir: Path, key: str, layout: _SavedLayout) -> None:
     """Save ``layout`` under ``key``, keeping the layouts of other displays."""
     path = config_dir / LAYOUTS_FILE
     config = _read(path)
@@ -124,7 +137,7 @@ def write_layout(config_dir: Path, key: str, layout: SavedLayout) -> None:
     _write(path, config)
 
 
-def read_perspectives(config_dir: Path, key: str) -> tuple[Perspective, ...]:
+def _read_perspectives(config_dir: Path, key: str) -> tuple[Perspective, ...]:
     """The perspectives saved for the layout ``key``, in file order.
 
     Raises ValueError for a perspective that isn't made of the numbers it needs.
@@ -141,7 +154,7 @@ def read_perspectives(config_dir: Path, key: str) -> tuple[Perspective, ...]:
     return tuple(perspectives)
 
 
-def write_perspectives(config_dir: Path, key: str, perspectives: Sequence[Perspective]) -> None:
+def _write_perspectives(config_dir: Path, key: str, perspectives: Sequence[Perspective]) -> None:
     """Save ``perspectives`` as all the perspectives of the layout ``key``."""
     config = configparser.ConfigParser()
     for perspective in perspectives:
@@ -157,17 +170,17 @@ def write_perspectives(config_dir: Path, key: str, perspectives: Sequence[Perspe
     _write(config_dir / f"{key}.persp", config)
 
 
-def _as_saved(layout: Layout) -> SavedLayout:
-    return SavedLayout(
+def _as_saved(layout: Layout) -> _SavedLayout:
+    return _SavedLayout(
         ppi_norm_offsets=list(layout.ppi_norm_offsets),
         bezel_mms=layout.bezels_in_mm(),
-        user_diagonal_inches=layout.diagonal_inches() if layout.uses_user_diagonals else None,
+        user_diagonal_inches=list(layout.user_diagonal_inches) if layout.user_diagonal_inches else None,
         use_perspective=layout.use_perspective,
         default_perspective=layout.default_perspective,
     )
 
 
-def _with_saved(layout: Layout, saved: SavedLayout) -> Layout:
+def _with_saved(layout: Layout, saved: _SavedLayout) -> Layout:
     """``layout`` with the settings saved for its displays."""
     bezels_mm = layout.bezels_mm
     if any(bez < 0 for bez_pair in saved.bezel_mms for bez in bez_pair):

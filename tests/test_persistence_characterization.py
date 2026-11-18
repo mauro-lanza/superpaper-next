@@ -148,6 +148,8 @@ def test_identical_sources_are_written_with_their_own_display_numbers():
         ("zoom=", ("zoom", 1.0)),
         ("zoom=big", ("zoom", 1.0)),
         ("zoom=0.5", ("zoom", 1.0)),
+        ("zoom=inf", ("zoom", 1.0)),
+        ("zoom=nan", ("zoom", 1.0)),
         ("align=", ("pan", (0.0, 0.0))),
         ("align=0.5", ("pan", (0.0, 0.0))),
         ("align=0.5,-2,9", ("pan", (0.5, -1.0))),
@@ -166,7 +168,19 @@ def test_values_earlier_versions_tolerated_still_load(line, value):
 
 
 @pytest.mark.parametrize(
-    "line", ["delay=", "delay=soon", "bezels=thin", "ppi=96.5", "diagonal_inches=24;big", "diagonal_inches=0;24"]
+    "line",
+    [
+        "delay=",
+        "delay=soon",
+        "delay=inf",
+        "delay=nan",
+        "delay=0",
+        "delay=-5",
+        "bezels=thin",
+        "ppi=96.5",
+        "diagonal_inches=24;big",
+        "diagonal_inches=0;24",
+    ],
 )
 def test_values_that_cant_be_used_make_a_profile_unusable(line):
     with pytest.raises(profile_file.ProfileFormatError):

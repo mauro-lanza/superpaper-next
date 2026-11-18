@@ -144,21 +144,22 @@ def test_saving_an_unchanged_layout_rewrites_the_same_bytes(monkeypatch, saved_l
     persp = (saved_layouts / f"{DUAL_KEY}.persp").read_bytes()
 
     display_store.save_layout(saved_layouts, layout)
-    display_store.save_perspectives(saved_layouts, layout)
+    display_store.save_perspective_choice(saved_layouts, layout)
 
     # The laptop's section survives, and nothing drifts when the user saves without editing.
     assert (saved_layouts / "display_systems.dat").read_bytes() == dat
     assert (saved_layouts / f"{DUAL_KEY}.persp").read_bytes() == persp
 
 
-def test_perspectives_with_whole_numbers_are_written_back_as_read(tmp_path):
-    (tmp_path / "7.persp").write_text(WHOLE_NUMBER_PERSP, encoding="utf-8")
+def test_perspectives_with_whole_numbers_are_written_back_as_read(monkeypatch, tmp_path):
+    persp_file = tmp_path / f"{DUAL_KEY}.persp"
+    persp_file.write_text(WHOLE_NUMBER_PERSP, encoding="utf-8")
 
-    perspectives = display_store.read_perspectives(tmp_path, "7")
-    display_store.write_perspectives(tmp_path, "7", perspectives)
+    layout = detect(monkeypatch, tmp_path, DUAL_MONITORS)
+    display_store.save_perspective_choice(tmp_path, layout)
 
-    assert (tmp_path / "7.persp").read_text(encoding="utf-8") == WHOLE_NUMBER_PERSP
-    assert perspectives[0].swivels[1] == Swivel(SwivelAxis.LEFT, -25, 40, 20)
+    assert persp_file.read_text(encoding="utf-8") == WHOLE_NUMBER_PERSP
+    assert layout.perspectives[0].swivels[1] == Swivel(SwivelAxis.LEFT, -25, 40, 20)
 
 
 @pytest.mark.parametrize(
@@ -170,11 +171,11 @@ def test_perspectives_with_whole_numbers_are_written_back_as_read(tmp_path):
         WHOLE_NUMBER_PERSP.replace("5,8,0", "5,8"),
     ],
 )
-def test_a_perspective_that_is_not_made_of_numbers_is_refused(tmp_path, broken):
-    (tmp_path / "7.persp").write_text(broken, encoding="utf-8")
+def test_a_perspective_that_is_not_made_of_numbers_is_refused(monkeypatch, tmp_path, broken):
+    (tmp_path / f"{DUAL_KEY}.persp").write_text(broken, encoding="utf-8")
 
     with pytest.raises(ValueError):
-        display_store.read_perspectives(tmp_path, "7")
+        detect(monkeypatch, tmp_path, DUAL_MONITORS)
 
 
 def test_repeated_saves_do_not_drift(monkeypatch, saved_layouts):
@@ -201,6 +202,16 @@ def test_a_fresh_layout_is_saved_with_float_bezels_as_earlier_versions_wrote_it(
     display_store.save_layout(tmp_path, layout)
 
     assert "bezel_mms = 0.0,0.0\n" in (tmp_path / "display_systems.dat").read_text(encoding="utf-8")
+
+
+def test_entered_diagonals_are_saved_as_entered(monkeypatch, tmp_path):
+    layout = detect(monkeypatch, tmp_path, DUAL_MONITORS).with_diagonals([27.25, 23.75])
+
+    display_store.save_layout(tmp_path, layout)
+    reloaded = detect(monkeypatch, tmp_path, DUAL_MONITORS)
+
+    assert reloaded.user_diagonal_inches == (27.25, 23.75)
+    assert reloaded.ppi_norm_offsets == layout.ppi_norm_offsets
 
 
 def test_monitors_without_a_saved_layout_get_a_guessed_one(monkeypatch, saved_layouts):

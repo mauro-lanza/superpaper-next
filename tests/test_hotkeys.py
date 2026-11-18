@@ -124,6 +124,15 @@ def test_a_general_hotkey_that_isnt_set_is_left_unbound(setup):
     assert setup.events == []
 
 
+def test_a_general_hotkey_cleared_in_settings_is_released(setup):
+    setup.hotkeys.register_general(GENERAL)
+
+    setup.hotkeys.register_general(Settings(hk_binding_next=None, hk_binding_pause=PAUSE))
+
+    assert set(setup.hotkeys._general.bound) == {PAUSE}
+    assert NEXT not in setup.hotkeys._owners
+
+
 def test_a_profile_hotkey_starts_its_profile_by_identity(setup):
     setup.hotkeys.register_profiles([saved("Work", ("control", "x")), saved("Home", None)])
 
