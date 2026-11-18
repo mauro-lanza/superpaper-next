@@ -10,13 +10,16 @@ import sys
 
 import pytest
 
+from superpaper import paths as paths_module
 from superpaper.paths import AppPaths, ensure_dirs, install_dir, resolve_paths
 
 
 def resolved(tmp_path, platform="linux", **environ):
     """resolve_paths for a scratch home and installation, as paths relative to tmp_path."""
     env = {"HOME": str(tmp_path / "home"), **{key: value.format(root=tmp_path) for key, value in environ.items()}}
-    paths = resolve_paths(env, platform, install=tmp_path / "app")
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(paths_module, "install_dir", lambda: tmp_path / "app")
+        paths = resolve_paths(env, platform)
     return {name: os.path.relpath(getattr(paths, name), tmp_path) for name in ("config", "profiles", "cache")}
 
 

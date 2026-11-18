@@ -16,6 +16,9 @@ logger = logging.getLogger(__name__)
 FALLBACK_PHYS_SIZE_MM = (509, 286)
 """A 23 inch display: a display of unknown size is assumed to be one, to have it stand out."""
 
+MAX_ATTEMPTS = 3
+RETRY_DELAY_SECONDS = 0.25
+
 
 class DisplayDetectionError(RuntimeError):
     """Raised when monitor enumeration cannot produce a usable display list."""
@@ -25,12 +28,12 @@ class DisplayDetectionError(RuntimeError):
         self.attempts = attempts
 
 
-def detect_layout(config_dir: Path, *, max_attempts: int = 3, retry_delay: float = 0.25) -> Layout:
+def detect_layout(config_dir: Path) -> Layout:
     """Detect the displays and load the layout saved for them from ``config_dir``."""
-    return display_store.load(config_dir, detect_displays(max_attempts=max_attempts, retry_delay=retry_delay))
+    return display_store.load(config_dir, detect_displays())
 
 
-def detect_displays(*, max_attempts: int = 3, retry_delay: float = 0.25) -> tuple[Display, ...]:
+def detect_displays() -> tuple[Display, ...]:
     """
     Detect the displays, sorted by their position on the desktop. Offsets are sanitized so
     that they are always non-negative.
@@ -42,28 +45,22 @@ def detect_displays(*, max_attempts: int = 3, retry_delay: float = 0.25) -> tupl
     if threading.current_thread() is not threading.main_thread():
         message = "Displays can only be detected on the main thread."
         raise RuntimeError(message)
-    if max_attempts < 1:
-        message = "max_attempts must be at least 1"
-        raise ValueError(message)
-    if retry_delay < 0:
-        message = "retry_delay cannot be negative"
-        raise ValueError(message)
 
     monitors = None
     last_error = None
-    for attempt in range(1, max_attempts + 1):
+    for attempt in range(1, MAX_ATTEMPTS + 1):
         try:
             monitors = get_monitors()
         except Exception as error:
             last_error = error
-            logger.warning("Display detection attempt %d/%d failed: %s", attempt, max_attempts, error)
+            logger.warning("Display detection attempt %d/%d failed: %s", attempt, MAX_ATTEMPTS, error)
         if monitors:
             break
-        if attempt < max_attempts:
+        if attempt < MAX_ATTEMPTS:
             logger.info("Display detection returned no displays; retrying.")
-            time.sleep(retry_delay)
+            time.sleep(RETRY_DELAY_SECONDS)
     else:
-        error = DisplayDetectionError(max_attempts)
+        error = DisplayDetectionError(MAX_ATTEMPTS)
         if last_error is not None:
             raise error from last_error
         raise error

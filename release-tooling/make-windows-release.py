@@ -38,7 +38,7 @@ def make_portable(dst_path):
     # copy resources
     shutil.copytree(os.path.join(SRCPATH, "resources"), portres, dirs_exist_ok=True)
     # copy profiles
-    shutil.copytree(os.path.join(SRCPATH, "profiles-win"), portprof, dirs_exist_ok=True)
+    shutil.copytree(os.path.realpath("./release-tooling/windows-profiles"), portprof, dirs_exist_ok=True)
     # copy exe-less structure to be used by innosetup
     shutil.copytree(portpath, INNO_STUB, dirs_exist_ok=True)
     # copy executable

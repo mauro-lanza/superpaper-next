@@ -1,19 +1,11 @@
 """The KDE tray menu (StatusNotifierItem): built without D-Bus from the tray's menu entries."""
 
-import pytest
-
-from superpaper.desktop import sni_tray as sni_module
-from superpaper.tray_menu import Check, Item, Separator, Submenu
+from superpaper.desktop.sni_tray import _MenuModel
+from superpaper.desktop.tray_menu import Check, Item, Separator, Submenu
 
 
-@pytest.fixture
-def sni_tray():
-    """The SNI module, whose ``call_soon`` runs actions at once."""
-    return sni_module
-
-
-def model_of(sni_tray, menu):
-    return sni_tray._MenuModel(menu, lambda action: action())
+def model_of(menu):
+    return _MenuModel(menu, lambda action: action())
 
 
 def entries(started, *, paused=False):
@@ -28,9 +20,9 @@ def entries(started, *, paused=False):
     )
 
 
-def test_the_menu_lists_the_profiles_and_starts_the_one_chosen(sni_tray):
+def test_the_menu_lists_the_profiles_and_starts_the_one_chosen():
     started = []
-    model = model_of(sni_tray, lambda: entries(started))
+    model = model_of(lambda: entries(started))
 
     model.rebuild()
     submenu = model.nodes[model.layout[2]]
@@ -42,10 +34,10 @@ def test_the_menu_lists_the_profiles_and_starts_the_one_chosen(sni_tray):
     assert started == ["Home"]
 
 
-def test_the_top_level_keeps_its_ids_when_the_profiles_change(sni_tray):
+def test_the_top_level_keeps_its_ids_when_the_profiles_change():
     profiles = [Item("Work", lambda: None)]
     menu = lambda: (Item("Settings", lambda: None), Submenu("Profiles", tuple(profiles)), Item("Exit", lambda: None))  # noqa: E731
-    model = model_of(sni_tray, menu)
+    model = model_of(menu)
 
     model.rebuild()
     before = model.layout
@@ -56,9 +48,9 @@ def test_the_top_level_keeps_its_ids_when_the_profiles_change(sni_tray):
     assert sorted(model.nodes) == [1, 2, 3, 4, 5]
 
 
-def test_a_check_item_carries_its_state(sni_tray):
+def test_a_check_item_carries_its_state():
     started = []
-    model = model_of(sni_tray, lambda: entries(started, paused=True))
+    model = model_of(lambda: entries(started, paused=True))
 
     model.rebuild()
     check = model.nodes[model.layout[4]]
@@ -68,9 +60,9 @@ def test_a_check_item_carries_its_state(sni_tray):
     assert started == ["pause"]
 
 
-def test_separators_and_unknown_ids_do_nothing(sni_tray):
+def test_separators_and_unknown_ids_do_nothing():
     started = []
-    model = model_of(sni_tray, lambda: entries(started))
+    model = model_of(lambda: entries(started))
 
     model.rebuild()
     model.activate(model.layout[1])
@@ -81,12 +73,12 @@ def test_separators_and_unknown_ids_do_nothing(sni_tray):
     assert started == []
 
 
-def test_an_action_that_fails_is_logged_and_the_menu_carries_on(sni_tray, caplog):
+def test_an_action_that_fails_is_logged_and_the_menu_carries_on(caplog):
     def broken():
         message = "broken"
         raise RuntimeError(message)
 
-    model = model_of(sni_tray, lambda: (Item("Broken", broken),))
+    model = model_of(lambda: (Item("Broken", broken),))
 
     model.rebuild()
     model.activate(1)

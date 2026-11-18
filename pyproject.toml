@@ -34,12 +34,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# GTK GUI toolkit. Installs from PyPI on Windows/macOS; on Linux wxPython has no
-# PyPI wheel -- install it from your distro or the wxPython extras index (see
-# docs/installation-linux.md).
+# On Linux wxPython has no PyPI wheel (see docs/installation-linux.md).
 gui = ["wxPython>=4.2.5"]
-# Linux desktop integration. dbus-python builds from source and needs the system
-# libdbus + glib development headers present (see docs/installation-linux.md).
+# dbus-python builds from source and needs libdbus and glib headers.
 linux = ["dbus-python>=1.4.0"]
 
 [project.urls]
@@ -49,10 +46,6 @@ Repository = "https://github.com/mauro-lanza/superpaper-next"
 [project.scripts]
 superpaper = "superpaper.__main__:main"
 
-# ---------------------------------------------------------------------------
-# setuptools: package discovery, dynamic version, bundled data
-# ---------------------------------------------------------------------------
-# Every package under superpaper/ (superpaper, superpaper.desktop, ...).
 [tool.setuptools.packages.find]
 include = ["superpaper*"]
 
@@ -60,17 +53,8 @@ include = ["superpaper*"]
 version = { attr = "superpaper.__version__.__version__" }
 
 [tool.setuptools.package-data]
-superpaper = [
-    "resources/superpaper.png",
-    "resources/superpaper.svg",
-    "resources/test.png",
-    "resources/icons8-merge-vertical-96.png",
-    "resources/icons8-merge-horizontal-96.png",
-    "resources/example_profiles/example.profile",
-    "resources/example_profiles/example_multi.profile",
-]
+superpaper = ["resources/*.png", "resources/*.svg", "resources/example_profiles/*.profile"]
 
-# The scalable SVG is valid at any size; the PNG goes in its real 96x96 bucket.
 [tool.setuptools.data-files]
 "share/applications" = ["superpaper/resources/superpaper.desktop"]
 "share/icons/hicolor/scalable/apps" = ["superpaper/resources/superpaper.svg"]
@@ -83,25 +67,15 @@ dev = [
     "pre-commit>=4.6.0",
     "pytest>=9.0.2",
 ]
-# Tools needed only to produce distributable builds (PyInstaller binary +
-# AppImage). Not runtime dependencies; kept separate from the lint/type `dev`
-# group. uv itself is intentionally NOT listed here -- it is a standalone
-# environment manager installed outside the project.
 build = [
-    "pyinstaller>=6.21.0",
+    "pyinstaller==6.21.0",
 ]
 
-# ---------------------------------------------------------------------------
-# pytest
-# ---------------------------------------------------------------------------
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 xfail_strict = true
 addopts = ["--strict-markers", "--strict-config"]
 
-# ---------------------------------------------------------------------------
-# Ruff: linter + formatter
-# ---------------------------------------------------------------------------
 [tool.ruff]
 target-version = "py314"
 line-length = 120
@@ -143,8 +117,7 @@ ignore = [
     "SIM105",  # contextlib.suppress: slower and less explicit than try/except/pass
     "RUF059",  # unused unpacked variable: legacy tuple unpacking is intentional
     "RUF002",  # ambiguous unicode char in docstring: false positives
-    "B905",    # zip() without strict=: deferred -- needs per-call review to pick
-               # strict=True/False rather than a blind auto-fix (py310+ only).
+    "B905",    # zip() without strict=: deferred -- needs per-call review
 ]
 
 [tool.ruff.lint.isort]
@@ -154,9 +127,6 @@ known-first-party = ["superpaper"]
 quote-style = "double"
 docstring-code-format = true
 
-# ---------------------------------------------------------------------------
-# ty: static type checker (Astral, preview)
-# ---------------------------------------------------------------------------
 [tool.ty.src]
 include = ["superpaper"]
 exclude = [

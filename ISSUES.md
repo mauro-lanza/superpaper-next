@@ -17,7 +17,7 @@ Display detection is bounded and transactional: transient enumeration failures a
 | Issue | Remaining work |
 |-------|----------------|
 | [#58](https://github.com/hhannine/superpaper/issues/58) | Manual pan controls exist, but there is no automatic centering on a selected monitor. |
-| [#63](https://github.com/hhannine/superpaper/issues/63) | Zoom-in and pan exist; zoom-out below cover-fit is not supported (`rendering/render.py` clamps zoom to 1.0). |
+| [#63](https://github.com/hhannine/superpaper/issues/63) | Zoom-in and pan exist; zoom-out below cover-fit is not supported (`superpaper/profiles/profile_file.py` clamps zoom to 1.0). |
 | [#92](https://github.com/hhannine/superpaper/issues/92), [#115](https://github.com/hhannine/superpaper/issues/115) | Rendering is cover-and-crop. Fit/contain, letterbox, no-upscale, stretch, and tile modes are missing. |
 | [#126](https://github.com/hhannine/superpaper/issues/126) | Native SNI is verified on KDE Wayland, not on the GNOME setup from the original report. |
 | [#141](https://github.com/hhannine/superpaper/issues/141) | KDE application and known UI failures were addressed, but the broad report has no automated cross-version Plasma coverage. |
@@ -30,7 +30,7 @@ Display detection is bounded and transactional: transient enumeration failures a
 |-------|----------------|
 | [#25](https://github.com/hhannine/superpaper/issues/25) | Detect display hotplug, adapt/reload the profile, and re-render without advancing the slideshow. |
 | [#105](https://github.com/hhannine/superpaper/issues/105) | Identify and implement a current, tested Deepin/DDE wallpaper API. |
-| [#113](https://github.com/hhannine/superpaper/issues/113) | Add macOS dependencies, user-writable paths, packaging, and current multi-display validation. PyObjC is imported unconditionally on darwin (`superpaper/desktop/macos.py`) but is not declared in `pyproject.toml`, and `paths.py` keeps config beside the installation instead of in `~/Library/Application Support` (`SUPERPAPER_CONFIG_HOME`/`SUPERPAPER_CACHE_HOME` override it). |
+| [#113](https://github.com/hhannine/superpaper/issues/113) | Add macOS dependencies, user-writable paths, packaging, and current multi-display validation. The known gaps (PyObjC, config location) are in [development-macos.md](docs/development-macos.md). |
 | [#153](https://github.com/hhannine/superpaper/issues/153) | Use unique macOS crop generations and delayed cleanup to avoid cached/deleted `-b` image URLs. |
 
 ## Open Features And Documentation

@@ -96,7 +96,7 @@ RUN python3.14 -m venv "${VIRTUAL_ENV}" \
     && echo "${WXPYTHON_SHA256}  /tmp/wxPython-4.2.5-cp314-cp314-linux_x86_64.whl" | sha256sum -c - \
     && pip install --no-cache-dir --no-deps /tmp/wxPython-4.2.5-cp314-cp314-linux_x86_64.whl \
     && pip install --no-cache-dir "/tmp/superpaper-deps[linux]" \
-    && pip install --no-cache-dir "pyinstaller==6.21.0" \
+    && pip install --no-cache-dir --group /tmp/superpaper-deps/pyproject.toml:build \
     && rm /tmp/wxPython-4.2.5-cp314-cp314-linux_x86_64.whl
 
 # appimagetool packages the finished AppDir into a single-file AppImage.

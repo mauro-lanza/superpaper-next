@@ -1,6 +1,6 @@
 import pytest
 
-from superpaper.user_input import OffsetError, parse_float, parse_offset_args, parse_offsets
+from superpaper.user_input import OffsetError, parse_float, parse_offsets
 
 
 def test_offsets_are_read_from_x_comma_y_fields():
@@ -30,21 +30,6 @@ def test_every_unreadable_field_is_named():
         "Manual offset of display 0: expected whole pixel numbers as x,y, not 'a,b'.",
         "Manual offset of display 2: expected whole pixel numbers as x,y, not '3'.",
     ]
-
-
-def test_command_line_offsets_pair_up_x_and_y_for_each_display():
-    assert parse_offset_args(["1", "2", "-3", "4"]) == ((1, 2), (-3, 4))
-    assert parse_offset_args([]) == ()
-
-
-def test_command_line_offsets_must_come_in_pairs():
-    with pytest.raises(OffsetError, match="not even"):
-        parse_offset_args(["1", "2", "3"])
-
-
-def test_command_line_offsets_must_be_whole_numbers():
-    with pytest.raises(OffsetError, match="whole numbers of pixels: 1 x"):
-        parse_offset_args(["1", "x"])
 
 
 @pytest.mark.parametrize(("text", "value"), [("1.5", 1.5), (" -2 ", -2.0), ("0", 0.0), ("1e3", 1000.0)])

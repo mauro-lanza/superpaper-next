@@ -13,10 +13,10 @@ def test_display_detection_retries_empty_results(monkeypatch):
     monkeypatch.setattr(display_detection, "get_monitors", lambda: next(results))
     monkeypatch.setattr(display_detection.time, "sleep", sleeps.append)
 
-    detected = display_detection.detect_displays(max_attempts=3, retry_delay=0.1)
+    detected = display_detection.detect_displays()
 
     assert [display.resolution for display in detected] == [(1920, 1080)]
-    assert sleeps == [0.1, 0.1]
+    assert sleeps == [display_detection.RETRY_DELAY_SECONDS] * 2
 
 
 def test_display_detection_retries_exceptions(monkeypatch):
@@ -32,7 +32,7 @@ def test_display_detection_retries_exceptions(monkeypatch):
     monkeypatch.setattr(display_detection, "get_monitors", get_result)
     monkeypatch.setattr(display_detection.time, "sleep", lambda _delay: None)
 
-    assert len(display_detection.detect_displays(max_attempts=2, retry_delay=0)) == 1
+    assert len(display_detection.detect_displays()) == 1
 
 
 def test_a_layout_needs_at_least_one_display(monkeypatch, tmp_path):
@@ -40,15 +40,16 @@ def test_a_layout_needs_at_least_one_display(monkeypatch, tmp_path):
     monkeypatch.setattr(display_detection.time, "sleep", lambda _delay: None)
 
     with pytest.raises(display_detection.DisplayDetectionError):
-        display_detection.detect_layout(tmp_path, max_attempts=2, retry_delay=0)
+        display_detection.detect_layout(tmp_path)
 
 
 def test_an_unreadable_saved_layout_is_an_error(monkeypatch, tmp_path):
     monkeypatch.setattr(display_detection, "get_monitors", lambda: [monitor(0, 0, 2560, 1440)])
+    monkeypatch.setattr(display_detection.time, "sleep", lambda _delay: None)
     (tmp_path / "display_systems.dat").write_text("not a layout\n", encoding="utf-8")
 
     with pytest.raises(configparser.Error):
-        display_detection.detect_layout(tmp_path, retry_delay=0)
+        display_detection.detect_layout(tmp_path)
 
 
 def test_a_layout_lists_displays_in_desktop_order(display_layout):
@@ -79,20 +80,21 @@ def test_a_layout_needs_a_value_for_every_display(display_layout):
 
 def test_negative_saved_bezels_are_ignored(display_layout, tmp_path, caplog):
     key = display_layout(config_dir=tmp_path).key
-    saved = display_store.SavedLayout([(0, 0), (2000, 0)], [(-3.0, 0.0), (0.0, 0.0)], None, True, None)
-    display_store.write_layout(tmp_path, key, saved)
+    (tmp_path / display_store.LAYOUTS_FILE).write_text(
+        f"[{key}]\n"
+        "ppi_norm_offsets = 0,0;2000,0\n"
+        "bezel_mms = -3.0,0.0;0.0,0.0\n"
+        "user_diagonal_inches = None\n"
+        "use_perspective = 1\n"
+        "def_perspective = None\n",
+        encoding="utf-8",
+    )
 
     layout = display_layout(config_dir=tmp_path)
 
     assert layout.bezels_in_mm() == [(0.0, 0.0), (0.0, 0.0)]
     assert layout.ppi_norm_offsets == ((0, 0), (2000, 0))
     assert "Ignoring the saved bezels" in caplog.text
-
-
-@pytest.mark.parametrize("kwargs", [{"max_attempts": 0}, {"retry_delay": -1}])
-def test_display_detection_rejects_invalid_retry_options(kwargs):
-    with pytest.raises(ValueError):
-        display_detection.detect_displays(**kwargs)
 
 
 def test_displays_are_detected_only_on_the_main_thread(monkeypatch):

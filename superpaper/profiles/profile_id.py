@@ -3,35 +3,11 @@
 import sys
 import unicodedata
 from dataclasses import InitVar, dataclass, field
-from enum import Enum, auto
 from pathlib import Path, PureWindowsPath
-
-
-class ProfileIdErrorCode(Enum):
-    NOT_STRING = auto()
-    EMPTY = auto()
-    NOT_NFC = auto()
-    ABSOLUTE = auto()
-    SEPARATOR = auto()
-    DOT_COMPONENT = auto()
-    NUL = auto()
-    CONTROL = auto()
-    TOO_LONG = auto()
-    SURROUNDING_WHITESPACE = auto()
-    TRAILING_DOT = auto()
-    INVALID_CHARACTER = auto()
-    RESERVED_NAME = auto()
-    RESERVED_APPLICATION_NAME = auto()
 
 
 class ProfileIdError(ValueError):
     """A profile identifier failed portable validation."""
-
-    def __init__(self, code: ProfileIdErrorCode, raw: object, message: str, suggested: str | None = None):
-        super().__init__(message)
-        self.code = code
-        self.raw = raw
-        self.suggested = suggested
 
 
 NEW_PROFILE_LABEL = "Create a new profile"
@@ -77,10 +53,6 @@ class ProfileId:
         return self._value
 
     @property
-    def profile_filename(self) -> str:
-        return f"{self.value}.profile"
-
-    @property
     def collision_key(self) -> str:
         return collision_key(self.value)
 
@@ -91,85 +63,76 @@ def collision_key(name: str) -> str:
 
 
 def _validate_profile_id(raw: object, *, new: bool) -> str:
-    # Rules for every name, whatever its origin: a single safe path component that
-    # survives the profile's "name=" line and doesn't shadow an entry of the UI.
     if not isinstance(raw, str):
-        raise ProfileIdError(ProfileIdErrorCode.NOT_STRING, raw, "Profile names must be strings.")
-    if not raw:
-        raise ProfileIdError(ProfileIdErrorCode.EMPTY, raw, "Profile names cannot be empty.")
-    if "\0" in raw:
-        raise ProfileIdError(ProfileIdErrorCode.NUL, raw, "Profile names cannot contain NUL characters.")
-    if any(unicodedata.category(char) in {"Cc", "Cs"} for char in raw):
-        raise ProfileIdError(ProfileIdErrorCode.CONTROL, raw, "Profile names cannot contain control characters.")
-    if raw in {".", ".."}:
-        raise ProfileIdError(ProfileIdErrorCode.DOT_COMPONENT, raw, "Profile names cannot be '.' or '..'.")
-    if Path(raw).is_absolute() or PureWindowsPath(raw).is_absolute():
-        raise ProfileIdError(ProfileIdErrorCode.ABSOLUTE, raw, "Profile names cannot be absolute paths.")
-    if "/" in raw or "\\" in raw:
-        raise ProfileIdError(ProfileIdErrorCode.SEPARATOR, raw, "Profile names cannot contain path separators.")
-    if raw.casefold() in _RESERVED_APPLICATION_NAMES:
-        raise ProfileIdError(
-            ProfileIdErrorCode.RESERVED_APPLICATION_NAME,
-            raw,
-            f"'{raw}' is reserved by Superpaper.",
-        )
-    if new or sys.platform == "win32":
-        # Windows rejects or silently aliases these names. New names avoid them on
-        # every platform so that profiles can move between systems.
-        _require_windows_compatible(raw)
-    if new:
-        _require_superpaper_conventions(raw)
+        message = "Profile names must be strings."
+        raise ProfileIdError(message)
+    problem = _problem(raw, new=new)
+    if problem is not None:
+        raise ProfileIdError(problem)
     return raw
 
 
-def _require_windows_compatible(raw: str) -> None:
+def _problem(raw: str, *, new: bool) -> str | None:
+    """Why ``raw`` can't identify a profile, or None if it can."""
+    # Rules for every name, whatever its origin: a single safe path component that
+    # survives the profile's "name=" line and doesn't shadow an entry of the UI.
+    if not raw:
+        return "Profile names cannot be empty."
+    if "\0" in raw:
+        return "Profile names cannot contain NUL characters."
+    if any(unicodedata.category(char) in {"Cc", "Cs"} for char in raw):
+        return "Profile names cannot contain control characters."
+    if raw in {".", ".."}:
+        return "Profile names cannot be '.' or '..'."
+    if Path(raw).is_absolute() or PureWindowsPath(raw).is_absolute():
+        return "Profile names cannot be absolute paths."
+    if "/" in raw or "\\" in raw:
+        return "Profile names cannot contain path separators."
+    if raw.casefold() in _RESERVED_APPLICATION_NAMES:
+        return f"'{raw}' is reserved by Superpaper."
+    if new or sys.platform == "win32":
+        # Windows rejects or silently aliases these names. New names avoid them on
+        # every platform so that profiles can move between systems.
+        problem = _windows_problem(raw)
+        if problem is not None:
+            return problem
+    if new:
+        return _superpaper_conventions_problem(raw)
+    return None
+
+
+def _windows_problem(raw: str) -> str | None:
     if raw != raw.strip():
-        raise ProfileIdError(
-            ProfileIdErrorCode.SURROUNDING_WHITESPACE,
-            raw,
-            "Profile names cannot start or end with whitespace.",
-        )
+        return "Profile names cannot start or end with whitespace."
     invalid = sorted(set(raw) & _WINDOWS_INVALID_CHARACTERS)
     if invalid:
-        raise ProfileIdError(
-            ProfileIdErrorCode.INVALID_CHARACTER,
-            raw,
-            f"Profile names cannot contain: {''.join(invalid)}",
-        )
+        return f"Profile names cannot contain: {''.join(invalid)}"
     if raw.endswith("."):
-        raise ProfileIdError(ProfileIdErrorCode.TRAILING_DOT, raw, "Profile names cannot end with a period.")
+        return "Profile names cannot end with a period."
     device_stem = raw.split(".", 1)[0].rstrip(" .").casefold()
     if device_stem in _WINDOWS_DEVICES:
-        raise ProfileIdError(ProfileIdErrorCode.RESERVED_NAME, raw, f"'{raw}' is reserved by Windows.")
+        return f"'{raw}' is reserved by Windows."
+    return None
 
 
-def _require_superpaper_conventions(raw: str) -> None:
-    normalized = unicodedata.normalize("NFC", raw)
-    if normalized != raw:
-        raise ProfileIdError(
-            ProfileIdErrorCode.NOT_NFC,
-            raw,
-            "Profile names must use Unicode NFC normalization.",
-            suggested=normalized,
-        )
+def _superpaper_conventions_problem(raw: str) -> str | None:
+    if unicodedata.normalize("NFC", raw) != raw:
+        return "Profile names must use Unicode NFC normalization."
     utf8_length = len(raw.encode("utf-8"))
     utf16_length = len(raw.encode("utf-16-le")) // 2
     if utf8_length > _MAX_PROFILE_ID_BYTES or utf16_length > _MAX_PROFILE_ID_UTF16_UNITS:
-        raise ProfileIdError(
-            ProfileIdErrorCode.TOO_LONG,
-            raw,
-            "Profile names cannot exceed 200 UTF-8 bytes or 200 UTF-16 code units.",
-        )
+        return "Profile names cannot exceed 200 UTF-8 bytes or 200 UTF-16 code units."
     if "=" in raw:
         # Older versions split the "name=" line at every "=" and would truncate it.
-        raise ProfileIdError(ProfileIdErrorCode.INVALID_CHARACTER, raw, "Profile names cannot contain: =")
+        return "Profile names cannot contain: ="
+    return None
 
 
 class ManagedPathError(ValueError):
     """A managed profile path escaped its root or is not a regular file."""
 
 
-def assert_managed_leaf(root: Path, path: Path, *, allow_missing: bool) -> Path:
+def _assert_managed_leaf(root: Path, path: Path, *, allow_missing: bool) -> Path:
     """Validate one leaf directly below root.
 
     A symlinked leaf is accepted (dotfile managers link profiles into place); reading
@@ -196,5 +159,5 @@ def assert_managed_leaf(root: Path, path: Path, *, allow_missing: bool) -> Path:
 def profile_path(root: Path, profile_id: ProfileId, *, allow_missing: bool = True) -> Path:
     """Build a contained profile path for a validated identifier."""
     resolved_root = root.resolve()
-    candidate = resolved_root / profile_id.profile_filename
-    return assert_managed_leaf(resolved_root, candidate, allow_missing=allow_missing)
+    candidate = resolved_root / f"{profile_id.value}.profile"
+    return _assert_managed_leaf(resolved_root, candidate, allow_missing=allow_missing)

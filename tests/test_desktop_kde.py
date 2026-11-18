@@ -167,6 +167,14 @@ def test_without_dbus_python_the_reason_is_reported(monkeypatch, tmp_path):
     assert "needs dbus-python" in result.problem
 
 
+def test_without_dbus_python_the_reason_is_reported_with_activities(monkeypatch, activity_manager, tmp_path):
+    monkeypatch.setitem(sys.modules, "dbus", None)
+
+    result = kde.set_wallpaper(PIECES, running("home", tmp_path))
+
+    assert "needs dbus-python" in result.problem
+
+
 def test_image_paths_reach_plasma_as_data_not_code():
     awkward = '/home/me/it\'s "quoted" ${default_images}\\ and\nsplit.png'
 

@@ -10,9 +10,11 @@ from superpaper.geometry.perspective import (
     Swivel,
     SwivelAxis,
     Tilt,
-    check_new_perspective_name,
     choice_label,
     parse_choice,
+)
+from superpaper.geometry.perspective_form import (
+    check_new_perspective_name,
     parse_rotations_mm,
     parse_viewer_offsets_mm,
     perspective_from_mm,

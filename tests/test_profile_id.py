@@ -9,8 +9,7 @@ from superpaper.profiles.profile_id import (
     ManagedPathError,
     ProfileId,
     ProfileIdError,
-    ProfileIdErrorCode,
-    assert_managed_leaf,
+    _assert_managed_leaf,
     profile_path,
 )
 
@@ -33,76 +32,68 @@ def test_profile_id_accepts_portable_names(name):
     profile_id = ProfileId.parse_new(name)
 
     assert profile_id.value == name
-    assert profile_id.profile_filename == f"{name}.profile"
 
 
 @pytest.mark.parametrize(
-    ("name", "code"),
+    ("name", "message"),
     [
-        ("", ProfileIdErrorCode.EMPTY),
-        (".", ProfileIdErrorCode.DOT_COMPONENT),
-        ("..", ProfileIdErrorCode.DOT_COMPONENT),
-        ("../outside", ProfileIdErrorCode.SEPARATOR),
-        ("folder/name", ProfileIdErrorCode.SEPARATOR),
-        (r"folder\name", ProfileIdErrorCode.SEPARATOR),
-        ("/absolute", ProfileIdErrorCode.ABSOLUTE),
-        (r"C:\absolute", ProfileIdErrorCode.ABSOLUTE),
-        ("name\0suffix", ProfileIdErrorCode.NUL),
-        ("name\n", ProfileIdErrorCode.CONTROL),
-        ("name\0 ", ProfileIdErrorCode.NUL),
-        ("name\tvalue", ProfileIdErrorCode.CONTROL),
-        ("name\ud800value", ProfileIdErrorCode.CONTROL),
-        ("cli", ProfileIdErrorCode.RESERVED_APPLICATION_NAME),
-        ("Create a new profile", ProfileIdErrorCode.RESERVED_APPLICATION_NAME),
+        ("", "cannot be empty"),
+        (".", "cannot be '.' or '..'"),
+        ("..", "cannot be '.' or '..'"),
+        ("../outside", "path separators"),
+        ("folder/name", "path separators"),
+        (r"folder\name", "path separators"),
+        ("/absolute", "absolute paths"),
+        (r"C:\absolute", "absolute paths"),
+        ("name\0suffix", "NUL"),
+        ("name\n", "control characters"),
+        ("name\0 ", "NUL"),
+        ("name\tvalue", "control characters"),
+        ("name\ud800value", "control characters"),
+        ("cli", "reserved by Superpaper"),
+        ("Create a new profile", "reserved by Superpaper"),
     ],
 )
-def test_profile_id_rejects_unsafe_names(name, code):
-    with pytest.raises(ProfileIdError) as error:
+def test_profile_id_rejects_unsafe_names(name, message):
+    with pytest.raises(ProfileIdError, match=message):
         ProfileId.parse(name)
-
-    assert error.value.code is code
-    assert error.value.raw == name
 
 
 def test_the_new_profile_entry_is_not_a_profile_name():
-    with pytest.raises(ProfileIdError) as error:
+    with pytest.raises(ProfileIdError, match="reserved by Superpaper"):
         ProfileId.parse(NEW_PROFILE_LABEL.upper())
-
-    assert error.value.code is ProfileIdErrorCode.RESERVED_APPLICATION_NAME
 
 
 NON_PORTABLE_NAMES = [
-    (" ", ProfileIdErrorCode.SURROUNDING_WHITESPACE),
-    (" Work", ProfileIdErrorCode.SURROUNDING_WHITESPACE),
-    ("Work ", ProfileIdErrorCode.SURROUNDING_WHITESPACE),
-    ("bad=name", ProfileIdErrorCode.INVALID_CHARACTER),
-    ("bad:name", ProfileIdErrorCode.INVALID_CHARACTER),
-    ("trailing.", ProfileIdErrorCode.TRAILING_DOT),
-    ("CON", ProfileIdErrorCode.RESERVED_NAME),
-    ("con.notes", ProfileIdErrorCode.RESERVED_NAME),
-    ("CON .txt", ProfileIdErrorCode.RESERVED_NAME),
-    ("CoNin$", ProfileIdErrorCode.RESERVED_NAME),
-    ("CONOUT$.txt", ProfileIdErrorCode.RESERVED_NAME),
-    ("LPT9", ProfileIdErrorCode.RESERVED_NAME),
-    ("LPT1 .foo", ProfileIdErrorCode.RESERVED_NAME),
-    ("COM¹.log", ProfileIdErrorCode.RESERVED_NAME),
-    ("a" * 201, ProfileIdErrorCode.TOO_LONG),
-    ("é" * 101, ProfileIdErrorCode.TOO_LONG),
-    ("😀" * 51, ProfileIdErrorCode.TOO_LONG),
+    (" ", "whitespace"),
+    (" Work", "whitespace"),
+    ("Work ", "whitespace"),
+    ("bad=name", "cannot contain: ="),
+    ("bad:name", "cannot contain: :"),
+    ("trailing.", "period"),
+    ("CON", "reserved by Windows"),
+    ("con.notes", "reserved by Windows"),
+    ("CON .txt", "reserved by Windows"),
+    ("CoNin$", "reserved by Windows"),
+    ("CONOUT$.txt", "reserved by Windows"),
+    ("LPT9", "reserved by Windows"),
+    ("LPT1 .foo", "reserved by Windows"),
+    ("COM¹.log", "reserved by Windows"),
+    ("a" * 201, "cannot exceed"),
+    ("é" * 101, "cannot exceed"),
+    ("😀" * 51, "cannot exceed"),
 ]
 
 
-@pytest.mark.parametrize(("name", "code"), NON_PORTABLE_NAMES)
-def test_new_profile_names_must_be_portable(name, code):
-    with pytest.raises(ProfileIdError) as error:
+@pytest.mark.parametrize(("name", "message"), NON_PORTABLE_NAMES)
+def test_new_profile_names_must_be_portable(name, message):
+    with pytest.raises(ProfileIdError, match=message):
         ProfileId.parse_new(name)
-
-    assert error.value.code is code
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="Windows enforces its filename rules for every name")
-@pytest.mark.parametrize(("name", "_code"), NON_PORTABLE_NAMES)
-def test_existing_non_portable_names_still_identify_profiles(name, _code):
+@pytest.mark.parametrize(("name", "_message"), NON_PORTABLE_NAMES)
+def test_existing_non_portable_names_still_identify_profiles(name, _message):
     assert ProfileId.parse(name).value == name
 
 
@@ -118,33 +109,25 @@ def test_profile_id_accepts_exact_length_boundaries(name):
     assert ProfileId.parse_new(name).value == name
 
 
-def test_new_profile_name_reports_normalized_suggestion():
+def test_new_profile_name_must_be_nfc():
     decomposed = unicodedata.normalize("NFD", "Café")
 
-    with pytest.raises(ProfileIdError) as error:
+    with pytest.raises(ProfileIdError, match="NFC"):
         ProfileId.parse_new(decomposed)
-
-    assert error.value.code is ProfileIdErrorCode.NOT_NFC
-    assert error.value.suggested == "Café"
     # macOS HFS+ hands out decomposed filenames, so an existing file must still load.
     assert ProfileId.parse(decomposed).value == decomposed
 
 
 @pytest.mark.parametrize("factory", [ProfileId, ProfileId.parse])
 def test_profile_id_public_construction_validates(factory):
-    with pytest.raises(ProfileIdError) as error:
+    with pytest.raises(ProfileIdError, match="path separators"):
         factory("../outside")
-
-    assert error.value.code is ProfileIdErrorCode.SEPARATOR
 
 
 @pytest.mark.parametrize("raw", [None, 42, b"Work"])
 def test_profile_id_rejects_non_strings(raw):
-    with pytest.raises(ProfileIdError) as error:
+    with pytest.raises(ProfileIdError, match="must be strings"):
         ProfileId.parse(raw)
-
-    assert error.value.code is ProfileIdErrorCode.NOT_STRING
-    assert error.value.raw is raw
 
 
 def test_collision_key_is_case_insensitive():
@@ -181,7 +164,7 @@ def test_managed_leaf_rejects_outside_path(tmp_path):
     outside = tmp_path / "outside.profile"
 
     with pytest.raises(ManagedPathError, match="not a direct leaf"):
-        assert_managed_leaf(root, outside, allow_missing=True)
+        _assert_managed_leaf(root, outside, allow_missing=True)
 
 
 @pytest.mark.parametrize("relative", [Path("nested/file.profile"), Path("nested/../file.profile"), Path("..")])
@@ -190,7 +173,7 @@ def test_managed_leaf_rejects_non_direct_or_dot_paths(tmp_path, relative):
     root.mkdir()
 
     with pytest.raises(ManagedPathError, match="not a direct leaf"):
-        assert_managed_leaf(root, root / relative, allow_missing=True)
+        _assert_managed_leaf(root, root / relative, allow_missing=True)
 
 
 def test_managed_leaf_accepts_symlinked_profile(tmp_path):
@@ -202,15 +185,15 @@ def test_managed_leaf_accepts_symlinked_profile(tmp_path):
     link = root / "linked.profile"
     link.symlink_to(dotfile)
 
-    assert assert_managed_leaf(root, link, allow_missing=False) == link
+    assert _assert_managed_leaf(root, link, allow_missing=False) == link
 
 
 def test_managed_leaf_allow_missing_accepts_missing_or_regular_file(tmp_path):
     path = tmp_path / "managed.profile"
 
-    assert assert_managed_leaf(tmp_path, path, allow_missing=True) == path
+    assert _assert_managed_leaf(tmp_path, path, allow_missing=True) == path
     path.write_text("profile", encoding="utf-8")
-    assert assert_managed_leaf(tmp_path, path, allow_missing=True) == path
+    assert _assert_managed_leaf(tmp_path, path, allow_missing=True) == path
 
 
 def test_managed_leaf_allow_missing_rejects_directory(tmp_path):
@@ -218,7 +201,7 @@ def test_managed_leaf_allow_missing_rejects_directory(tmp_path):
     path.mkdir()
 
     with pytest.raises(ManagedPathError, match="must be regular files"):
-        assert_managed_leaf(tmp_path, path, allow_missing=True)
+        _assert_managed_leaf(tmp_path, path, allow_missing=True)
 
 
 def test_profile_path_requires_existing_regular_file(tmp_path):

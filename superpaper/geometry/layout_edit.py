@@ -5,15 +5,14 @@ Each transition takes the state and the layout and returns the new state and lay
 caller keeps both and does the drawing.
 """
 
-import configparser
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import assert_never
 
-from superpaper.files import SaveFailed
 from superpaper.geometry import display_store
 from superpaper.geometry.canvas import Point
+from superpaper.geometry.display_store import SaveFailed
 from superpaper.geometry.displays import Layout
 from superpaper.user_input import Problems, parse_bezel, parse_diagonals
 
@@ -102,11 +101,7 @@ def cancel_bezels(state: EditState, layout: Layout) -> tuple[Idle, Layout]:
 
 def save_display_settings(config_dir: Path, layout: Layout) -> SaveFailed | None:
     """Write the display settings of ``layout`` to ``config_dir``; why that failed, or None."""
-    try:
-        display_store.save_layout(config_dir, layout)
-    except (OSError, configparser.Error, ValueError, KeyError) as error:
-        return SaveFailed(f"The display settings could not be saved: {error}")
-    return None
+    return display_store.save_or_failure(display_store.save_layout, config_dir, layout, "display settings")
 
 
 def with_entered_diagonals(layout: Layout, texts: Sequence[str]) -> Layout | None:

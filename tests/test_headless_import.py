@@ -47,7 +47,7 @@ HEADLESS_MODULES = (
     "superpaper.rendering.render",
     "superpaper.session",
     "superpaper.settings",
-    "superpaper.tray_menu",
+    "superpaper.desktop.tray_menu",
     "superpaper.user_input",
 )
 

@@ -3,15 +3,15 @@ import os
 import pytest
 from PIL import Image
 
-from superpaper.rendering import render
-from superpaper.rendering.render import SourceImageError, open_preview_image, source_icon_image
+from superpaper.rendering import source_image
+from superpaper.rendering.source_image import SourceImageError, open_preview_image, source_icon_image
 
 
 @pytest.fixture(autouse=True)
 def empty_cache():
-    render._preview_cache.clear()
+    source_image._preview_cache.clear()
     yield
-    render._preview_cache.clear()
+    source_image._preview_cache.clear()
 
 
 def save(path, size=(40, 20), color=(200, 10, 10), orientation=None):
@@ -46,7 +46,7 @@ def test_ninth_image_evicts_the_least_recently_used(tmp_path):
     images = [open_preview_image(path) for path in paths[:8]]
     assert open_preview_image(paths[0]) is images[0]  # now the most recent
     open_preview_image(paths[8])
-    assert len(render._preview_cache) == 8
+    assert len(source_image._preview_cache) == 8
     assert open_preview_image(paths[0]) is images[0]
     assert open_preview_image(paths[1]) is not images[1]
 
@@ -58,7 +58,7 @@ def test_errors_are_not_cached(tmp_path):
     for path in (missing, str(corrupt)):
         with pytest.raises(SourceImageError):
             open_preview_image(path)
-    assert not render._preview_cache
+    assert not source_image._preview_cache
 
 
 def test_exif_orientation_is_applied(tmp_path):
@@ -69,8 +69,8 @@ def test_exif_orientation_is_applied(tmp_path):
 def test_large_image_is_downscaled_keeping_aspect(tmp_path):
     path = save(tmp_path / "big.png", size=(4000, 2000))
     image = open_preview_image(path)
-    assert image.width * image.height <= render.PREVIEW_MAX_PIXELS
-    assert image.width * image.height > render.PREVIEW_MAX_PIXELS * 0.95
+    assert image.width * image.height <= source_image.PREVIEW_MAX_PIXELS
+    assert image.width * image.height > source_image.PREVIEW_MAX_PIXELS * 0.95
     assert abs(image.width / image.height - 2.0) < 0.01
 
 
@@ -101,4 +101,4 @@ def test_icons_leave_the_preview_cache_alone(tmp_path):
     cached = [open_preview_image(path) for path in previews]
     for n in range(20):
         assert source_icon_image(save(tmp_path / f"i{n}.jpg", size=(400, 300)), (32, 32)) is not None
-    assert list(render._preview_cache.values()) == cached
+    assert list(source_image._preview_cache.values()) == cached

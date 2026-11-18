@@ -36,7 +36,7 @@ in wxPython, which installs from PyPI on macOS.
   `~/Library/Application Support`. To keep the files elsewhere, set
   `SUPERPAPER_CONFIG_HOME` and `SUPERPAPER_CACHE_HOME` to the directories to use.
 
-Both are tracked under #113.
+Both are tracked under #113 in [`ISSUES.md`](../ISSUES.md).
 
 ## Running
 

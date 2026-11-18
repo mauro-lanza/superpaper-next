@@ -1,11 +1,4 @@
-"""
-Display rotation correcting perspective transforms for Superpaper.
-
-Having displays in a multi monitor setup both tilted and swiveled will
-shear the wallpaper in disjoint pieces where lines are not preserved.
-This module will research into alleviating or fixing this issue by applying
-perspective corrections that aim to undo these effects caused by the rotations
-of the displays relative to each other.
+"""Perspective corrections for displays that are tilted or swiveled towards the viewer.
 
 Written by Henri Hänninen, copyright 2020 under MIT licence.
 """
@@ -20,23 +13,12 @@ from typing import assert_never
 
 import numpy as np
 
-from superpaper.user_input import parse_float
-
 logger = logging.getLogger(__name__)
 
-# "none" is display_store's no-default sentinel; "default" and "disabled" clash with the
-# editor's perspective choices.
-_RESERVED_PERSPECTIVE_NAMES = frozenset({"default", "disabled", "none"})
+MM_PER_INCH = 25.4
+
 DEFAULT_LABEL = "default"
 DISABLED_LABEL = "disabled"
-ROTATION_CELL_NAMES = (
-    "Swivel angle",
-    "Sw. ax. lat. off.",
-    "Sw. ax. dep. off.",
-    "Tilt angle",
-    "Ti. ax. ver. off.",
-    "Ti. ax. dep. off.",
-)
 
 
 class SwivelAxis(Enum):
@@ -134,75 +116,9 @@ def choice_label(choice: PerspectiveChoice) -> str:
             assert_never(choice)
 
 
-def check_new_perspective_name(name: str) -> None:
-    """Raise ValueError if ``name`` cannot be given to a perspective being saved."""
-    if name.casefold() in _RESERVED_PERSPECTIVE_NAMES:
-        message = f"'{name}' is reserved; choose another perspective name."
-        raise ValueError(message)
-
-
-def perspective_from_mm(
-    name: str,
-    max_ppi: float,
-    central_display: int,
-    viewer_offset_mm: list[float],
-    swivels_mm: list[tuple[SwivelAxis, float, float, float]],
-    tilts_mm: list[tuple[float, float, float]],
-) -> Perspective:
-    """The perspective for the dialog's lengths in millimetres, converted to pixels at
-    ``max_ppi``; angles and axes are kept."""
-    px_per_mm = max_ppi / 25.4
-    lateral, vertical, depth = (px_per_mm * length for length in viewer_offset_mm)
-    return Perspective(
-        name,
-        central_display,
-        (lateral, vertical, depth),
-        tuple(Swivel(axis, angle, px_per_mm * lat, px_per_mm * dep) for axis, angle, lat, dep in swivels_mm),
-        tuple(Tilt(angle, px_per_mm * ver, px_per_mm * dep) for angle, ver, dep in tilts_mm),
-    )
-
-
-def parse_viewer_offsets_mm(texts: Sequence[str]) -> list[float]:
-    """The viewer's (horizontal, vertical, distance) offsets in millimetres, as typed.
-
-    Raises ValueError saying what is wrong with them; the distance must be positive.
-    """
-    numbers = [parse_float(text) for text in texts]
-    offsets = [number for number in numbers if number is not None]
-    if len(offsets) != len(numbers):
-        message = "Viewer offsets should be lenghts in millimeters, separate decimals with a point."
-        raise ValueError(message)
-    if offsets[2] <= 0:
-        message = "Viewer distance must be entered and positive."
-        raise ValueError(message)
-    return offsets
-
-
-def parse_rotations_mm(
-    axes: Sequence[int], cells: Sequence[Sequence[str]]
-) -> tuple[list[tuple[SwivelAxis, float, float, float]], list[tuple[float, float, float]]]:
-    """The swivels and tilts of the displays in the dialog's grid, as typed.
-
-    ``axes`` holds each display's swivel axis choice (a SwivelAxis value) and ``cells`` its
-    texts in the order of ROTATION_CELL_NAMES. Raises ValueError naming the display and
-    column of a cell that is not a number.
-    """
-    swivels = []
-    tilts = []
-    for display, (axis, row) in enumerate(zip(axes, cells, strict=True)):
-        numbers = []
-        for name, text in zip(ROTATION_CELL_NAMES, row, strict=True):
-            number = parse_float(text)
-            if number is None:
-                message = f"Display {display}, '{name}': '{text}' is not a number; separate decimals with a point."
-                raise ValueError(message)
-            numbers.append(number)
-        swivels.append((SwivelAxis(axis), numbers[0], numbers[1], numbers[2]))
-        tilts.append((numbers[3], numbers[4], numbers[5]))
-    return swivels, tilts
-
-
-def get_backprojected_display_system(crops, perspective: Perspective):
+def get_backprojected_display_system(
+    crops: Sequence[Sequence[float]], perspective: Perspective
+) -> tuple[list[tuple[float, float, float, float]], list[list[float]]]:
     """
     Return a back-projected quadrilateral and associated projection
     transformation coefficients for each display in the Layout.
@@ -227,12 +143,12 @@ def get_backprojected_display_system(crops, perspective: Perspective):
     logger.info("swivs: %s", swivels)
     logger.info("tilts: %s", tilts)
 
-    disp_positions, init_plane_basis = position_displays_viewer(central_disp, viewer_pos_wrt_central, crops)
+    disp_positions, init_plane_basis = _position_displays_viewer(central_disp, viewer_pos_wrt_central, crops)
     init_plane_point = disp_positions[central_disp]
 
     projected_quads = []
     for sz, pos, swiv, tilt in zip(sizes, disp_positions, swivels, tilts):
-        p_quad = get_backprojected_display(sz, pos, swiv, tilt, init_plane_basis, init_plane_point)
+        p_quad = _get_backprojected_display(sz, pos, swiv, tilt, init_plane_basis, init_plane_point)
         projected_quads.append(p_quad)
     leftmost_corner = min([corner[0] for quad in projected_quads for corner in quad])
     bottommost_corner = min([corner[1] for quad in projected_quads for corner in quad])
@@ -245,20 +161,22 @@ def get_backprojected_display_system(crops, perspective: Perspective):
     logger.info("translated_quads: %s", translated_quads)
     ordered_quads = [(tquad[2], tquad[3], tquad[1], tquad[0]) for tquad in translated_quads]
     logger.info("ordered_quads: %s", ordered_quads)
-    ordered_crops = [crop_from_quad(ordqu) for ordqu in ordered_quads]
+    ordered_crops = [_crop_from_quad(ordqu) for ordqu in ordered_quads]
     logger.info("ordered_crops: %s", ordered_crops)
     ppi_norm_corners = [
         ((crop[0], crop[1]), (crop[2], crop[1]), (crop[2], crop[3]), (crop[0], crop[3])) for crop in crops
     ]
     projected_coeffs = []
     for ordquad, ppi_norm_quad in zip(ordered_quads, ppi_norm_corners):
-        coeffs = find_coeffs(ordquad, ppi_norm_quad)
+        coeffs = _find_coeffs(ordquad, ppi_norm_quad)
         projected_coeffs.append(coeffs)
 
     return (ordered_crops, projected_coeffs)
 
 
-def position_displays_viewer(central_disp, viewer_pos_wrt_central, crops):
+def _position_displays_viewer(
+    central_disp: int, viewer_pos_wrt_central: tuple[float, float, float], crops: Sequence[Sequence[float]]
+) -> tuple[list[np.ndarray], list[np.ndarray]]:
     """Return display positions in viewer coordinates and a basis for the
     initialized plane."""
     centers = [((crp[2] + crp[0]) / 2, (crp[3] + crp[1]) / 2) for crp in crops]
@@ -275,7 +193,7 @@ def position_displays_viewer(central_disp, viewer_pos_wrt_central, crops):
     return homog_cents, basis
 
 
-def crop_from_quad(quad):
+def _crop_from_quad(quad: Sequence[Sequence[float]]) -> tuple[float, float, float, float]:
     """Return (left, top, right, bottom) from a list of 4 corners."""
     leftmost = min([corner[0] for corner in quad])
     topmost = min([corner[1] for corner in quad])
@@ -284,9 +202,14 @@ def crop_from_quad(quad):
     return (leftmost, topmost, rightmost, bottommost)
 
 
-def get_backprojected_display(
-    display_size, display_center, swivel_ax_ang_off: Swivel, tilt_ang_off: Tilt, bproj_pln_basis, bproj_pln_point
-):
+def _get_backprojected_display(
+    display_size: tuple[float, float],
+    display_center: np.ndarray,
+    swivel_ax_ang_off: Swivel,
+    tilt_ang_off: Tilt,
+    bproj_pln_basis: Sequence[np.ndarray],
+    bproj_pln_point: np.ndarray,
+) -> list[tuple[int, int]]:
     """
     Return a quadrilateral that is produced then a display is back projected
     onto the plane of the assumed wallpaper, to be called 'poster plane'.
@@ -326,14 +249,14 @@ def get_backprojected_display(
     swiv_ang *= -1 * 2 * pi / 360  # something causes swivels go the wrong way; maybe the y-axis flip?
     tilt_ang *= 2 * pi / 360
 
-    display_plane = XYPlaneRectangle(display_center, display_size)
+    display_plane = _XYPlaneRectangle(display_center, display_size)
     axis_swivel = display_plane.swivel_axis(swiv_ax, depth_offset=swiv_depth, lateral_offset=swiv_loff)
     axis_tilt = display_plane.tilt_axis(depth_offset=tilt_depth, vertical_offset=tilt_voff)
 
     # Swivel and tilt each corner of the display, specifically in this order
     disp_corners = display_plane.corners
     rotated_corners = tuple(
-        swivel_and_tilt(corner, axis_tilt, tilt_ang, axis_swivel, swiv_ang) for corner in disp_corners
+        _swivel_and_tilt(corner, axis_tilt, tilt_ang, axis_swivel, swiv_ang) for corner in disp_corners
     )
 
     posterplane_normal = bproj_pln_basis[2]
@@ -342,24 +265,24 @@ def get_backprojected_display(
 
     # Back project display plane corners onto poster plane
     proj_corners = tuple(
-        backproject_point_to_plane(crnr, posterplane_center, posterplane_normal) for crnr in rotated_corners
+        _backproject_point_to_plane(crnr, posterplane_center, posterplane_normal) for crnr in rotated_corners
     )
 
     # Convert corners into poster plane coordinates
-    poster_plane_corners = convert_to_plane_basis(proj_corners, posterplane_basis, posterplane_center)
+    poster_plane_corners = _convert_to_plane_basis(proj_corners, posterplane_basis, posterplane_center)
 
     return poster_plane_corners
 
 
-class XYPlaneRectangle:
+class _XYPlaneRectangle:
     """Represent a rectangle in viewer coordinates."""
 
-    def __init__(self, center, size):
+    def __init__(self, center: np.ndarray, size: tuple[float, float]):
         self.center = center
         self.size = size
         self.corners = self.get_corners()
 
-    def get_corners(self):
+    def get_corners(self) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """Return rect corners as top left, top right, bot left, bot right."""
         width, height = self.size
         cent_x, cent_y, cent_z, cent_w = self.center
@@ -371,7 +294,7 @@ class XYPlaneRectangle:
         )
         return corners
 
-    def side_middle_pt(self, side):
+    def side_middle_pt(self, side: str) -> np.ndarray:
         """Return the midpoint of side (left/right)."""
         if side == "left":
             mid = (self.corners[0] + self.corners[2]) / 2
@@ -382,7 +305,9 @@ class XYPlaneRectangle:
             raise ValueError(msg)
         return mid
 
-    def swivel_axis(self, side, depth_offset=0, lateral_offset=0):
+    def swivel_axis(
+        self, side: str, depth_offset: float = 0, lateral_offset: float = 0
+    ) -> tuple[np.ndarray, np.ndarray]:
         """Return swivel axis.
 
         Points from side midpoint to top side top corner."""
@@ -400,7 +325,9 @@ class XYPlaneRectangle:
         pt_on_line[2] += depth_offset
         return (axis, pt_on_line)
 
-    def tilt_axis(self, side="left", depth_offset=0, vertical_offset=0):
+    def tilt_axis(
+        self, side: str = "left", depth_offset: float = 0, vertical_offset: float = 0
+    ) -> tuple[np.ndarray, np.ndarray]:
         """Return tilt axis, including optional offsets.
 
         Choose positive rotation to tilt display upwards."""
@@ -418,14 +345,22 @@ class XYPlaneRectangle:
         return (axis, pt_on_line)
 
 
-def swivel_and_tilt(vector, axis_tilt, tilt, axis_swivel, swivel):
+def _swivel_and_tilt(
+    vector: np.ndarray,
+    axis_tilt: tuple[np.ndarray, np.ndarray],
+    tilt: float,
+    axis_swivel: tuple[np.ndarray, np.ndarray],
+    swivel: float,
+) -> np.ndarray:
     """Swivel and tilt a vector around given axii."""
-    swivel_vec = rotate_point_around_line(vector, axis_swivel, swivel)
-    tilt_swiveled_vec = rotate_point_around_line(swivel_vec, axis_tilt, tilt)
+    swivel_vec = _rotate_point_around_line(vector, axis_swivel, swivel)
+    tilt_swiveled_vec = _rotate_point_around_line(swivel_vec, axis_tilt, tilt)
     return tilt_swiveled_vec
 
 
-def rotate_point_around_line(point, axis_with_pt, theta):
+def _rotate_point_around_line(
+    point: np.ndarray, axis_with_pt: tuple[np.ndarray, np.ndarray], theta: float
+) -> np.ndarray:
     """Return a point in homogenous coordinates that results in
     the rotation around a line.
 
@@ -439,7 +374,7 @@ def rotate_point_around_line(point, axis_with_pt, theta):
     """
     axis, point_on_line = axis_with_pt
     ax_3d = np.array([axis[0], axis[1], axis[2]])
-    rot_m = rotation_matrix(ax_3d, theta)
+    rot_m = _rotation_matrix(ax_3d, theta)
     p = np.array([point_on_line[0], point_on_line[1], point_on_line[2]])
     p_rp = p - np.dot(rot_m, p)
     col_p_rp = np.array([[p_rp[0]], [p_rp[1]], [p_rp[2]]])
@@ -451,7 +386,7 @@ def rotate_point_around_line(point, axis_with_pt, theta):
     return np.dot(transl_and_rot, point)
 
 
-def rotation_matrix(axis, theta):
+def _rotation_matrix(axis: np.ndarray, theta: float) -> np.ndarray:
     """
     Return the rotation matrix associated with counterclockwise rotation about
     the given axis by theta radians.
@@ -473,7 +408,7 @@ def rotation_matrix(axis, theta):
     )
 
 
-def backproject_point_to_plane(point, point_on_plane, plane_normal):
+def _backproject_point_to_plane(point: np.ndarray, point_on_plane: np.ndarray, plane_normal: np.ndarray) -> np.ndarray:
     """Back-project a point along it's ray to a point on a plane
     parametrized with a normal and point."""
     norm = plane_normal - point_on_plane
@@ -491,7 +426,9 @@ def backproject_point_to_plane(point, point_on_plane, plane_normal):
     return cartes_projected_p
 
 
-def convert_to_plane_basis(points, basis, origo):
+def _convert_to_plane_basis(
+    points: Sequence[np.ndarray], basis: Sequence[np.ndarray], origo: np.ndarray
+) -> list[tuple[int, int]]:
     """Covert homogenous coordinate points into 2d plane basis set at origo."""
     # pick cartesian part of basis
     base_x = (basis[0])[:-1]
@@ -509,7 +446,7 @@ def convert_to_plane_basis(points, basis, origo):
     return plane_coords
 
 
-def find_coeffs(source_coords, target_coords):
+def _find_coeffs(source_coords: Sequence[Sequence[float]], target_coords: Sequence[Sequence[float]]) -> list[float]:
     """Compute the perspective transfomation coefficients from source and
     target quadrilaterals.
 
@@ -519,7 +456,7 @@ def find_coeffs(source_coords, target_coords):
     for s, t in zip(source_coords, target_coords):
         matrix.append([t[0], t[1], 1, 0, 0, 0, -s[0] * t[0], -s[0] * t[1]])
         matrix.append([0, 0, 0, t[0], t[1], 1, -s[1] * t[0], -s[1] * t[1]])
-    A = np.matrix(matrix, dtype=float)
+    A = np.array(matrix, dtype=float)
     B = np.array(source_coords).reshape(8)
     res = np.linalg.solve(A, B)
-    return np.array(res).reshape(8)
+    return np.array(res).reshape(8).tolist()

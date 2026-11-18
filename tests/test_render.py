@@ -10,7 +10,7 @@ from PIL import Image
 
 from superpaper.geometry.canvas import canvas_size_with_bezels
 from superpaper.geometry.perspective import Named, Perspective, Swivel, SwivelAxis, Tilt
-from superpaper.rendering import render
+from superpaper.rendering import render, source_image
 from tests.conftest import monitor
 
 
@@ -41,21 +41,21 @@ def test_an_image_opens_upright_and_in_rgb(tmp_path):
     grey = tmp_path / "grey.png"
     Image.new("L", (3, 3), 128).save(grey)
 
-    upright = render.open_source_image(path)
+    upright = source_image.open_source_image(path)
 
     assert upright.size == (20, 40)
     assert upright.getpixel((3, 20))[2] > 150  # blue on the left
     assert upright.getpixel((16, 20))[0] > 150  # red on the right
-    assert render.open_source_image(grey).mode == "RGB"
+    assert source_image.open_source_image(grey).mode == "RGB"
 
 
 def test_an_image_over_the_size_limit_is_refused_before_it_is_decoded(tmp_path, monkeypatch):
     path = write_image(tmp_path / "large.png", (4, 4), lambda x, y: (0, 0, 0))
-    monkeypatch.setattr(render, "MAX_PIXELS", 15)
-    monkeypatch.setattr(render.ImageOps, "exif_transpose", lambda image: pytest.fail("the image was decoded"))
+    monkeypatch.setattr(source_image, "MAX_PIXELS", 15)
+    monkeypatch.setattr(source_image.ImageOps, "exif_transpose", lambda image: pytest.fail("the image was decoded"))
 
-    with pytest.raises(render.SourceImageError, match="too large: 4 x 4 pixels"):
-        render.open_source_image(path)
+    with pytest.raises(source_image.SourceImageError, match="too large: 4 x 4 pixels"):
+        source_image.open_source_image(path)
 
 
 def test_an_unusable_image_is_reported_by_its_path(tmp_path):
@@ -70,8 +70,8 @@ def test_an_unusable_image_is_reported_by_its_path(tmp_path):
         (not_an_image, "isn't an image Superpaper can read"),
         (truncated, "can't be read"),
     ]:
-        with pytest.raises(render.SourceImageError, match=reason) as raised:
-            render.open_source_image(path)
+        with pytest.raises(source_image.SourceImageError, match=reason) as raised:
+            source_image.open_source_image(path)
         assert str(path) in str(raised.value)
 
 

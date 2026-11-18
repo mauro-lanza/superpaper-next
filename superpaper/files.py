@@ -9,15 +9,7 @@ import contextlib
 import os
 import secrets
 import shutil
-from dataclasses import dataclass
 from pathlib import Path
-
-
-@dataclass(frozen=True, slots=True)
-class SaveFailed:
-    """Settings that couldn't be written to disk, and why."""
-
-    message: str
 
 
 def write_atomically(path: Path, content: bytes) -> None:

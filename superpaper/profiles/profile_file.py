@@ -14,10 +14,17 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Literal, assert_never, get_args
 
-from superpaper.geometry.perspective import Default, Disabled, PerspectiveChoice, choice_label, parse_choice
+from superpaper.geometry.perspective import (
+    MM_PER_INCH,
+    Default,
+    Disabled,
+    PerspectiveChoice,
+    choice_label,
+    parse_choice,
+)
 from superpaper.profiles.selection import SORT_MODES, SortMode, is_supported_image
 from superpaper.settings import format_hotkey, parse_hotkey
-from superpaper.user_input import Offset
+from superpaper.user_input import Offset, parse_float
 
 logger = logging.getLogger(__name__)
 
@@ -152,20 +159,21 @@ def parse(text: str) -> Profile:
     Raises ProfileFormatError for a value that can't be used, such as a delay that isn't
     a number or a display diagonal of 0 inches.
     """
-    name = "default_profile"
-    spanmode: SpanMode = "single"
-    spangroups: tuple[tuple[int, ...], ...] | None = None
-    slideshow = True
-    delay = 600.0
-    sortmode: SortMode = "shuffle"
-    sources = []
-    hotkey = None
-    perspective: PerspectiveChoice = Default()
-    zoom = 1.0
-    pan = (0.0, 0.0)
-    corrections: list[Correction] = []
-    bezels = []
-    selected = None
+    defaults = Profile(name="default_profile")
+    name = defaults.name
+    spanmode = defaults.spanmode
+    spangroups = defaults.spangroups
+    slideshow = defaults.slideshow
+    delay = defaults.delay
+    sortmode = defaults.sortmode
+    sources = list(defaults.sources)
+    hotkey = defaults.hotkey
+    perspective = defaults.perspective
+    zoom = defaults.zoom
+    pan = defaults.pan
+    corrections = list(defaults.corrections)
+    bezels = list(defaults.bezels)
+    selected = defaults.selected
     for line in text.splitlines():
         key, separator, value = line.partition("=")
         if not separator:
@@ -190,6 +198,9 @@ def parse(text: str) -> Profile:
             slideshow = value.lower() == "true"
         elif key == "delay":
             delay = _numbers(key, value, float)[0]
+            if not math.isfinite(delay) or delay <= 0:
+                message = f"The setting {key}={value} needs a positive, finite number of seconds."
+                raise ProfileFormatError(message)
         elif key == "sortmode":
             chosen = next((mode for mode in SORT_MODES if mode == value.lower()), None)
             if chosen is None:
@@ -216,10 +227,8 @@ def parse(text: str) -> Profile:
         elif key == "perspective":
             perspective = parse_choice(value)
         elif key == "zoom":
-            try:
-                zoom = max(1.0, float(value))
-            except ValueError:
-                zoom = 1.0
+            zoom = parse_float(value)
+            zoom = 1.0 if zoom is None else max(1.0, zoom)
         elif key == "align":
             try:
                 parts = value.split(",")
@@ -394,7 +403,7 @@ def _shift_by_bezels(offsets, ppi_array, bezels, count):
         logger.error("Couldn't compute bezel offsets without pixel densities.")
         return offsets
     max_ppi = max(ppi_array)
-    inch_per_mm = 1.0 / 25.4
+    inch_per_mm = 1.0 / MM_PER_INCH
     bezel_px = [0]  # never offset 1st disp, anchor to it.
     for bezel_mm in bezels:
         bezel_px.append(round(float(max_ppi) * inch_per_mm * bezel_mm))

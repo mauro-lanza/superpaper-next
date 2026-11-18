@@ -52,22 +52,6 @@ def _parse_field(text: str) -> Offset | None:
         return None
 
 
-def parse_offset_args(args: Sequence[str]) -> tuple[Offset, ...]:
-    """The offsets of command line ``args``: an x and a y in pixels for each display."""
-    if len(args) % 2:
-        message = (
-            "Number of offset pixels not even. If passing manual offsets, give width and height offset "
-            "for each display, even if not actually offsetting every display."
-        )
-        raise OffsetError(message)
-    try:
-        pixels = [int(arg) for arg in args]
-    except ValueError:
-        message = f"The offsets must be whole numbers of pixels: {' '.join(args)}"
-        raise OffsetError(message) from None
-    return tuple(zip(pixels[::2], pixels[1::2]))
-
-
 def parse_float(text: str) -> float | None:
     """The finite number ``text`` spells, or None if it isn't one."""
     try:

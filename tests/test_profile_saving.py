@@ -25,9 +25,11 @@ def stored_profile(app_paths, name, extra=""):
 
 def save_over(app_paths, loaded, profile, **kwargs):
     """Save ``profile`` the way the editor does after opening ``loaded``."""
-    return profile_store.save_managed_profile(
-        app_paths, profile, current_profile_id=loaded.profile_id, expected_source_digest=loaded.digest, **kwargs
-    )
+    return profile_store.ProfileStore(app_paths).save(profile, current=loaded, **kwargs).path
+
+
+def save_new(app_paths, profile):
+    return profile_store.ProfileStore(app_paths).save(profile).path
 
 
 @pytest.mark.parametrize("name", ["../escape", "cli", "bad=name", "trailing.", "Work: dual"])
@@ -35,7 +37,7 @@ def test_new_profile_with_unusable_name_is_rejected_without_write(app_paths, nam
     with pytest.raises((ProfileIdError, ValueError)):
         profile_store.validate_managed_profile_id(app_paths.profiles, name)
     with pytest.raises(profile_store.ProfileTransactionError):
-        profile_store.save_managed_profile(app_paths, edited(name))
+        save_new(app_paths, edited(name))
     assert list(app_paths.profiles.iterdir()) == []
 
 
@@ -47,7 +49,7 @@ def test_new_profile_rejects_portable_collision(app_paths):
     with pytest.raises(ValueError, match="collides"):
         profile_store.validate_managed_profile_id(profiles, "work")
     with pytest.raises(profile_store.ProfileTransactionError):
-        profile_store.save_managed_profile(app_paths, edited("work"))
+        save_new(app_paths, edited("work"))
     assert existing.read_text(encoding="utf-8") == "name=Work\n"
     assert [path.name for path in profiles.iterdir()] == ["Work.profile"]
 
@@ -57,7 +59,7 @@ def test_new_name_collides_with_a_file_that_does_not_load(app_paths):
     broken.write_text("name=Work\ndelay=not-a-number\n", encoding="utf-8")
 
     with pytest.raises(profile_store.ProfileTransactionError):
-        profile_store.save_managed_profile(app_paths, edited("work"))
+        save_new(app_paths, edited("work"))
 
     assert broken.read_text(encoding="utf-8") == "name=Work\ndelay=not-a-number\n"
 
@@ -90,7 +92,7 @@ def test_resave_keeps_a_name_that_new_profiles_may_not_use(app_paths):
 def test_create_then_resave(app_paths):
     profiles = app_paths.profiles
 
-    assert profile_store.save_managed_profile(app_paths, edited("Work")) == profiles / "Work.profile"
+    assert save_new(app_paths, edited("Work")) == profiles / "Work.profile"
     loaded = load_profile(app_paths, "Work")
     assert save_over(app_paths, loaded, edited("Work", hotkey=("control", "x"))) == profiles / "Work.profile"
     assert load_profile(app_paths, "Work").profile.hotkey == ("control", "x")
@@ -114,7 +116,7 @@ def test_directory_named_like_a_profile_is_never_replaced(app_paths):
     (app_paths.profiles / "Work.profile").mkdir()
 
     with pytest.raises(profile_store.ProfileTransactionError):
-        profile_store.save_managed_profile(app_paths, edited("Work"))
+        save_new(app_paths, edited("Work"))
 
     assert (app_paths.profiles / "Work.profile").is_dir()
 
@@ -236,7 +238,7 @@ def test_rename_moves_the_selection_and_delete_forgets_it(app_paths, tmp_path):
 
     save_over(app_paths, loaded, edited("Renamed"))
     renamed = load_profile(app_paths, "Renamed")
-    profile_store.delete_managed_profile(app_paths, renamed)
+    profile_store.ProfileStore(app_paths).delete(renamed)
     recreated = stored_profile(app_paths, "Renamed")
 
     assert renamed.selection.images == [str(image)]

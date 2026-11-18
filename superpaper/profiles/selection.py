@@ -22,7 +22,7 @@ SORT_MODES: tuple[SortMode, ...] = get_args(SortMode)
 SUPPORTED_IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".bmp", ".gif", ".tiff", ".webp")
 
 # Planning a batch re-lists the sources when a chosen image has gone; this bounds that
-# for an entry that keeps disappearing, such as a dangling symlink (issue #135).
+# for an entry that keeps disappearing, such as a dangling symlink.
 _MAX_RELISTS = 20
 
 

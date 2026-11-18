@@ -26,7 +26,7 @@ from typing import Any, assert_never
 
 from PIL import Image
 
-from superpaper.tray_menu import Check, Item, MenuEntry, Separator, Submenu
+from superpaper.desktop.tray_menu import Check, Item, MenuEntry, Separator, Submenu
 
 logger = logging.getLogger(__name__)
 
@@ -120,7 +120,6 @@ class _MenuModel:
     def __init__(self, menu: Callable[[], tuple[MenuEntry, ...]], call_soon: Callable[[Callable[[], None]], None]):
         self._menu = menu
         self._call_soon = call_soon
-        self.revision = 1
         self.nodes: dict[int, _Node] = {}
         self.layout: tuple[int, ...] = ()
 
@@ -200,7 +199,6 @@ if dbus is not None:
             self.model = model
             self.model.rebuild()
 
-        # --- helpers -------------------------------------------------------
         def _props_variant(self, props, property_names):
             out = dbus.Dictionary(signature="sv")
             for key, value in props.items():
@@ -212,7 +210,6 @@ if dbus is not None:
                     out[key] = dbus.String(value)
             return out
 
-        # --- com.canonical.dbusmenu methods --------------------------------
         def _build_node(self, item_id, recursion_depth, property_names):
             """Recursively build a dbusmenu (id, props, children) struct."""
             node = self.model.nodes[item_id]
@@ -238,7 +235,7 @@ if dbus is not None:
                 root = dbus.Struct((dbus.Int32(0), root_props, children), signature="ia{sv}av")
             else:
                 root = self._build_node(parentId, recursionDepth, propertyNames)
-            return dbus.UInt32(self.model.revision), root
+            return dbus.UInt32(1), root
 
         @dbus.service.method(MENU_IFACE, in_signature="aias", out_signature="a(ia{sv})")
         def GetGroupProperties(self, ids, propertyNames):
@@ -287,7 +284,6 @@ if dbus is not None:
             self.model.rebuild()
             return dbus.Array(signature="i"), dbus.Array(signature="i")
 
-        # --- properties ----------------------------------------------------
         @dbus.service.method(PROPS_IFACE, in_signature="ss", out_signature="v")
         def Get(self, interface, prop):
             return self.GetAll(interface).get(prop, dbus.String(""))
@@ -303,15 +299,6 @@ if dbus is not None:
                 },
                 signature="sv",
             )
-
-        # --- signals -------------------------------------------------------
-        @dbus.service.signal(MENU_IFACE, signature="a(ia{sv})a(ias)")
-        def ItemsPropertiesUpdated(self, updated, removed):
-            pass
-
-        @dbus.service.signal(MENU_IFACE, signature="ui")
-        def LayoutUpdated(self, revision, parent):
-            pass
 
     class SNITray(dbus.service.Object):
         """``org.kde.StatusNotifierItem`` implementation."""
@@ -346,7 +333,6 @@ if dbus is not None:
             except Exception:
                 pass
 
-        # --- org.kde.StatusNotifierItem methods ----------------------------
         @dbus.service.method(SNI_IFACE, in_signature="ii", out_signature="")
         def Activate(self, x, y):
             logger.info("SNI tray Activate (left-click).")
@@ -366,7 +352,6 @@ if dbus is not None:
         def Scroll(self, delta, orientation):
             pass
 
-        # --- properties ----------------------------------------------------
         @dbus.service.method(PROPS_IFACE, in_signature="ss", out_signature="v")
         def Get(self, interface, prop):
             return self.GetAll(interface).get(prop, dbus.String(""))
@@ -391,20 +376,3 @@ if dbus is not None:
                 },
                 signature="sv",
             )
-
-        # --- signals -------------------------------------------------------
-        @dbus.service.signal(SNI_IFACE, signature="")
-        def NewIcon(self):
-            pass
-
-        @dbus.service.signal(SNI_IFACE, signature="")
-        def NewTitle(self):
-            pass
-
-        @dbus.service.signal(SNI_IFACE, signature="")
-        def NewToolTip(self):
-            pass
-
-        @dbus.service.signal(SNI_IFACE, signature="s")
-        def NewStatus(self, status):
-            pass

@@ -4,8 +4,8 @@ import os
 
 import wx  # ty:ignore[unresolved-import]
 
-from superpaper.files import SaveFailed
 from superpaper.geometry import perspective_form
+from superpaper.geometry.display_store import SaveFailed
 from superpaper.geometry.perspective import Named
 from superpaper.paths import resource
 from superpaper.profiles import profile_file

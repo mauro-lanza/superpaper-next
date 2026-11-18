@@ -44,15 +44,15 @@ def resource(name: str) -> Path:
     return install_dir() / "superpaper" / "resources" / name
 
 
-def resolve_paths(environ: Mapping[str, str], platform: str, install: Path | None = None) -> AppPaths:
-    """Decide where Superpaper's files live, exactly as earlier versions did.
+def resolve_paths(environ: Mapping[str, str], platform: str) -> AppPaths:
+    """Decide where Superpaper's files live.
 
     Linux follows the XDG base directories, or Snap's. Windows keeps everything beside
     a writable (portable) installation and in %LOCALAPPDATA%\\Superpaper otherwise;
     macOS keeps everything beside the installation. SUPERPAPER_CONFIG_HOME and
     SUPERPAPER_CACHE_HOME override the two directories. Nothing is created.
     """
-    install = install_dir() if install is None else install
+    install = install_dir()
     config = environ.get(CONFIG_OVERRIDE)
     cache = environ.get(CACHE_OVERRIDE)
     config_dir = Path(config) if config else _default_config(environ, platform, install)

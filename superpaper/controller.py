@@ -81,7 +81,7 @@ class Superpaper:
                 self.session.activate(started)
             return
         # A normal start shows the last wallpaper again, and the slideshow carries on from
-        # there on its own schedule (issue #140).
+        # there on its own schedule.
         previous = self.store.active()
         if previous is None:
             logger.info("No previous profile was found.")
@@ -184,7 +184,7 @@ class Superpaper:
         """
         try:
             layout = display_detection.detect_layout(self.paths.config)
-        except (display_detection.DisplayDetectionError, OSError, ValueError, KeyError, configparser.Error) as error:
+        except (display_detection.DisplayDetectionError, OSError, ValueError, configparser.Error) as error:
             logger.warning("Keeping the previous display layout: %s", error)
             return
         self.session.use_displays(layout)

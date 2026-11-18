@@ -40,7 +40,6 @@ class ProfileDiscoveryDiagnostic:
     path: Path
     kind: ProfileDiagnosticKind
     detail: str
-    profile_id: ProfileId | None = None
     # Digest of the diagnosed bytes, so that deleting the file later can confirm it
     # removes the content the user was asked about.
     digest: bytes | None = None
@@ -77,8 +76,6 @@ class ProfileTransactionError(OSError):
             message += "; rollback also failed: " + "; ".join(map(str, rollback_errors))
         super().__init__(getattr(error, "errno", None), message)
         self.stage = stage
-        self.original_error = error
-        self.rollback_errors = rollback_errors
 
     def __str__(self) -> str:
         # The editor shows this; OSError's own would start with "[Errno None]".
@@ -141,8 +138,8 @@ class ProfileStore:
         update_active: bool = False,
     ) -> StoredProfile:
         """Save ``profile`` as a new profile, or over ``current``, renaming it if its name
-        changed; returns its record. See save_managed_profile."""
-        path = save_managed_profile(
+        changed; returns its record. See _save_managed_profile."""
+        path = _save_managed_profile(
             self.paths,
             profile,
             selected=selected,
@@ -177,7 +174,7 @@ class ProfileStore:
     def delete(self, stored: StoredProfile) -> None:
         """Delete a profile and forget what it showed, unless its file changed after it was
         loaded (ManagedPathError)."""
-        delete_managed_profile(self.paths, stored)
+        _delete_managed_profile(self.paths, stored)
         self._records.pop(stored.profile_id, None)
 
 
@@ -218,18 +215,16 @@ def discover(paths: AppPaths) -> ProfileInventory:
 
 def _load(path: Path, profile_id: ProfileId, cache_dir: Path) -> StoredProfile | ProfileDiscoveryDiagnostic:
     if not path.is_file():
-        return ProfileDiscoveryDiagnostic(
-            path, ProfileDiagnosticKind.NOT_REGULAR_FILE, "Not a regular file.", profile_id
-        )
+        return ProfileDiscoveryDiagnostic(path, ProfileDiagnosticKind.NOT_REGULAR_FILE, "Not a regular file.")
     try:
         content = path.read_bytes()
     except OSError as error:
-        return ProfileDiscoveryDiagnostic(path, ProfileDiagnosticKind.IO_ERROR, str(error), profile_id)
+        return ProfileDiscoveryDiagnostic(path, ProfileDiagnosticKind.IO_ERROR, str(error))
     digest = _content_digest(content)
     try:
         profile = profile_file.parse(content.decode("utf-8"))
     except (UnicodeDecodeError, profile_file.ProfileFormatError) as error:
-        return ProfileDiscoveryDiagnostic(path, ProfileDiagnosticKind.MALFORMED_CONTENT, str(error), profile_id, digest)
+        return ProfileDiscoveryDiagnostic(path, ProfileDiagnosticKind.MALFORMED_CONTENT, str(error), digest)
     # The filename is the identity; a name= line that disagrees (a file renamed by hand,
     # or a case-only rename on Windows) is corrected on the next save.
     if profile.name != profile_id.value:
@@ -288,7 +283,7 @@ def validate_managed_profile_id(
     return profile_id
 
 
-def delete_managed_profile(paths: AppPaths, stored: StoredProfile) -> None:
+def _delete_managed_profile(paths: AppPaths, stored: StoredProfile) -> None:
     """Delete a loaded profile's file, refusing if the file changed after it was loaded."""
     path = profile_path(paths.profiles, stored.profile_id, allow_missing=False)
     if _content_digest(path.read_bytes()) != stored.digest:
@@ -387,7 +382,7 @@ def _selection_to_carry_over(selection_file: Path, source_content: bytes) -> lis
     return [path for path in legacy_lines[-1].strip().split(";") if path] or None
 
 
-def save_managed_profile(
+def _save_managed_profile(
     paths: AppPaths,
     profile: Profile,
     *,
