@@ -158,6 +158,34 @@ def test_requests_are_handled_in_the_order_they_were_made(runtime):
     assert runtime.shown == ["A-1.png", "A-2.png", "B-1.png", "B-2.png"]
 
 
+def test_consecutive_nexts_render_once_and_move_on_each_time(runtime):
+    a = saved("A")
+    runtime.hold_changes()
+    runtime.session.activate(a)
+    assert runtime.holding.wait(10)
+    for _ in range(3):
+        runtime.session.next()
+    runtime.release()
+    runtime.settle()
+
+    assert runtime.shown == ["A-1.png", "A-4.png"]
+    assert a.selection.number == 4
+
+
+def test_a_request_between_nexts_keeps_its_place(runtime):
+    runtime.hold_changes()
+    runtime.session.activate(saved("A"))
+    assert runtime.holding.wait(10)
+    runtime.session.next()
+    runtime.session.next()
+    runtime.session.activate(saved("B"))
+    runtime.session.next()
+    runtime.release()
+    runtime.settle()
+
+    assert runtime.shown == ["A-1.png", "A-3.png", "B-1.png", "B-2.png"]
+
+
 def test_requests_never_wait_for_a_change_under_way(runtime):
     runtime.hold_changes()
     runtime.session.activate(saved("A"))
