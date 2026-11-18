@@ -103,7 +103,7 @@ class DisplayBand(wx.CollapsiblePane):
             wx.TextCtrl(parent, -1, size=wx.Size(field_width, -1), style=wx.TE_RIGHT) for _ in layout.displays
         ]
         use_user_diags = layout.uses_user_diagonals
-        for tc, diag in zip(self.tc_list_diaginch, diags):
+        for tc, diag in zip(self.tc_list_diaginch, diags, strict=True):
             tc_list_sizer_diag.Add(tc, 0, wx.ALIGN_LEFT | wx.ALL, 5)
             tc.ChangeValue(diag)
             tc.Enable(use_user_diags)
@@ -152,7 +152,7 @@ class DisplayBand(wx.CollapsiblePane):
         layout = self.staged.layout
         self.cb_diaginch.SetValue(layout.uses_user_diagonals)
         diags = [str(diagonal) for diagonal in layout.diagonal_inches()]
-        for tc, diag in zip(self.tc_list_diaginch, diags):
+        for tc, diag in zip(self.tc_list_diaginch, diags, strict=True):
             tc.ChangeValue(diag)
             tc.Enable(layout.uses_user_diagonals)
 

@@ -581,7 +581,7 @@ class WallpaperSettingsPanel(wx.Panel):
         # Advanced settings
         self.show_adv_setting_sizer(self.span_mode == "advanced")
         self.cb_offsets.SetValue(shown.offsets_applied)
-        for tc, offstr in zip(self.tc_list_offsets, shown.offsets):
+        for tc, offstr in zip(self.tc_list_offsets, shown.offsets, strict=True):
             tc.SetValue(offstr)
         wx.PostEvent(self.cb_offsets, wx.CommandEvent(commandEventType=wx.EVT_CHECKBOX.typeId))
         persp_label = choice_label(shown.perspective)
@@ -591,7 +591,7 @@ class WallpaperSettingsPanel(wx.Panel):
             self.ch_persp.SetSelection(0)
         self.cb_spangroups.SetValue(shown.spangroups_enabled)
         self.toggle_spangroup_widgets(shown.spangroups_enabled)
-        for ch, group in zip(self.ch_list_spangroups, shown.spangroup_choices):
+        for ch, group in zip(self.ch_list_spangroups, shown.spangroup_choices, strict=True):
             ch.SetSelection(group)
 
         # Paths displays: get number to show from profile.

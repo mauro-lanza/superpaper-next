@@ -114,7 +114,7 @@ class Layout:
         """The size of the desktop, in pixels."""
         crops = [
             (left, top, left + width, top + height)
-            for (width, height), (left, top) in zip(self.resolutions(), self.digital_offsets())
+            for (width, height), (left, top) in zip(self.resolutions(), self.digital_offsets(), strict=True)
         ]
         return canvas_size(crops)
 
@@ -130,7 +130,7 @@ class Layout:
         """Each display's resolution scaled to the pixel density of the densest display."""
         max_ppi = self.max_ppi()
         sizes = []
-        for display, ppi in zip(self.displays, self._ppis()):
+        for display, ppi in zip(self.displays, self._ppis(), strict=True):
             relative_ppi = ppi / max_ppi
             sizes.append((round(display.resolution[0] / relative_ppi), round(display.resolution[1] / relative_ppi)))
         return sizes
@@ -151,7 +151,7 @@ class Layout:
         """Each display's (left, top, right, bottom) to cut from the density-normalised
         canvas, moved by ``manual_offsets``; a display without one isn't moved."""
         crops = []
-        for index, (offset, size) in enumerate(zip(self.ppi_norm_offsets, self.ppi_norm_resolutions())):
+        for index, (offset, size) in enumerate(zip(self.ppi_norm_offsets, self.ppi_norm_resolutions(), strict=True)):
             manual = manual_offsets[index] if index < len(manual_offsets) else (0, 0)
             left_top = (round(offset[0] + manual[0]), round(offset[1] + manual[1]))
             crops.append((*left_top, round(size[0]) + left_top[0], round(size[1]) + left_top[1]))
@@ -165,7 +165,9 @@ class Layout:
         """The displays as they are placed on the density-normalised canvas."""
         return [
             DisplayArea(size, offset, bezels)
-            for size, offset, bezels in zip(self.ppi_norm_resolutions(), self.ppi_norm_offsets, self.ppi_norm_bezels())
+            for size, offset, bezels in zip(
+                self.ppi_norm_resolutions(), self.ppi_norm_offsets, self.ppi_norm_bezels(), strict=True
+            )
         ]
 
     def with_offsets(self, offsets: Sequence[Point]) -> Layout:
@@ -183,7 +185,7 @@ class Layout:
         """
         sizes = self.ppi_norm_resolutions()
         bezels = self.ppi_norm_bezels()
-        cells = [(size[0] + bezel[0], size[1] + bezel[1]) for size, bezel in zip(sizes, bezels)]
+        cells = [(size[0] + bezel[0], size[1] + bezel[1]) for size, bezel in zip(sizes, bezels, strict=True)]
 
         columns: list[list[int]] = []
         for index, display in enumerate(self.displays):
@@ -200,7 +202,7 @@ class Layout:
 
         offsets: dict[int, Point] = {}
         left = 0
-        for column, width, height in zip(columns, column_widths, column_heights):
+        for column, width, height in zip(columns, column_widths, column_heights, strict=True):
             top = round((tallest - height) / 2)
             current_top = 0
             for index in column:
@@ -327,7 +329,7 @@ class Layout:
         if self.user_diagonal_inches is None:
             return [display.detected_phys_size_mm for display in self.displays]
         sizes = []
-        for display, diagonal in zip(self.displays, self.user_diagonal_inches):
+        for display, diagonal in zip(self.displays, self.user_diagonal_inches, strict=True):
             width_inch = _width_inches(display.resolution, diagonal)
             height_inch = display.resolution[1] / display.resolution[0] * width_inch
             sizes.append((width_inch * MM_PER_INCH, height_inch * MM_PER_INCH))
@@ -338,14 +340,16 @@ class Layout:
             return [display.resolution[0] / display.detected_phys_size_mm[0] * MM_PER_INCH for display in self.displays]
         return [
             display.resolution[0] / _width_inches(display.resolution, diagonal)
-            for display, diagonal in zip(self.displays, self.user_diagonal_inches)
+            for display, diagonal in zip(self.displays, self.user_diagonal_inches, strict=True)
         ]
 
     def _cells(self) -> list[tuple[float, float, float, float]]:
         """Each display with its bezel as (left, top, right, bottom) in ppi norm pixels."""
         return [
             (offset[0], offset[1], offset[0] + size[0] + bezel[0], offset[1] + size[1] + bezel[1])
-            for offset, size, bezel in zip(self.ppi_norm_offsets, self.ppi_norm_resolutions(), self.ppi_norm_bezels())
+            for offset, size, bezel in zip(
+                self.ppi_norm_offsets, self.ppi_norm_resolutions(), self.ppi_norm_bezels(), strict=True
+            )
         ]
 
     def _is_valid(self) -> bool:

@@ -35,7 +35,7 @@ def layout(monkeypatch, tmp_path):
 def flatten(perspective):
     """Every number of ``perspective`` in one list, the swivel axes as their values."""
     numbers = [perspective.central_display, *perspective.viewer_pos]
-    for swivel, tilt in zip(perspective.swivels, perspective.tilts):
+    for swivel, tilt in zip(perspective.swivels, perspective.tilts, strict=True):
         numbers += [swivel.axis.value, swivel.angle, swivel.lateral_offset, swivel.depth_offset, *astuple(tilt)]
     return numbers
 

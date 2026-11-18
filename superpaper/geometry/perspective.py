@@ -147,7 +147,7 @@ def get_backprojected_display_system(
     init_plane_point = disp_positions[central_disp]
 
     projected_quads = []
-    for sz, pos, swiv, tilt in zip(sizes, disp_positions, swivels, tilts):
+    for sz, pos, swiv, tilt in zip(sizes, disp_positions, swivels, tilts, strict=True):
         p_quad = _get_backprojected_display(sz, pos, swiv, tilt, init_plane_basis, init_plane_point)
         projected_quads.append(p_quad)
     leftmost_corner = min([corner[0] for quad in projected_quads for corner in quad])
@@ -167,7 +167,7 @@ def get_backprojected_display_system(
         ((crop[0], crop[1]), (crop[2], crop[1]), (crop[2], crop[3]), (crop[0], crop[3])) for crop in crops
     ]
     projected_coeffs = []
-    for ordquad, ppi_norm_quad in zip(ordered_quads, ppi_norm_corners):
+    for ordquad, ppi_norm_quad in zip(ordered_quads, ppi_norm_corners, strict=True):
         coeffs = _find_coeffs(ordquad, ppi_norm_quad)
         projected_coeffs.append(coeffs)
 
@@ -453,7 +453,7 @@ def _find_coeffs(source_coords: Sequence[Sequence[float]], target_coords: Sequen
     Quad corner order needs to be TOP LEFT, TOP RIGHT, BOTTOM RIGHT, BOTTOM LEFT.
     """
     matrix = []
-    for s, t in zip(source_coords, target_coords):
+    for s, t in zip(source_coords, target_coords, strict=True):
         matrix.append([t[0], t[1], 1, 0, 0, 0, -s[0] * t[0], -s[0] * t[1]])
         matrix.append([0, 0, 0, t[0], t[1], 1, -s[1] * t[0], -s[1] * t[1]])
     A = np.array(matrix, dtype=float)

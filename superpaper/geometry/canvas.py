@@ -40,8 +40,8 @@ def canvas_size(crops: Sequence[Crop]) -> tuple[int, int]:
 def canvas_size_with_bezels(crops: Sequence[Crop], bezels: Sequence[Point]) -> tuple[int, int]:
     """The size of the canvas that holds ``crops`` and their outer bezels (one (right, bottom)
     per crop), so that a render is as large as the preview shows it."""
-    right = max(round(crop[2] + bezel[0]) for crop, bezel in zip(crops, bezels))
-    bottom = max(round(crop[3] + bezel[1]) for crop, bezel in zip(crops, bezels))
+    right = max(round(crop[2] + bezel[0]) for crop, bezel in zip(crops, bezels, strict=True))
+    bottom = max(round(crop[3] + bezel[1]) for crop, bezel in zip(crops, bezels, strict=True))
     return (right, bottom)
 
 

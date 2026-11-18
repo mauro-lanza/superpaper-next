@@ -31,7 +31,7 @@ def edges_in_unit(layout: Layout, *, use_px: bool) -> list[Edges]:
     bezels = layout.ppi_norm_bezels()
     return [
         (unit(crop[0]), unit(crop[1]), unit(crop[2] + bezel[0]), unit(crop[3] + bezel[1]))
-        for crop, bezel in zip(crops, bezels)
+        for crop, bezel in zip(crops, bezels, strict=True)
     ]
 
 

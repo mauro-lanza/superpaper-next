@@ -147,7 +147,7 @@ class Selection:
             files, counters = self._pending
             if all(os.path.isfile(path) for path in files):
                 if not peek:
-                    for image_list, counter in zip(self._lists, counters):
+                    for image_list, counter in zip(self._lists, counters, strict=True):
                         image_list.counter = counter
                     self._pending = None
                 return list(files)
