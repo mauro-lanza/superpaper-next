@@ -1,44 +1,92 @@
-"""The KDE tray menu (StatusNotifierItem): built without D-Bus from the tray's state."""
+"""The KDE tray menu (StatusNotifierItem): built without D-Bus from the tray's menu entries."""
 
-import sys
-from types import SimpleNamespace
+import pytest
 
-from superpaper.profile_id import ProfileId
-from superpaper.profiles import Profile
-from superpaper.ui.sni_tray import _MenuModel
+from superpaper.ui.tray_menu import Check, Item, Separator, Submenu
+from tests.conftest import import_headless, wx_stub
 
 
-def stored(name):
-    return SimpleNamespace(profile=Profile(name=name), profile_id=ProfileId(name))
+@pytest.fixture
+def sni_tray(monkeypatch):
+    """The SNI module against a wx stub whose CallAfter runs at once."""
+    module, forget = import_headless(monkeypatch, "sni_tray", wx_stub())
+    yield module
+    forget()
 
 
-def test_the_menu_lists_the_profiles_and_starts_the_one_chosen(monkeypatch):
-    monkeypatch.setitem(sys.modules, "wx", None)  # run actions at once, not on a wx main loop
-    started = []
-    work, home = stored("Work"), stored("Home")
-    tray = SimpleNamespace(
-        list_of_profiles=[work, home],
-        is_paused=False,
-        start_profile=lambda event, chosen: started.append(chosen),
-        **{
-            name: lambda event: None
-            for name in (
-                "open_config",
-                "configure_wallpapers",
-                "configure_settings",
-                "reload_profiles",
-                "next_wallpaper",
-                "pause_timer",
-                "on_about",
-                "on_exit",
-            )
-        },
+def entries(started, *, paused=False):
+    return (
+        Item("Settings", lambda: started.append("settings")),
+        Separator(),
+        Submenu(
+            "Profiles", (Item("Work", lambda: started.append("Work")), Item("Home", lambda: started.append("Home")))
+        ),
+        Separator(),
+        Check("Pause Timer", lambda: started.append("pause"), checked=paused),
     )
-    menu = _MenuModel(tray)
 
-    menu.rebuild()
-    profile_items = menu._items[_MenuModel.PROFILES_SUBMENU_ID]["children"]
-    menu.activate(profile_items[1])
 
-    assert [menu._items[item]["props"]["label"] for item in profile_items] == ["Work", "Home"]
-    assert started == [home]
+def test_the_menu_lists_the_profiles_and_starts_the_one_chosen(sni_tray):
+    started = []
+    model = sni_tray._MenuModel(lambda: entries(started))
+
+    model.rebuild()
+    submenu = model.nodes[model.layout[2]]
+    model.activate(submenu.children[1])
+
+    assert [model.nodes[child].props["label"] for child in submenu.children] == ["Work", "Home"]
+    assert submenu.props["children-display"] == "submenu"
+    assert submenu.action is None
+    assert started == ["Home"]
+
+
+def test_the_top_level_keeps_its_ids_when_the_profiles_change(sni_tray):
+    profiles = [Item("Work", lambda: None)]
+    menu = lambda: (Item("Settings", lambda: None), Submenu("Profiles", tuple(profiles)), Item("Exit", lambda: None))  # noqa: E731
+    model = sni_tray._MenuModel(menu)
+
+    model.rebuild()
+    before = model.layout
+    profiles.append(Item("Home", lambda: None))
+    model.rebuild()
+
+    assert model.layout == before == (1, 2, 3)
+    assert sorted(model.nodes) == [1, 2, 3, 4, 5]
+
+
+def test_a_check_item_carries_its_state(sni_tray):
+    started = []
+    model = sni_tray._MenuModel(lambda: entries(started, paused=True))
+
+    model.rebuild()
+    check = model.nodes[model.layout[4]]
+    model.activate(model.layout[4])
+
+    assert check.props == {"label": "Pause Timer", "enabled": True, "toggle-type": "checkmark", "toggle-state": 1}
+    assert started == ["pause"]
+
+
+def test_separators_and_unknown_ids_do_nothing(sni_tray):
+    started = []
+    model = sni_tray._MenuModel(lambda: entries(started))
+
+    model.rebuild()
+    model.activate(model.layout[1])
+    model.activate(model.layout[2])
+    model.activate(999)
+
+    assert model.nodes[model.layout[1]].props == {"type": "separator"}
+    assert started == []
+
+
+def test_an_action_that_fails_is_logged_and_the_menu_carries_on(sni_tray, caplog):
+    def broken():
+        message = "broken"
+        raise RuntimeError(message)
+
+    model = sni_tray._MenuModel(lambda: (Item("Broken", broken),))
+
+    model.rebuild()
+    model.activate(1)
+
+    assert "SNI menu action failed: broken" in caplog.text

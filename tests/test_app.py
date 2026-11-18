@@ -12,7 +12,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from superpaper import displays
+from superpaper import display_detection
 from superpaper.paths import AppPaths
 from superpaper.profile_id import ProfileId
 from superpaper.profile_store import ProfileStore
@@ -42,7 +42,7 @@ class Detection:
 @pytest.fixture(autouse=True)
 def detection(monkeypatch):
     detect = Detection()
-    monkeypatch.setattr(displays, "DisplaySystem", detect)
+    monkeypatch.setattr(display_detection, "detect_layout", detect)
     return detect
 
 
@@ -71,7 +71,7 @@ class FakeSession:
     def __init__(self, running=None):
         self.running = running
         self.paused = False
-        self.display_system = LAYOUT
+        self.layout = LAYOUT
         self.requests = []
 
     def __getattr__(self, request):
@@ -113,7 +113,7 @@ def test_a_profile_starts_on_freshly_detected_displays(headless_app_module, dete
 
 @pytest.mark.parametrize(
     "error",
-    [displays.DisplayDetectionError(3), configparser.Error("an unreadable display_systems.dat")],
+    [display_detection.DisplayDetectionError(3), configparser.Error("an unreadable display_systems.dat")],
 )
 def test_a_failed_display_detection_keeps_the_previous_layout(headless_app_module, detection, caplog, error):
     superpaper = application(headless_app_module)
@@ -198,7 +198,7 @@ def test_the_help_and_the_configuration_open_at_start_when_they_should(
     monkeypatch.setattr(app.desktop, "setter_problem", lambda set_command: None)
     superpaper = application(app, settings=Settings(show_help=show_help))
     superpaper.tray.clickable = clickable
-    superpaper.session.display_system = FRESH
+    superpaper.session.layout = FRESH
 
     superpaper._show_at_start()
 
@@ -211,7 +211,7 @@ def test_problems_with_this_desktop_are_said_once_at_start(headless_app_module, 
     monkeypatch.setattr(app, "show_message_dialog", lambda message, *args: shown.append(message))
     monkeypatch.setattr(app.desktop, "setter_problem", lambda set_command: "no setter here")
     superpaper = application(app, settings=Settings(show_help=False))
-    superpaper.session.display_system = SimpleNamespace(size_hint=lambda: "enter the sizes")
+    superpaper.session.layout = SimpleNamespace(size_hint=lambda: "enter the sizes")
 
     superpaper._show_at_start()
 
@@ -245,23 +245,15 @@ def test_a_start_with_nothing_to_run_runs_nothing(headless_app_module, startup):
     assert superpaper.session.requests == []
 
 
-@pytest.mark.parametrize(
-    "raw",
-    [ProfileId("Work"), "Work", "/outside/profiles/Work.profile", r"C:\outside\Work.profile"],
-)
-def test_startup_profile_compatibility_extracts_identity_only(headless_app_module, raw):
-    assert headless_app_module._startup_profile_id(raw) == ProfileId("Work")
-
-
 def test_startup_outside_path_cannot_select_by_path(headless_app_module):
     app = headless_app_module
     managed = profile("Work")
     superpaper = application(app, profiles=[managed])
 
-    startup_id = app._startup_profile_id("/outside/not-the-managed-file/Work.profile")
+    startup_id = ProfileId.from_path("/outside/not-the-managed-file/Work.profile")
 
     assert superpaper.store.get(startup_id) is managed
-    assert app._startup_profile_id("/outside/Other.profile") == ProfileId("Other")
+    assert ProfileId.from_path("/outside/Other.profile") == ProfileId("Other")
     assert superpaper.store.get(ProfileId("Other")) is None
 
 

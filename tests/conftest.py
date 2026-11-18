@@ -61,11 +61,11 @@ def display_layout(monkeypatch, tmp_path):
 
     The layouts are loaded from ``config_dir``, by default a directory with none saved.
     """
-    from superpaper import displays
+    from superpaper import display_detection
 
     def build(monitors=TWO_DISPLAYS, config_dir=None):
-        monkeypatch.setattr(displays, "get_monitors", lambda: monitors)
-        return displays.DisplaySystem(config_dir or tmp_path / "no-saved-layouts")
+        monkeypatch.setattr(display_detection, "get_monitors", lambda: monitors)
+        return display_detection.detect_layout(config_dir or tmp_path / "no-saved-layouts")
 
     return build
 

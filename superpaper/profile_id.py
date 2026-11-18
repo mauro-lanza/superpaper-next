@@ -1,5 +1,6 @@
 """Profile identity: which filenames are profiles, and where their files may live."""
 
+import os
 import sys
 import unicodedata
 from dataclasses import InitVar, dataclass, field
@@ -34,10 +35,12 @@ class ProfileIdError(ValueError):
         self.suggested = suggested
 
 
+NEW_PROFILE_LABEL = "Create a new profile"
+"""The profile dropdown's entry for starting a new profile; no profile may be named so."""
 _WINDOWS_INVALID_CHARACTERS = frozenset('<>:"|?*')
 _MAX_PROFILE_ID_BYTES = 200
 _MAX_PROFILE_ID_UTF16_UNITS = 200
-_RESERVED_APPLICATION_NAMES = frozenset({"create a new profile", "cli"})
+_RESERVED_APPLICATION_NAMES = frozenset({NEW_PROFILE_LABEL.casefold(), "cli"})
 _WINDOWS_DEVICES = frozenset(
     {"con", "prn", "aux", "nul", "conin$", "conout$"}
     | {f"com{index}" for index in range(1, 10)}
@@ -69,6 +72,13 @@ class ProfileId:
     def parse_new(cls, raw: object) -> ProfileId:
         _validate_profile_id(raw, new=True)
         return cls(raw)
+
+    @classmethod
+    def from_path(cls, name_or_path: str | os.PathLike[str]) -> ProfileId:
+        """The profile named by ``name_or_path``: a profile name, or the path of its file,
+        of which only the file's name counts, so a path can't choose where a profile lives."""
+        leaf = os.fspath(name_or_path).replace("\\", "/").rsplit("/", 1)[-1]
+        return cls.parse(leaf.removesuffix(".profile"))
 
     @property
     def value(self) -> str:

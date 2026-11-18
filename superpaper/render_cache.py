@@ -24,7 +24,7 @@ from superpaper.files import write_atomically
 from superpaper.profile_id import ProfileId
 
 if TYPE_CHECKING:
-    from superpaper.displays import DisplaySystem
+    from superpaper.displays import Layout
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +82,7 @@ def save(slot: Slot, image: Image.Image, *, platform: str = sys.platform) -> Pat
     return path
 
 
-def cut_pieces(image: Path, layout: DisplaySystem) -> list[Path]:
+def cut_pieces(image: Path, layout: Layout) -> list[Path]:
     """Cut the render ``image`` into one image per display of ``layout``, kept beside it,
     in the layout's display order."""
     pieces = []

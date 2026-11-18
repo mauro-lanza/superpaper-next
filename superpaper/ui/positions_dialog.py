@@ -1,10 +1,12 @@
 """Entering display positions exactly, in millimetres or pixels."""
 
-import wx  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-import]
+import wx  # ty:ignore[unresolved-import]
 
+from superpaper import canvas
 from superpaper.paths import resource
-from superpaper.ui.help import HelpPopup
+from superpaper.ui.help import show_help_popup
 from superpaper.ui.message import show_message_dialog
+from superpaper.user_input import parse_float
 
 
 class DisplayPositionEntry(wx.Frame):
@@ -21,17 +23,17 @@ class DisplayPositionEntry(wx.Frame):
         self.layout_editor = layout_editor
         self.layout_editor.button_save.Disable()
         self.layout_editor.button_cancel.Disable()
-        self.display_sys = preview.display_sys
+        self.staged = preview.staged
         if dragged_positions:
-            self.layout_editor.export_offsets(self.display_sys)  # export dragged offsets first
-        self.old_ppinorm_offs = self.display_sys.get_ppinorm_offsets()  # back up the offsets
+            self.staged.layout = self.layout_editor.dragged_layout(self.staged.layout)  # use dragged offsets first
+        self.old_ppinorm_offs = self.staged.layout.ppi_norm_offsets  # back up the offsets
 
         self.help_bmp = wx.ArtProvider.GetBitmap(wx.ART_QUESTION, wx.ART_BUTTON, wx.Size(20, 20))
 
         sizer_main = wx.BoxSizer(wx.VERTICAL)
 
         # Display position config
-        self.create_position_config(len(self.display_sys.disp_list))
+        self.create_position_config(len(self.staged.layout.displays))
 
         # Bottom row buttons
         self.create_bottom_butts()
@@ -80,7 +82,6 @@ class DisplayPositionEntry(wx.Frame):
 
     def display_opt_widget_row(self, row_id):
         """Return a display position config widget row."""
-        # statbox_disp_opts = self.sizer_disp_opts.GetStaticBox()
         statbox_disp_opts = self
         row_id = wx.StaticText(statbox_disp_opts, -1, str(row_id))
         row_left = wx.TextCtrl(
@@ -186,7 +187,7 @@ class DisplayPositionEntry(wx.Frame):
 
     def update_offsets_and_redraw(self):
         """Collect display postitions and redraw preview."""
-        max_ppi = self.display_sys.max_ppi()
+        max_ppi = self.staged.layout.max_ppi()
         if self.cb_use_px.GetValue():
             unit_mult = 1
         else:
@@ -196,21 +197,21 @@ class DisplayPositionEntry(wx.Frame):
             new_off = []
             for tc in row[-2:]:
                 tc_val = tc.GetValue()
-                try:
-                    new_off.append(float(tc_val) * unit_mult)
-                except ValueError:
+                value = parse_float(tc_val)
+                if value is None:
                     if tc_val:
                         msg = f"Entered value '{tc_val}' is not valid."
                     else:
                         msg = "Please enter a position for every display. Some value is empty."
                     show_message_dialog(msg)
                     return False
-            offs.append(tuple(new_off))
-        offs = self.sanitize_offs(offs)
+                new_off.append(value * unit_mult)
+            offs.append((new_off[0], new_off[1]))
+        offs = canvas.translate_to_origin(offs)
 
-        self.display_sys.update_ppinorm_offsets(offs)
-        self.preview.display_data = self.display_sys.get_disp_list(True)
-        self.preview.refresh_preview(use_ppi_px=True, force_refresh=True)
+        self.staged.layout = self.staged.layout.with_offsets(offs)
+        self.preview.display_data = self.staged.layout.ppi_norm_areas()
+        self.preview.refresh_preview(use_ppi_px=True)
         self.layout_editor.create_shapes()
         self.preview.GetParent().Refresh()
 
@@ -233,10 +234,10 @@ class DisplayPositionEntry(wx.Frame):
     def onCancel(self, event):
         """Closes display position config, throwing away unsaved contents."""
         # Restore old offsets
-        self.display_sys.update_ppinorm_offsets(self.old_ppinorm_offs)
+        self.staged.layout = self.staged.layout.with_offsets(self.old_ppinorm_offs)
         # redraw preview with restored data
-        self.preview.display_data = self.display_sys.get_disp_list(True)
-        self.preview.refresh_preview(use_ppi_px=True, force_refresh=True)
+        self.preview.display_data = self.staged.layout.ppi_norm_areas()
+        self.preview.refresh_preview(use_ppi_px=True)
         self.layout_editor.create_shapes()
         self.preview.GetParent().Refresh()
         # close dialog
@@ -262,22 +263,18 @@ class DisplayPositionEntry(wx.Frame):
             "top-most edge are at 0. Right, Bottom edge positions\n"
             "include bezel sizes."
         )
-        pop = HelpPopup(self, text)
-        btn = evt.GetEventObject()
-        pos = btn.ClientToScreen((0, 0))
-        sz = btn.GetSize()
-        pop.Position(pos, wx.Size(0, sz[1]))
-        pop.Popup()
+        show_help_popup(self, text, evt.GetEventObject())
 
     def populate_fields(self):
-        """Populate config fields from DisplaySystem offsets."""
-        max_ppi = self.display_sys.max_ppi()
+        """Populate config fields from the staged layout's offsets."""
+        layout = self.staged.layout
+        max_ppi = layout.max_ppi()
         if self.cb_use_px.GetValue():
             unit_mult = 1
         else:
             unit_mult = 1 / (max_ppi / 25.4)  # convert ppi to px/mm
-        crops = self.display_sys.get_ppi_norm_crops(len(self.display_sys.disp_list) * [(0, 0)])
-        bezels = self.display_sys.bezels_in_px()
+        crops = layout.ppi_norm_crops(len(layout.displays) * [(0, 0)])
+        bezels = layout.ppi_norm_bezels()
         for row, ltrb, bez in zip(self.grid_rows, crops, bezels):
             row[0].SetLabel(str(self.grid_rows.index(row)))
             row[1].SetValue(str(ltrb[0] * unit_mult))
@@ -289,7 +286,7 @@ class DisplayPositionEntry(wx.Frame):
 
     def convert_units(self, use_px):
         """Convert table data between px and mm in place."""
-        max_ppi = self.display_sys.max_ppi()
+        max_ppi = self.staged.layout.max_ppi()
         if use_px:
             # convert from mm to px
             unit_mult = max_ppi / 25.4
@@ -301,12 +298,3 @@ class DisplayPositionEntry(wx.Frame):
                 curval = tc.GetValue()
                 if curval:
                     tc.SetValue(str(unit_mult * float(curval)))
-
-    def sanitize_offs(self, offsets):
-        """Return offsets translated to be non-negative, anchoring to (0,0)."""
-        sanitized_offs = []
-        leftmost_offset = min([off[0] for off in offsets])
-        topmost_offset = min([off[1] for off in offsets])
-        for off in offsets:
-            sanitized_offs.append((off[0] - leftmost_offset, off[1] - topmost_offset))
-        return sanitized_offs

@@ -1,3 +1,4 @@
+import logging
 import os
 import subprocess
 import sys
@@ -5,6 +6,7 @@ from types import ModuleType, SimpleNamespace
 
 import pytest
 
+from superpaper.desktop.process import Result
 from tests.conftest import write_profile
 
 
@@ -25,9 +27,6 @@ def cli_subprocess_env(tmp_path):
 def run_module_cli(tmp_path, *args):
     script = (
         "import runpy, sys, types; "
-        "spanmode = types.ModuleType('superpaper.desktop.spanmode'); "
-        "spanmode.set_spanmode = lambda: None; "
-        "sys.modules['superpaper.desktop.spanmode'] = spanmode; "
         # One fake monitor, so that runs on headless machines reach the code under test.
         "import screeninfo; "
         "screeninfo.get_monitors = lambda: [types.SimpleNamespace("
@@ -42,6 +41,16 @@ def run_module_cli(tmp_path, *args):
         text=True,
         env=cli_subprocess_env(tmp_path),
     )
+
+
+@pytest.fixture(autouse=True)
+def spanned(monkeypatch):
+    """Record the set commands the desktop is told to span for, instead of changing the desktop."""
+    from superpaper import cli
+
+    commands = []
+    monkeypatch.setattr(cli.desktop, "set_spanmode", lambda set_command: commands.append(set_command) or Result())
+    return commands
 
 
 def test_import_cli_does_not_load_tray_or_gui(tmp_path):
@@ -91,10 +100,7 @@ def test_module_missing_profile_exits_nonzero(tmp_path):
 
 def test_missing_wxpython_is_explained(tmp_path):
     script = (
-        "import runpy, sys, types; "
-        "spanmode = types.ModuleType('superpaper.desktop.spanmode'); "
-        "spanmode.set_spanmode = lambda: None; "
-        "sys.modules['superpaper.desktop.spanmode'] = spanmode; "
+        "import runpy, sys; "
         "sys.modules['wx'] = None; "
         "sys.argv = ['superpaper']; "
         "runpy.run_module('superpaper', run_name='__main__')"
@@ -107,36 +113,6 @@ def test_missing_wxpython_is_explained(tmp_path):
     assert "need wxPython" in result.stderr
 
 
-def test_main_leaves_span_mode_to_the_cli(monkeypatch):
-    from superpaper import __main__ as entrypoint
-
-    calls = []
-    cli = ModuleType("superpaper.cli")
-    cli.cli_logic = lambda paths: calls.append("cli")
-    monkeypatch.setitem(sys.modules, "superpaper.cli", cli)
-    monkeypatch.setattr(entrypoint, "set_spanmode", lambda: calls.append("spanmode"))
-    monkeypatch.setattr(sys, "argv", ["superpaper", "--help"])
-
-    entrypoint.main()
-
-    assert calls == ["cli"]
-
-
-def test_main_dispatches_tray_after_spanmode(monkeypatch):
-    from superpaper import __main__ as entrypoint
-
-    calls = []
-    app = ModuleType("superpaper.ui.app")
-    app.run = lambda paths, settings, profile=None: calls.append("tray")
-    monkeypatch.setitem(sys.modules, "superpaper.ui.app", app)
-    monkeypatch.setattr(entrypoint, "set_spanmode", lambda: calls.append("spanmode"))
-    monkeypatch.setattr(sys, "argv", ["superpaper"])
-
-    entrypoint.main()
-
-    assert calls == ["spanmode", "tray"]
-
-
 def fake_tray(monkeypatch):
     """Replace the wx tray with a recorder of what it was started with."""
     app = ModuleType("superpaper.ui.app")
@@ -146,13 +122,48 @@ def fake_tray(monkeypatch):
     return started
 
 
+def test_no_arguments_start_the_tray_after_spanning_the_desktop(monkeypatch, app_paths, spanned):
+    from superpaper import cli
+    from superpaper.settings import first_run_settings
+
+    started = fake_tray(monkeypatch)
+
+    assert cli.run([], app_paths) == 0
+
+    assert started == [(app_paths, first_run_settings(sys.platform), None)]
+    assert spanned == [""]
+
+
+def test_the_tray_spans_the_desktop_for_the_saved_set_command(monkeypatch, app_paths, spanned):
+    from superpaper import cli
+
+    fake_tray(monkeypatch)
+    (app_paths.config / "general_settings").write_text("set_command=setter {image}\n", encoding="utf-8")
+
+    assert cli.run([], app_paths) == 0
+
+    assert spanned == ["setter {image}"]
+
+
+def test_a_desktop_that_cant_span_is_reported_and_the_tray_still_starts(monkeypatch, app_paths, caplog):
+    from superpaper import cli
+
+    started = fake_tray(monkeypatch)
+    monkeypatch.setattr(cli.desktop, "set_spanmode", lambda set_command: Result("no registry"))
+
+    assert cli.run([], app_paths) == 0
+
+    assert len(started) == 1
+    assert "Could not set the desktop to span the displays: no registry" in caplog.text
+
+
 def test_first_tray_start_writes_the_default_settings(monkeypatch, app_paths):
     from superpaper import cli
     from superpaper.settings import first_run_settings, read_settings
 
     started = fake_tray(monkeypatch)
 
-    cli.start_tray(app_paths)
+    assert cli.run([], app_paths) == 0
 
     defaults = first_run_settings(sys.platform)
     assert started == [(app_paths, defaults, None)]
@@ -166,18 +177,31 @@ def test_tray_logs_to_the_cache_when_logging_is_on(monkeypatch, app_paths):
     settings_file = app_paths.config / "general_settings"
     settings_file.write_text("logging=true\n", encoding="utf-8")
     try:
-        cli.start_tray(app_paths)
+        assert cli.run([], app_paths) == 0
 
-        files = [handler.baseFilename for handler in sp_logging.G_LOGGER.handlers if hasattr(handler, "baseFilename")]
-        assert files == [str(app_paths.cache / "log")]
-        assert sp_logging.DEBUG is True
+        logging.getLogger("superpaper.test").info("from a module")
+        assert "from a module" in (app_paths.cache / "log").read_text(encoding="utf-8")
         assert settings_file.read_text(encoding="utf-8") == "logging=true\n"
     finally:
         sp_logging.configure_logging(debug=False)
 
 
-def test_setimages_dispatches_one_shot_render(monkeypatch, tmp_path, app_paths):
+def test_the_debug_flag_alone_starts_the_tray_with_logging(monkeypatch, app_paths):
+    from superpaper import cli, sp_logging
+
+    started = fake_tray(monkeypatch)
+    try:
+        assert cli.run(["--debug"], app_paths) == 0
+
+        assert [profile for _, _, profile in started] == [None]
+        assert logging.getLogger("superpaper.test").isEnabledFor(logging.INFO)
+    finally:
+        sp_logging.configure_logging(debug=False)
+
+
+def test_setimages_dispatches_one_shot_render(monkeypatch, tmp_path, app_paths, spanned):
     from superpaper import cli
+    from superpaper.perspective import Disabled
     from superpaper.profiles import Profile
 
     image = tmp_path / "wallpaper.png"
@@ -190,18 +214,18 @@ def test_setimages_dispatches_one_shot_render(monkeypatch, tmp_path, app_paths):
         captured["detections"] = captured.get("detections", 0) + 1
         return layout
 
-    def show(profile, images, paths, *, display_system, set_command):
-        captured["render"] = (profile, images, paths, display_system, set_command)
+    def show(profile, images, paths, *, layout, set_command):
+        captured["render"] = (profile, images, paths, layout, set_command)
 
-    monkeypatch.setattr(sys, "argv", ["superpaper", "--setimages", str(image)])
-    monkeypatch.setattr(cli, "DisplaySystem", detect)
+    monkeypatch.setattr(cli, "detect_layout", detect)
     monkeypatch.setattr(cli, "show", show)
 
-    assert cli.cli_logic(app_paths) == 0
+    assert cli.run(["--setimages", str(image)], app_paths) == 0
     # One image spans the displays, without a perspective.
-    draft = Profile(name="cli", slideshow=False, sources=((str(image),),), perspective="disabled")
+    draft = Profile(name="cli", slideshow=False, sources=((str(image),),), perspective=Disabled())
     assert captured["render"] == (draft, [str(image)], app_paths, layout, "")
     assert captured["detections"] == 1
+    assert spanned == [""]
 
 
 def test_a_wallpaper_that_cant_be_shown_exits_with_an_error(monkeypatch, tmp_path, app_paths):
@@ -209,79 +233,114 @@ def test_a_wallpaper_that_cant_be_shown_exits_with_an_error(monkeypatch, tmp_pat
 
     image = tmp_path / "wallpaper.png"
     image.touch()
-    monkeypatch.setattr(sys, "argv", ["superpaper", "--setimages", str(image)])
-    monkeypatch.setattr(cli, "DisplaySystem", lambda config_dir: SimpleNamespace())
+    monkeypatch.setattr(cli, "detect_layout", lambda config_dir: SimpleNamespace())
     # The problem is logged where it happens.
     monkeypatch.setattr(cli, "show", lambda *args, **kwargs: f"The image {image} can't be opened.")
 
-    with pytest.raises(SystemExit) as exit_info:
-        cli.cli_logic(app_paths)
-
-    assert exit_info.value.code == 1
+    assert cli.run(["--setimages", str(image)], app_paths) == 1
 
 
-def test_advanced_cli_arguments_are_preserved(monkeypatch, tmp_path, app_paths):
+def test_advanced_cli_arguments_are_preserved(monkeypatch, tmp_path, app_paths, spanned):
     from superpaper import cli
+    from superpaper.perspective import Named
     from superpaper.profiles import Profile
 
     image = tmp_path / "wallpaper.png"
     image.touch()
     captured = {}
-    display_system = SimpleNamespace(perspective_dict={"desk": object()}, size_hint=lambda: None)
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        [
-            "superpaper",
-            "--setimages",
-            str(image),
-            "--advanced",
-            "--perspective",
-            "desk",
-            "--spangroups",
-            "0",
-            "12",
-            "--offsets",
-            "1",
-            "2",
-            "--command",
-            "setter {image}",
-        ],
-    )
-    monkeypatch.setattr(cli, "DisplaySystem", lambda config_dir: display_system)
+    layout = SimpleNamespace(perspective_names=lambda: ["desk"], size_hint=lambda: None)
+    monkeypatch.setattr(cli, "detect_layout", lambda config_dir: layout)
     monkeypatch.setattr(
         cli,
         "show",
-        lambda rendered_profile, images, paths, *, display_system, set_command: captured.update(
-            render=(rendered_profile, paths, display_system, set_command)
+        lambda rendered_profile, images, paths, *, layout, set_command: captured.update(
+            render=(rendered_profile, paths, layout, set_command)
         ),
     )
 
-    assert cli.cli_logic(app_paths) == 0
+    argv = [
+        "--setimages",
+        str(image),
+        "--advanced",
+        "--perspective",
+        "desk",
+        "--spangroups",
+        "0",
+        "12",
+        "--offsets",
+        "1",
+        "2",
+        "--command",
+        "setter {image}",
+    ]
+    assert cli.run(argv, app_paths) == 0
     draft = Profile(
         name="cli",
         spanmode="advanced",
         spangroups=((0,), (1, 2)),
         slideshow=False,
         sources=((str(image),),),
-        perspective="desk",
+        perspective=Named("desk"),
         corrections=(("offsets", ((1, 2),)),),
     )
     # The layout that knows the perspective is the one the wallpaper is rendered for.
-    assert captured["render"] == (draft, app_paths, display_system, "setter {image}")
+    assert captured["render"] == (draft, app_paths, layout, "setter {image}")
+    # The desktop spans for the command the wallpaper is set with.
+    assert spanned == ["setter {image}"]
 
 
-def test_offsets_must_be_whole_numbers(monkeypatch, tmp_path, app_paths):
+def test_offsets_must_be_whole_numbers(tmp_path, app_paths):
     from superpaper import cli
 
     image = tmp_path / "wallpaper.png"
     image.touch()
-    monkeypatch.setattr(sys, "argv", ["superpaper", "--setimages", str(image), "--advanced", "--offsets", "1", "x"])
 
-    with pytest.raises(SystemExit) as exit_info:
-        cli.cli_logic(app_paths)
+    assert cli.run(["--setimages", str(image), "--advanced", "--offsets", "1", "x"], app_paths) == 1
 
-    assert exit_info.value.code == 1
+
+def test_invalid_arguments_set_nothing_up(tmp_path):
+    from superpaper import cli
+    from superpaper.paths import AppPaths
+
+    paths = AppPaths(config=tmp_path / "config", profiles=tmp_path / "config" / "profiles", cache=tmp_path / "cache")
+    image = tmp_path / "wallpaper.png"
+    image.touch()
+
+    assert cli.run(["--setimages", str(image), "--offsets", "1"], paths) == 1
+    assert list(tmp_path.iterdir()) == [image]
+
+
+def test_the_custom_command_must_be_in_quotes(tmp_path, app_paths, caplog):
+    from superpaper import cli
+
+    image = tmp_path / "wallpaper.png"
+    image.touch()
+
+    assert cli.run(["--setimages", str(image), "--command", "setter", "{image}"], app_paths) == 1
+    assert "Remember to put the custom command in quotes." in caplog.text
+
+
+def test_spangroups_must_be_display_numbers(tmp_path, app_paths, caplog):
+    from superpaper import cli
+
+    image = tmp_path / "wallpaper.png"
+    image.touch()
+
+    assert cli.run(["--setimages", str(image), "--spangroups", "0x"], app_paths) == 1
+    assert "One of the display ids was not an integer: 0x" in caplog.text
+
+
+def test_a_desktop_without_a_setter_is_reported_before_displays_are_used(monkeypatch, tmp_path, app_paths, caplog):
+    from superpaper import cli
+
+    image = tmp_path / "wallpaper.png"
+    image.touch()
+    monkeypatch.setenv("DESKTOP_SESSION", "unknown")
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(cli, "show", lambda *args, **kwargs: pytest.fail("rendered"))
+
+    assert cli.run(["--setimages", str(image)], app_paths) == 1
+    assert "can't set the wallpaper" in caplog.text
 
 
 @pytest.mark.parametrize(("advanced", "hinted"), [(True, True), (False, False)])
@@ -292,30 +351,38 @@ def test_an_undetected_display_size_is_mentioned_when_spanning_by_size(
 
     image = tmp_path / "wallpaper.png"
     image.touch()
-    arguments = ["superpaper", "--setimages", str(image), "--command", "setter {image}"]
-    monkeypatch.setattr(sys, "argv", [*arguments, "--advanced"] if advanced else arguments)
-    monkeypatch.setattr(cli, "DisplaySystem", lambda config_dir: SimpleNamespace(size_hint=lambda: "Enter its size."))
+    arguments = ["--setimages", str(image), "--command", "setter {image}"]
+    monkeypatch.setattr(cli, "detect_layout", lambda config_dir: SimpleNamespace(size_hint=lambda: "Enter its size."))
     monkeypatch.setattr(cli, "show", lambda *args, **kwargs: None)
 
-    assert cli.cli_logic(app_paths) == 0
+    assert cli.run([*arguments, "--advanced"] if advanced else arguments, app_paths) == 0
     assert ("Enter its size." in caplog.text) is hinted
 
 
-def test_cli_help_exits_successfully(monkeypatch, tmp_path):
+def test_cli_help_exits_successfully(tmp_path):
     from superpaper import cli
     from superpaper.paths import AppPaths
 
     paths = AppPaths(config=tmp_path / "config", profiles=tmp_path / "config" / "profiles", cache=tmp_path / "cache")
-    monkeypatch.setattr(sys, "argv", ["superpaper", "--help"])
 
     with pytest.raises(SystemExit) as error:
-        cli.cli_logic(paths)
+        cli.run(["--help"], paths)
 
     assert error.value.code == 0
     assert list(tmp_path.iterdir()) == []
 
 
-def test_profile_launch_returns_after_the_tray_quits(monkeypatch, app_paths):
+def test_images_and_a_profile_together_are_refused(tmp_path, app_paths, caplog):
+    from superpaper import cli
+
+    image = tmp_path / "wallpaper.png"
+    image.touch()
+
+    assert cli.run(["--setimages", str(image), "--profile", "saved"], app_paths) == 1
+    assert "Pass either image(s)" in caplog.text
+
+
+def test_profile_launch_returns_after_the_tray_quits(monkeypatch, app_paths, spanned):
     from superpaper import cli
 
     profiles = app_paths.profiles
@@ -327,23 +394,18 @@ def test_profile_launch_returns_after_the_tray_quits(monkeypatch, app_paths):
     tray_calls = []
     app.run = lambda paths, settings, profile=None: tray_calls.append(profile)
     monkeypatch.setitem(sys.modules, "superpaper.ui.app", app)
-    monkeypatch.setattr(cli, "DisplaySystem", lambda config_dir: None)
-    monkeypatch.setattr(sys, "argv", ["superpaper", "--profile", "saved"])
+    monkeypatch.setattr(cli, "detect_layout", lambda config_dir: None)
 
-    assert cli.cli_logic(app_paths) == 0
+    assert cli.run(["--profile", "saved"], app_paths) == 0
     assert [profile_id.value for profile_id in tray_calls] == ["saved"]
+    assert spanned == [""]
 
 
 @pytest.mark.parametrize("profile_name", ["../saved", "/tmp/saved", r"folder\saved"])
-def test_profile_lookup_rejects_path_input(monkeypatch, app_paths, profile_name):
+def test_profile_lookup_rejects_path_input(app_paths, profile_name):
     from superpaper import cli
 
-    monkeypatch.setattr(sys, "argv", ["superpaper", "--profile", profile_name])
-
-    with pytest.raises(SystemExit) as error:
-        cli.cli_logic(app_paths)
-
-    assert error.value.code == 1
+    assert cli.run(["--profile", profile_name], app_paths) == 1
 
 
 def test_invalid_profile_id_fails_before_inventory_or_display_data(monkeypatch, app_paths):
@@ -351,12 +413,10 @@ def test_invalid_profile_id_fails_before_inventory_or_display_data(monkeypatch, 
 
     profiles = app_paths.profiles
     (profiles / "existing.profile").write_text("name=existing\n", encoding="utf-8")
-    monkeypatch.setattr(cli, "DisplaySystem", lambda config_dir: pytest.fail("display data was requested"))
+    monkeypatch.setattr(cli, "detect_layout", lambda config_dir: pytest.fail("display data was requested"))
     monkeypatch.setattr(cli.profile_store, "discover", lambda paths: pytest.fail("inventory was constructed"))
-    monkeypatch.setattr(sys, "argv", ["superpaper", "--profile", "../invalid"])
 
-    with pytest.raises(SystemExit):
-        cli.cli_logic(app_paths)
+    assert cli.run(["--profile", "../invalid"], app_paths) == 1
 
 
 def test_profile_lookup_accepts_valid_unicode(monkeypatch, app_paths):
@@ -374,11 +434,10 @@ def test_profile_lookup_accepts_valid_unicode(monkeypatch, app_paths):
 
     app.run = run
     monkeypatch.setitem(sys.modules, "superpaper.ui.app", app)
-    monkeypatch.setattr(cli, "DisplaySystem", lambda config_dir: None)
-    monkeypatch.setattr(sys, "argv", ["superpaper", "--profile", "Työ"])
+    monkeypatch.setattr(cli, "detect_layout", lambda config_dir: None)
 
     with pytest.raises(SystemExit):
-        cli.cli_logic(app_paths)
+        cli.run(["--profile", "Työ"], app_paths)
     assert [profile_id.value for profile_id in calls] == ["Työ"]
 
 
@@ -401,10 +460,9 @@ def test_profile_launch_accepts_profiles_saved_by_older_versions(monkeypatch, tm
     calls = []
     app.run = lambda paths, settings, profile=None: calls.append(profile)
     monkeypatch.setitem(sys.modules, "superpaper.ui.app", app)
-    monkeypatch.setattr(cli, "DisplaySystem", lambda config_dir: None)
-    monkeypatch.setattr(sys, "argv", ["superpaper", "--profile", "saved"])
+    monkeypatch.setattr(cli, "detect_layout", lambda config_dir: None)
 
-    assert cli.cli_logic(app_paths) == 0
+    assert cli.run(["--profile", "saved"], app_paths) == 0
     assert [profile_id.value for profile_id in calls] == ["saved"]
 
 
@@ -421,25 +479,46 @@ def test_profile_lookup_rejects_malformed_content_before_tray(monkeypatch, app_p
     calls = []
     app.run = lambda paths, settings, profile=None: calls.append(profile)
     monkeypatch.setitem(sys.modules, "superpaper.ui.app", app)
-    monkeypatch.setattr(cli, "DisplaySystem", lambda config_dir: None)
-    monkeypatch.setattr(sys, "argv", ["superpaper", "--profile", "saved"])
+    monkeypatch.setattr(cli, "detect_layout", lambda config_dir: None)
 
-    with pytest.raises(SystemExit):
-        cli.cli_logic(app_paths)
+    assert cli.run(["--profile", "saved"], app_paths) == 1
 
     assert calls == []
 
 
-def test_missing_image_exits_nonzero(monkeypatch, tmp_path, app_paths):
+def test_missing_image_exits_nonzero(tmp_path, app_paths):
     from superpaper import cli
 
-    missing = tmp_path / "missing.png"
-    monkeypatch.setattr(sys, "argv", ["superpaper", "--setimages", str(missing)])
+    assert cli.run(["--setimages", str(tmp_path / "missing.png")], app_paths) == 1
 
-    try:
-        status = cli.cli_logic(app_paths)
-    except SystemExit as error:
-        status = error.code
 
-    assert isinstance(status, int)
-    assert status != 0
+@pytest.mark.parametrize(
+    ("filename", "content", "named"),
+    [
+        (
+            "{key}.persp",
+            "[desk]\ncentral_disp = 0\nviewer_pos = 0,0\nswivels = 0,0,0,0\ntilts = 0,0,0\n",
+            "perspective 'desk'",
+        ),
+        ("display_systems.dat", "[{key}]\nppi_norm_offsets = 0,0\n", "layout {key}"),
+    ],
+)
+def test_a_corrupt_saved_layout_exits_with_a_message_naming_the_file(
+    monkeypatch, tmp_path, app_paths, caplog, filename, content, named
+):
+    from superpaper import cli, display_detection
+
+    image = tmp_path / "wallpaper.png"
+    image.touch()
+    monitors = [SimpleNamespace(x=0, y=0, width=1920, height=1080, width_mm=527, height_mm=296, name="A")]
+    monkeypatch.setattr(display_detection, "get_monitors", lambda: monitors)
+    key = display_detection.detect_layout(tmp_path / "none").key
+    (app_paths.config / filename.format(key=key)).write_text(content.format(key=key), encoding="utf-8")
+    monkeypatch.setattr(cli, "show", lambda *args, **kwargs: pytest.fail("rendered"))
+
+    with caplog.at_level(logging.ERROR):
+        assert cli.run(["--setimages", str(image)], app_paths) == 1
+
+    message = next(record.getMessage() for record in caplog.records if "could not be read" in record.getMessage())
+    assert filename.format(key=key) in message
+    assert named.format(key=key) in message

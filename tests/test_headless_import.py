@@ -19,7 +19,7 @@ HEADLESS_MODULES = (
     "superpaper.desktop.kde",
     "superpaper.desktop.linux",
     "superpaper.desktop.process",
-    "superpaper.desktop.spanmode",
+    "superpaper.desktop.wallpaper",
     "superpaper.display_store",
     "superpaper.displays",
     "superpaper.files",
@@ -34,7 +34,6 @@ HEADLESS_MODULES = (
     "superpaper.session",
     "superpaper.settings",
     "superpaper.sp_logging",
-    "superpaper.sp_platform",
 )
 
 

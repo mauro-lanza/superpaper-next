@@ -11,13 +11,16 @@ import logging
 import math
 import os
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Literal, get_args
 
+from superpaper.perspective import Default, Disabled, PerspectiveChoice, choice_label, parse_choice
 from superpaper.selection import is_supported_image
 
 logger = logging.getLogger(__name__)
 
-SPAN_MODES = ("single", "advanced", "multi")
+SpanMode = Literal["single", "advanced", "multi"]
+SPAN_MODES: tuple[SpanMode, ...] = get_args(SpanMode)
 SORT_MODES = ("shuffle", "alphabetical", "date_seeded_shuffle")
 MIN_DELAY = 20
 """The shortest slideshow delay, in seconds: rendering a wallpaper takes a while."""
@@ -43,7 +46,7 @@ class Profile:
     """A profile's settings: what a .profile file holds."""
 
     name: str
-    spanmode: str = "single"
+    spanmode: SpanMode = "single"
     spangroups: tuple[tuple[int, ...], ...] | None = None
     """The displays each image spans, with advanced spanning; None for one image on all."""
     slideshow: bool = True
@@ -53,7 +56,7 @@ class Profile:
     sources: tuple[tuple[str, ...], ...] = ()
     """For each display (multi) or span group, the image files and folders to show."""
     hotkey: tuple[str, ...] | None = None
-    perspective: str = "default"
+    perspective: PerspectiveChoice = field(default_factory=Default)
     zoom: float = 1.0
     pan: tuple[float, float] = (0.0, 0.0)
     """Where the image sits when it overflows the desktop: -1 to 1 for each axis."""
@@ -122,14 +125,14 @@ def parse(text: str) -> Profile:
     a number or a display diagonal of 0 inches.
     """
     name = "default_profile"
-    spanmode = "single"
-    spangroups = None
+    spanmode: SpanMode = "single"
+    spangroups: tuple[tuple[int, ...], ...] | None = None
     slideshow = True
     delay = 600.0
     sortmode = "shuffle"
     sources = []
     hotkey = None
-    perspective = "default"
+    perspective: PerspectiveChoice = Default()
     zoom = 1.0
     pan = (0.0, 0.0)
     corrections = []
@@ -145,12 +148,16 @@ def parse(text: str) -> Profile:
         if key == "name":
             name = value
         elif key == "spanmode":
-            if value.lower() in SPAN_MODES:
-                spanmode = value.lower()
-            else:
+            mode = next((mode for mode in SPAN_MODES if mode == value.lower()), None)
+            if mode is None:
                 logger.info("Unknown span mode '%s' in profile '%s'.", value, name)
+            else:
+                spanmode = mode
         elif key == "spangroups":
-            spangroups = _parse_spangroups(value)
+            try:
+                spangroups = parse_spangroups(value.split(","))
+            except ValueError:
+                spangroups = None
         elif key == "slideshow":
             slideshow = value.lower() == "true"
         elif key == "delay":
@@ -178,7 +185,7 @@ def parse(text: str) -> Profile:
         elif key == "hotkey":
             hotkey = tuple(value.split("+")) if value else None
         elif key == "perspective":
-            perspective = value
+            perspective = parse_choice(value)
         elif key == "zoom":
             try:
                 zoom = max(1.0, float(value))
@@ -233,7 +240,7 @@ def serialize(profile: Profile) -> str:
         lines.append("bezels=" + ";".join(map(str, profile.bezels)))
     if profile.hotkey:
         lines.append("hotkey=" + "+".join(profile.hotkey))
-    lines.append(f"perspective={profile.perspective}")
+    lines.append(f"perspective={choice_label(profile.perspective)}")
     if profile.zoom != 1.0:
         lines.append(f"zoom={profile.zoom}")
     if profile.pan != (0.0, 0.0):
@@ -242,12 +249,19 @@ def serialize(profile: Profile) -> str:
     return "\n".join(lines) + "\n"
 
 
-def draft(images: Sequence[str], *, spanmode: str, perspective=None, spangroups=None, offsets=()) -> Profile:
+def draft(
+    images: Sequence[str],
+    *,
+    spanmode: SpanMode,
+    perspective: PerspectiveChoice | None = None,
+    spangroups=None,
+    offsets=(),
+) -> Profile:
     """Settings to show ``images`` with once, outside any saved profile: from the command
     line or by the align test.
 
     Advanced spanning uses ``offsets``, each display's (x, y) in pixels, and applies the
-    ``perspective`` named; without one, none is applied.
+    ``perspective`` chosen; without one, none is applied.
     """
     corrections = (("offsets", tuple(offsets)),) if offsets and spanmode == "advanced" else ()
     return Profile(
@@ -256,7 +270,7 @@ def draft(images: Sequence[str], *, spanmode: str, perspective=None, spangroups=
         spangroups=tuple(tuple(group) for group in spangroups) if spangroups else None,
         slideshow=False,
         sources=tuple((image,) for image in images),
-        perspective=perspective or "disabled",
+        perspective=perspective if perspective is not None else Disabled(),
         corrections=corrections,
     )
 
@@ -316,15 +330,19 @@ def _numbers(key: str, value: str, kind):
         raise ProfileFormatError(message) from None
 
 
-def _parse_spangroups(value: str):
-    """Groups of display numbers, one digit each, separated by commas: "01,2"."""
-    groups = []
-    for group in value.split(","):
+def parse_spangroups(groups: Sequence[str]) -> tuple[tuple[int, ...], ...]:
+    """Each group of display ids, one digit per display, without duplicates, sorted.
+
+    Raises ValueError naming the group that holds a non-digit.
+    """
+    parsed = []
+    for group in groups:
         try:
-            groups.append(tuple(sorted({int(digit) for digit in group})))
+            parsed.append(tuple(sorted({int(display) for display in group})))
         except ValueError:
-            return None
-    return tuple(groups)
+            message = f"One of the display ids was not an integer: {group}"
+            raise ValueError(message) from None
+    return tuple(parsed)
 
 
 def _parse_offset(pair: str) -> tuple[int, int]:

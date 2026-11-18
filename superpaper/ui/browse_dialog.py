@@ -1,6 +1,6 @@
 """Choosing the image files and folders a profile shows, and their icons in source lists."""
 
-import wx  # pyright: ignore[reportMissingImports]  # ty:ignore[unresolved-import]
+import wx  # ty:ignore[unresolved-import]
 
 from superpaper.render import source_icon_image
 from superpaper.selection import is_folder
@@ -36,7 +36,6 @@ class BrowsePaths(wx.Dialog):
             size=wx.Size(250, 250),
             style=wx.RESIZE_BORDER | wx.DEFAULT_DIALOG_STYLE,
         )
-        # self.SetMinSize((250, 250))
         BMP_SIZE = 32
         self.tsize = (BMP_SIZE, BMP_SIZE)
         self.il = wx.ImageList(BMP_SIZE, BMP_SIZE)
@@ -45,7 +44,7 @@ class BrowsePaths(wx.Dialog):
             self.num_wallpaper_area = num_span_groups
             self.wp_area_name = "Group"
         else:
-            self.num_wallpaper_area = len(parent.display_sys.disp_list)
+            self.num_wallpaper_area = len(parent.staged.layout.displays)
             self.wp_area_name = "Display"
         self.use_multi_image = use_multi_image
         self.path_list_data = []
@@ -60,9 +59,6 @@ class BrowsePaths(wx.Dialog):
         self.dir3 = wx.GenericDirCtrl(
             self,
             -1,
-            #   size=(450, 550),
-            #   style=wx.DIRCTRL_SHOW_FILTERS|wx.DIRCTRL_MULTIPLE,
-            #   style=wx.DIRCTRL_MULTIPLE,
             dir=self.defdir,
             filter="Image files (*.jpg, *.png)|*.jpg;*.jpeg;*.png;*.bmp;*.gif;*.tiff;*.webp",
         )
@@ -116,10 +112,8 @@ class BrowsePaths(wx.Dialog):
         if self.use_multi_image:
             sizer_main.Add(sizer_radio, 0, wx.ALL | wx.EXPAND, 5)
         sizer_main.Add(sizer_buttons, 0, wx.ALL | wx.EXPAND, 5)
-        # self.SetSizer(sizer_main)
         self.SetSizerAndFit(sizer_main)
         self.SetSize(wx.Size(-1, 650))
-        # self.SetAutoLayout(True)
 
     def create_paths_listctrl(self, use_multi_image):
         if use_multi_image:
@@ -127,18 +121,7 @@ class BrowsePaths(wx.Dialog):
                 self,
                 -1,
                 size=wx.Size(-1, -1),
-                style=wx.LC_REPORT
-                #  | wx.BORDER_SUNKEN
-                | wx.BORDER_SIMPLE
-                #  | wx.BORDER_STATIC
-                #  | wx.BORDER_THEME
-                #  | wx.BORDER_NONE
-                #  | wx.LC_EDIT_LABELS
-                | wx.LC_SORT_ASCENDING,
-                #  | wx.LC_NO_HEADER
-                #  | wx.LC_VRULES
-                #  | wx.LC_HRULES
-                #  | wx.LC_SINGLE_SEL
+                style=wx.LC_REPORT | wx.BORDER_SIMPLE | wx.LC_SORT_ASCENDING,
             )
             self.paths_listctrl.InsertColumn(0, self.wp_area_name, wx.LIST_FORMAT_RIGHT, width=100)
             self.paths_listctrl.InsertColumn(1, "Source", width=620)
@@ -148,18 +131,7 @@ class BrowsePaths(wx.Dialog):
                 self,
                 -1,
                 size=wx.Size(-1, -1),
-                style=wx.LC_REPORT
-                #  | wx.BORDER_SUNKEN
-                | wx.BORDER_SIMPLE
-                #  | wx.BORDER_STATIC
-                #  | wx.BORDER_THEME
-                #  | wx.BORDER_NONE
-                #  | wx.LC_EDIT_LABELS
-                #  | wx.LC_SORT_ASCENDING
-                | wx.LC_NO_HEADER,
-                #  | wx.LC_VRULES
-                #  | wx.LC_HRULES
-                #  | wx.LC_SINGLE_SEL
+                style=wx.LC_REPORT | wx.BORDER_SIMPLE | wx.LC_NO_HEADER,
             )
             self.paths_listctrl.InsertColumn(0, "Source", width=720)
 
@@ -175,8 +147,7 @@ class BrowsePaths(wx.Dialog):
             self.paths_listctrl.SetItem(index, 1, data_row[1])
         else:
             img_id = self.add_to_imagelist(data_row[0])
-            index = self.paths_listctrl.InsertItem(self.paths_listctrl.GetItemCount(), data_row[0], img_id)
-            # self.paths_listctrl.SetItem(index, 1, data[1])
+            self.paths_listctrl.InsertItem(self.paths_listctrl.GetItemCount(), data_row[0], img_id)
 
     def add_to_imagelist(self, path):
         return self.il.Add(source_icon(path, self.tsize))
@@ -188,7 +159,6 @@ class BrowsePaths(wx.Dialog):
     def onAdd(self, event):
         """Adds selected path to export field."""
         sel_path = self.dir3.GetPath()
-        # self.dir3.GetPaths(paths) # more efficient but couldn't get to work
         if self.use_multi_image:
             # Extra column in advanced mode
             disp_id = str(self.radiobox_displays.GetSelection())

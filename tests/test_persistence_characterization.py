@@ -3,6 +3,7 @@
 import pytest
 
 from superpaper import profiles
+from superpaper.perspective import Default, Disabled, Named
 from superpaper.profiles import Profile
 from superpaper.settings import read_settings, write_settings
 from tests.conftest import load_profile, write_profile
@@ -15,7 +16,7 @@ def test_minimal_profile_uses_legacy_defaults(tmp_path):
 
     assert profile == Profile(name="minimal", sources=((str(image),),))
     assert (profile.spanmode, profile.slideshow, profile.delay, profile.sortmode) == ("single", True, 600.0, "shuffle")
-    assert (profile.perspective, profile.zoom, profile.pan) == ("default", 1.0, (0.0, 0.0))
+    assert (profile.perspective, profile.zoom, profile.pan) == (Default(), 1.0, (0.0, 0.0))
 
 
 def test_a_profile_is_written_as_the_editor_always_wrote_it():
@@ -28,7 +29,7 @@ def test_a_profile_is_written_as_the_editor_always_wrote_it():
         sortmode="alphabetical",
         corrections=(("offsets", ((1, -2), (3, 4))),),
         hotkey=("control", "super", "w"),
-        perspective="desk",
+        perspective=Named("desk"),
         zoom=1.25,
         pan=(-0.5, 1.0),
         selected=("/images/a.png",),
@@ -59,7 +60,7 @@ def test_a_written_profile_reads_back_the_same(tmp_path):
         spanmode="multi",
         slideshow=False,
         hotkey=("alt", "1"),
-        perspective="disabled",
+        perspective=Disabled(),
         zoom=1.5,
         pan=(0.25, -1.0),
         corrections=(("offsets", ((0, 0), (12, -3))),),
