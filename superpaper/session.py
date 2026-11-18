@@ -23,14 +23,13 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
-from typing import TYPE_CHECKING, assert_never
+from typing import TYPE_CHECKING
 
 import superpaper.desktop as desktop
 import superpaper.rendering.render as render
 from superpaper.desktop.kde import Activities
 from superpaper.desktop.process import Result
 from superpaper.desktop.wallpaper import Pieces, Spanned, Wallpaper
-from superpaper.geometry.perspective import Default, Disabled, Named
 from superpaper.paths import AppPaths
 from superpaper.profiles.profile_file import Profile
 from superpaper.profiles.profile_id import ProfileId, ProfileIdError
@@ -474,15 +473,7 @@ def _is_perspective_render(profile: Profile, layout: Layout) -> bool:
     still gets again at startup."""
     if profile.spanmode != "advanced" or not layout.use_perspective:
         return False
-    match profile.perspective:
-        case Default():
-            return layout.default_perspective is not None
-        case Disabled():
-            return False
-        case Named():
-            return True
-        case _:
-            assert_never(profile.perspective)
+    return layout.perspective_for(profile.perspective) is not None
 
 
 def _activities(paths: AppPaths, running: str | None) -> Activities:
