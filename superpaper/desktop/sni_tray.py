@@ -26,7 +26,7 @@ from typing import Any, assert_never
 
 from PIL import Image
 
-from superpaper.desktop.tray_menu import Check, Item, MenuEntry, Separator, Submenu
+from superpaper.desktop.tray_menu import Check, Item, MenuEntry, Notice, Separator, Submenu
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +46,8 @@ MENU_IFACE = "com.canonical.dbusmenu"
 PROPS_IFACE = "org.freedesktop.DBus.Properties"
 WATCHER_NAME = "org.kde.StatusNotifierWatcher"
 WATCHER_PATH = "/StatusNotifierWatcher"
+NOTICE_ID = 1_000_000
+NOTICE_SEPARATOR_ID = 1_000_001
 
 
 def sni_supported():
@@ -127,7 +129,19 @@ class _MenuModel:
         """Recompute the nodes and the ids of the top-level ones, in menu order."""
         ids = count(1)
         # The top level gets its ids first, so they stay put when the profiles come and go.
-        top = [(next(ids), entry) for entry in self._menu()]
+        # A notice and the separator after it have fixed ids, so that the other items keep
+        # theirs when it comes and goes while the menu is open.
+        top = []
+        after_notice = False
+        for entry in self._menu():
+            if isinstance(entry, Notice):
+                node_id = NOTICE_ID
+            elif after_notice and isinstance(entry, Separator):
+                node_id = NOTICE_SEPARATOR_ID
+            else:
+                node_id = next(ids)
+            after_notice = isinstance(entry, Notice)
+            top.append((node_id, entry))
         nodes: dict[int, _Node] = {}
         for node_id, entry in top:
             match entry:
@@ -136,6 +150,8 @@ class _MenuModel:
                 case Check(label, action, checked):
                     props = {"label": label, "enabled": True, "toggle-type": "checkmark", "toggle-state": int(checked)}
                     nodes[node_id] = _Node(props, action, ())
+                case Notice(label):
+                    nodes[node_id] = _Node({"label": label, "enabled": False}, None, ())
                 case Separator():
                     nodes[node_id] = _Node({"type": "separator"}, None, ())
                 case Submenu(label, items):

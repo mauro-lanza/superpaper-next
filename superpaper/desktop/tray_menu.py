@@ -18,6 +18,13 @@ class Check:
 
 
 @dataclass(frozen=True, slots=True)
+class Notice:
+    """A disabled line of text."""
+
+    label: str
+
+
+@dataclass(frozen=True, slots=True)
 class Separator:
     pass
 
@@ -28,4 +35,14 @@ class Submenu:
     items: tuple[Item, ...]
 
 
-MenuEntry = Item | Check | Separator | Submenu
+MenuEntry = Item | Check | Notice | Separator | Submenu
+
+MAX_REASON = 80
+
+
+def failure_notice(reason: str) -> Notice:
+    """The menu line for a wallpaper change that failed: the first line of ``reason``, cut short."""
+    line = (reason.strip().splitlines() or [""])[0]
+    if len(line) > MAX_REASON:
+        line = line[: MAX_REASON - 1] + "…"
+    return Notice(f"Last change failed: {line}")

@@ -62,6 +62,7 @@ class Runtime:
         self.paths = paths
         self.clock = Clock()
         self.changes = []
+        self.reported = []
         self.restored = []
         self.has_render = True
         self.problem = None
@@ -70,7 +71,13 @@ class Runtime:
         self.holding = threading.Event()
         monkeypatch.setattr(session_module, "show", self.show)
         monkeypatch.setattr(session_module, "show_again", self.show_again)
-        self.session = Session(paths, "layout 0", set_command=lambda: self.set_command, clock=self.clock)
+        self.session = Session(
+            paths,
+            "layout 0",
+            on_change=self.reported.append,
+            set_command=lambda: self.set_command,
+            clock=self.clock,
+        )
 
     def show(self, profile, files, paths, *, layout, set_command="", profile_id=None, running=None):
         if self.hold is not None:
@@ -136,6 +143,17 @@ def test_a_started_profile_is_shown_and_remembered(runtime):
     assert runtime.changes[0].profile_id == ProfileId("A")
     assert runtime.session.running.profile_id == ProfileId("A")
     assert (runtime.paths.cache / "running_profile").read_text(encoding="utf-8") == "A"
+
+
+def test_each_change_reports_its_problem_or_none(runtime):
+    runtime.problem = "Image missing"
+    runtime.session.activate(saved("A"))
+    runtime.settle()
+    runtime.problem = None
+    runtime.session.next()
+    runtime.settle()
+
+    assert runtime.reported == ["Image missing", None]
 
 
 def test_starting_the_running_profile_again_shows_its_next_image(runtime):
@@ -425,6 +443,7 @@ def test_a_profile_without_a_complete_selection_is_left_alone(runtime, caplog):
     runtime.settle()
 
     assert runtime.shown == []
+    assert runtime.reported == ["profile 'A' has no complete selection."]
     assert "Wallpaper change skipped: profile 'A' has no complete selection." in caplog.text
 
 

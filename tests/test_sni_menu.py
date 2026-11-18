@@ -1,7 +1,7 @@
 """The KDE tray menu (StatusNotifierItem): built without D-Bus from the tray's menu entries."""
 
-from superpaper.desktop.sni_tray import _MenuModel
-from superpaper.desktop.tray_menu import Check, Item, Separator, Submenu
+from superpaper.desktop.sni_tray import NOTICE_ID, NOTICE_SEPARATOR_ID, _MenuModel
+from superpaper.desktop.tray_menu import Check, Item, Separator, Submenu, failure_notice
 
 
 def model_of(menu):
@@ -46,6 +46,35 @@ def test_the_top_level_keeps_its_ids_when_the_profiles_change():
 
     assert model.layout == before == (1, 2, 3)
     assert sorted(model.nodes) == [1, 2, 3, 4, 5]
+
+
+def test_a_notice_is_a_disabled_line_that_does_nothing():
+    failure = [failure_notice("Image missing")]
+    model = model_of(lambda: (*failure, Item("Exit", lambda: None)))
+
+    model.rebuild()
+    notice = model.nodes[model.layout[0]]
+    model.activate(model.layout[0])
+    failure.clear()
+    model.rebuild()
+
+    assert notice.props == {"label": "Last change failed: Image missing", "enabled": False}
+    assert notice.action is None
+    assert len(model.layout) == 1
+
+
+def test_regular_items_keep_their_ids_while_a_notice_shows():
+    failure = []
+    model = model_of(lambda: (*failure, *entries([])))
+
+    model.rebuild()
+    before = {node_id: node.props for node_id, node in model.nodes.items()}
+    failure.extend([failure_notice("Image missing"), Separator()])
+    model.rebuild()
+
+    assert before.items() <= {node_id: node.props for node_id, node in model.nodes.items()}.items()
+    assert len(model.nodes) == len(before) + 2
+    assert model.layout[:2] == (NOTICE_ID, NOTICE_SEPARATOR_ID)
 
 
 def test_a_check_item_carries_its_state():
