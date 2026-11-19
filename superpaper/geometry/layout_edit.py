@@ -124,8 +124,9 @@ def parse_bezel(text: str) -> float | None:
 
 
 def arranged_if_resized(before: Layout, after: Layout) -> Layout:
-    """``after``, with its displays arranged afresh only if switching from ``before`` changed their sizes."""
-    if after.ppi_norm_resolutions() == before.ppi_norm_resolutions():
+    """``after``, with its displays arranged afresh only if switching from ``before`` changed the sizes
+    the user sees (diagonals shown to 0.1")."""
+    if after.diagonal_inches() == before.diagonal_inches():
         return after
     return after.with_initial_offsets()
 
