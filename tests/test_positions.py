@@ -1,23 +1,10 @@
 """The rules of the position entry, the layout editor and the display settings band."""
 
-from types import SimpleNamespace
-
 import pytest
 
-from superpaper.geometry import canvas, display_detection, positions, units
+from superpaper.geometry import canvas, positions, units
 from superpaper.geometry.canvas import DisplayArea
 from superpaper.geometry.layout_edit import parse_bezel, parse_diagonals
-
-MONITORS = [
-    SimpleNamespace(x=0, y=0, width=1920, height=1080, width_mm=527, height_mm=296, name="A"),
-    SimpleNamespace(x=1920, y=0, width=1920, height=1080, width_mm=527, height_mm=296, name="B"),
-]
-
-
-@pytest.fixture
-def layout(monkeypatch, tmp_path):
-    monkeypatch.setattr(display_detection, "get_monitors", lambda: MONITORS)
-    return display_detection.detect_layout(tmp_path)
 
 
 def test_units_convert_between_millimetres_and_pixels(layout):

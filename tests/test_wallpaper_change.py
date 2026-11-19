@@ -16,10 +16,7 @@ from superpaper.paths import AppPaths
 from superpaper.profiles.profile_file import OffsetsCorrection, Profile
 from superpaper.profiles.profile_id import ProfileId
 from superpaper.rendering import render
-from tests.conftest import monitor
-
-# Two 2x2 displays with a one-pixel gap between them, the second one pixel lower.
-TINY_DISPLAYS = [monitor(0, 0, 2, 2, 10, 10), monitor(3, 1, 2, 2, 10, 10)]
+from tests.conftest import TINY_DISPLAYS, monitor
 
 
 def write_image(path, size=(5, 3), colour=(10, 20, 30), *, modified=None):

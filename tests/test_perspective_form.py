@@ -1,11 +1,10 @@
 """Saving a perspective from the dialog's fields."""
 
 from dataclasses import astuple
-from types import SimpleNamespace
 
 import pytest
 
-from superpaper.geometry import canvas, display_detection, display_store
+from superpaper.geometry import canvas, display_store
 from superpaper.geometry.display_store import SaveFailed
 from superpaper.geometry.perspective import Perspective, Swivel, SwivelAxis, Tilt
 from superpaper.geometry.perspective_form import (
@@ -19,17 +18,7 @@ from superpaper.geometry.perspective_form import (
 )
 from superpaper.user_input import Problems
 
-MONITORS = [
-    SimpleNamespace(x=0, y=0, width=1920, height=1080, width_mm=527, height_mm=296, name="A"),
-    SimpleNamespace(x=1920, y=0, width=1920, height=1080, width_mm=527, height_mm=296, name="B"),
-]
 ZEROS = ("0", "0", "0", "0", "0", "0")
-
-
-@pytest.fixture
-def layout(monkeypatch, tmp_path):
-    monkeypatch.setattr(display_detection, "get_monitors", lambda: MONITORS)
-    return display_detection.detect_layout(tmp_path)
 
 
 def flatten(perspective):
