@@ -19,5 +19,6 @@ releases/
 
 # Test artifacts
 .pytest_cache/
+.coverage
 
 scripts/
