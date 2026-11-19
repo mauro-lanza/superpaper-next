@@ -3,8 +3,17 @@ import threading
 
 import pytest
 
-from superpaper.geometry import display_detection, display_store, displays
+from superpaper.geometry import display_detection, display_store
 from tests.conftest import monitor
+from tests.geometry.conftest import (
+    DUAL_KEY,
+    DUAL_MONITORS,
+    LAPTOP_KEY,
+    LAPTOP_MONITORS,
+    SAVED_COUCH,
+    SAVED_DESK,
+    detect,
+)
 
 
 def test_display_detection_retries_empty_results(monkeypatch):
@@ -52,32 +61,6 @@ def test_an_unreadable_saved_layout_is_an_error(monkeypatch, tmp_path):
         display_detection.detect_layout(tmp_path)
 
 
-def test_a_layout_lists_displays_in_desktop_order(display_layout):
-    # A display to the left of the primary one has a negative position.
-    layout = display_layout([monitor(0, 0, 1280, 1024), monitor(-1920, 0, 1920, 1080)])
-
-    assert layout.resolutions() == [(1920, 1080), (1280, 1024)]
-    assert layout.digital_offsets() == [(0, 0), (1920, 0)]
-
-
-def test_an_undetected_display_size_is_hinted_until_a_diagonal_is_entered(display_layout):
-    layout = display_layout([monitor(0, 0, 1920, 1080, None, None)])
-
-    assert layout.size_hint() == displays.SIZE_HINT
-    assert layout.with_diagonals([15.6]).size_hint() is None
-    assert display_layout().size_hint() is None
-
-
-def test_bezels_cant_be_negative(display_layout):
-    with pytest.raises(ValueError, match="negative"):
-        display_layout().with_bezels([(-1.0, 0.0), (0.0, 0.0)])
-
-
-def test_a_layout_needs_a_value_for_every_display(display_layout):
-    with pytest.raises(ValueError, match="same number of values"):
-        display_layout().with_offsets([(0, 0)])
-
-
 def test_negative_saved_bezels_are_ignored(display_layout, tmp_path, caplog):
     key = display_layout(config_dir=tmp_path).key
     (tmp_path / display_store.LAYOUTS_FILE).write_text(
@@ -113,3 +96,56 @@ def test_displays_are_detected_only_on_the_main_thread(monkeypatch):
     worker.join(10)
 
     assert errors == ["Displays can only be detected on the main thread."]
+
+
+@pytest.mark.parametrize(("monitors", "key"), [(DUAL_MONITORS, DUAL_KEY), (LAPTOP_MONITORS, LAPTOP_KEY)])
+def test_the_key_of_a_monitor_set_never_changes(monkeypatch, tmp_path, monitors, key):
+    layout = detect(monkeypatch, tmp_path, monitors)
+
+    assert str(hash(layout.displays)) == key
+    assert layout.key == key
+
+
+def test_the_key_ignores_monitor_names_and_order(monkeypatch, tmp_path):
+    renamed = [monitor(m.x, m.y, m.width, m.height, m.width_mm, m.height_mm, "renamed") for m in DUAL_MONITORS]
+
+    assert detect(monkeypatch, tmp_path, renamed[::-1]).key == DUAL_KEY
+
+
+def test_a_saved_layout_loads(monkeypatch, saved_layouts):
+    layout = detect(monkeypatch, saved_layouts, DUAL_MONITORS)
+
+    assert layout.ppi_norm_offsets == ((0, 0), (2605.7204000891693, 98.49418762870297))
+    assert layout.bezels_in_mm() == [(10.5, 0.0), (0.0, 0.0)]
+    assert layout.uses_user_diagonals is True
+    assert layout.diagonal_inches() == [27.0, 23.8]
+    assert [display.detected_phys_size_mm for display in layout.displays] == [(597, 336), (527, 296)]
+    assert layout.ppi_norm_resolutions() == [(2560, 1440), (2257, 1269)]
+    assert layout.ppi_norm_crops([(0, 0), (0, 0)]) == [(0, 0, 2560, 1440), (2606, 98, 4863, 1367)]
+    assert layout.use_perspective is True
+    assert layout.default_perspective == "desk"
+    assert layout.perspectives == (SAVED_DESK, SAVED_COUCH)
+
+
+def test_the_laptop_layout_loads_with_its_diagonal_override(monkeypatch, saved_layouts):
+    layout = detect(monkeypatch, saved_layouts, LAPTOP_MONITORS)
+
+    (laptop,) = layout.displays
+    assert laptop.phys_size_failed is True
+    assert laptop.detected_phys_size_mm == (509, 286)
+    assert layout.diagonal_inches() == [15.6]
+    assert layout.default_perspective is None
+    assert layout.perspectives == ()
+
+
+def test_monitors_without_a_saved_layout_get_a_guessed_one(monkeypatch, saved_layouts):
+    moved = [DUAL_MONITORS[0], monitor(0, 1440, 1920, 1080, 527, 296, "HDMI-A-1")]
+
+    layout = detect(monkeypatch, saved_layouts, moved)
+
+    assert layout.key not in {DUAL_KEY, LAPTOP_KEY}
+    assert layout.uses_user_diagonals is False
+    assert layout.bezels_in_mm() == [(0.0, 0.0), (0.0, 0.0)]
+    assert layout.ppi_norm_offsets == ((0, 0), (150, 1440))
+    assert layout.default_perspective is None
+    assert layout.perspectives == ()

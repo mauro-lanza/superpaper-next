@@ -1,10 +1,10 @@
-"""The positions and bezel tools' save and cancel, and the display settings band's changes."""
+"""The positions and bezel tools' save and cancel, and the display settings band's entry rules."""
 
 import pytest
 
 from superpaper.geometry import display_store, layout_edit
 from superpaper.geometry.display_store import SaveFailed
-from superpaper.geometry.layout_edit import ConfiguringBezels, ConfiguringPositions, Idle
+from superpaper.geometry.layout_edit import ConfiguringBezels, ConfiguringPositions, Idle, parse_bezel, parse_diagonals
 from superpaper.user_input import Problems
 from tests.conftest import monitor
 
@@ -71,37 +71,28 @@ def test_a_tool_cannot_start_while_another_is_active(layout, busy):
         layout_edit.start_bezels(busy, layout)
 
 
-@pytest.mark.parametrize("state", [Idle(), ConfiguringBezels((), ())])
-def test_positions_cannot_be_ended_unless_positioning(layout, state):
-    with pytest.raises(ValueError, match="Expected ConfiguringPositions"):
-        layout_edit.save_positions(state, layout, None)
-    with pytest.raises(ValueError, match="Expected ConfiguringPositions"):
-        layout_edit.cancel_positions(state, layout)
+ENDINGS = {
+    "ConfiguringPositions": (
+        lambda state, layout: layout_edit.save_positions(state, layout, None),
+        layout_edit.cancel_positions,
+    ),
+    "ConfiguringBezels": (layout_edit.save_bezels, layout_edit.cancel_bezels),
+}
 
 
-@pytest.mark.parametrize("state", [Idle(), ConfiguringPositions(())])
-def test_bezels_cannot_be_ended_unless_setting_them(layout, state):
-    with pytest.raises(ValueError, match="Expected ConfiguringBezels"):
-        layout_edit.save_bezels(state, layout)
-    with pytest.raises(ValueError, match="Expected ConfiguringBezels"):
-        layout_edit.cancel_bezels(state, layout)
-
-
-def test_changes_are_unsaved_only_when_the_settings_differ_from_the_saved_ones(layout):
-    saved = layout.settings()
-
-    assert layout.settings() == saved
-    assert layout.with_diagonals([20.0, 20.0]).settings() != saved
-    assert layout.with_offsets([(0, 0), (1, 1)]).settings() != saved
-    assert layout.with_bezels([(1.0, 0.0), (0.0, 0.0)]).settings() != saved
-
-
-def test_changing_something_and_back_is_not_a_change(layout):
-    saved = layout.settings()
-
-    changed_back = layout.with_diagonals([20.0, 20.0]).with_detected_sizes()
-
-    assert changed_back.settings() == saved
+@pytest.mark.parametrize(
+    ("state", "expected"),
+    [
+        (Idle(), "ConfiguringPositions"),
+        (ConfiguringBezels((), ()), "ConfiguringPositions"),
+        (Idle(), "ConfiguringBezels"),
+        (ConfiguringPositions(()), "ConfiguringBezels"),
+    ],
+)
+def test_a_tool_cannot_be_ended_unless_it_is_active(layout, state, expected):
+    for end in ENDINGS[expected]:
+        with pytest.raises(ValueError, match=f"Expected {expected}"):
+            end(state, layout)
 
 
 def test_valid_entered_diagonals_are_applied(layout):
@@ -111,9 +102,30 @@ def test_valid_entered_diagonals_are_applied(layout):
     assert entered.user_diagonal_inches == (24.0, 27.5)
 
 
-@pytest.mark.parametrize("texts", [["24", ""], ["24", "x"], ["24", "0"]])
-def test_invalid_entered_diagonals_change_nothing(layout, texts):
-    assert layout_edit.with_entered_diagonals(layout, texts) is None
+@pytest.mark.parametrize(
+    ("texts", "inches"),
+    [
+        (["27", "24.5"], [27.0, 24.5]),
+        (["27", ""], None),
+        (["27", "0"], None),
+        (["-1"], None),
+        (["x"], None),
+        ([], None),
+    ],
+)
+def test_diagonals_apply_only_when_every_field_is_a_positive_number(texts, inches):
+    assert parse_diagonals(texts) == inches
+
+
+@pytest.mark.parametrize(
+    ("text", "value"), [("0", 0.0), ("3.5", 3.5), ("-1", None), ("", None), ("nan", None), ("x", None)]
+)
+def test_a_bezel_is_a_non_negative_number(text, value):
+    assert parse_bezel(text) == value
+
+
+def test_invalid_entered_diagonals_change_nothing(layout):
+    assert layout_edit.with_entered_diagonals(layout, ["24", "x"]) is None
 
 
 def test_returning_to_detected_sizes_arranges_the_displays_afresh_when_the_sizes_change(layout):
@@ -158,14 +170,6 @@ def test_entering_a_different_size_arranges_the_displays_afresh(mixed_layout):
     assert layout_edit.arranged_if_resized(mixed_layout, after).ppi_norm_offsets != mixed_layout.ppi_norm_offsets
 
 
-def test_reverting_restores_the_saved_settings(layout):
-    saved = layout.settings()
-    edited = layout.with_diagonals([20.0, 20.0]).with_bezels([(3.0, 0.0), (0.0, 0.0)])
-
-    assert edited.settings() != saved
-    assert edited.with_settings(saved).settings() == saved
-
-
 def test_valid_entered_bezels_are_applied(layout):
     result = layout_edit.with_entered_bezels(layout, [("2.0", "0.0"), ("0.0", "1.5")])
 
@@ -181,15 +185,6 @@ def test_invalid_entered_bezels_are_reported_with_the_text_entered(layout):
             "Bezel thickness must be a non-negative number, '-1' was entered.",
         )
     )
-
-
-def test_cancelling_the_position_entry_restores_the_offsets_it_opened_with(layout):
-    opened_with = layout_edit.start_positions(Idle(), layout)
-    entered = layout.with_offsets([(0, 0), (40, 0)])
-
-    _, restored = layout_edit.cancel_positions(opened_with, entered)
-
-    assert restored == layout
 
 
 def test_saving_display_settings_writes_them_to_the_config_directory(layout, tmp_path):

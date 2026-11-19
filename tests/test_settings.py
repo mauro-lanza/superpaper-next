@@ -114,3 +114,35 @@ def test_the_file_uses_the_encoding_older_versions_wrote(tmp_path, monkeypatch):
 
     assert settings.browse_default_dir == "C:\\Users\\J\xf6rg\\Pictures"
     assert "browse_default_dir=C:\\Users\\J\xf6rg\\Pictures\n".encode("cp1252") in path.read_bytes()
+
+
+def test_general_settings_round_trip_is_byte_stable(tmp_path):
+    settings_path = tmp_path / "general_settings"
+    settings_path.write_text(
+        "logging=FALSE\n"
+        "use hotkeys=TrUe\n"
+        "next wallpaper hotkey=control+super+w\n"
+        "pause wallpaper hotkey=control+super+shift+p\n"
+        "show_help_at_start=false\n"
+        "set_command=env FOO=bar setter --arg=a=b {image}\n"
+        "browse_default_dir=/tmp/wallpapers\n"
+        "warn_large_img=false\n"
+        "unknown_setting=retired\n",
+        encoding="utf-8",
+    )
+
+    settings = read_settings(settings_path, "linux")
+    write_settings(settings_path, settings)
+
+    assert settings.set_command == "env FOO=bar setter --arg=a=b {image}"
+    expected = (
+        "logging=false\n"
+        "use hotkeys=true\n"
+        "next wallpaper hotkey=control+super+w\n"
+        "pause wallpaper hotkey=control+super+shift+p\n"
+        "show_help_at_start=false\n"
+        "set_command=env FOO=bar setter --arg=a=b {image}\n"
+        "browse_default_dir=/tmp/wallpapers\n"
+        "warn_large_img=false"
+    )
+    assert settings_path.read_bytes() == expected.encode()

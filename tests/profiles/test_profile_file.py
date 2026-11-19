@@ -1,12 +1,78 @@
-"""The .profile format as earlier versions wrote and read it, and general_settings."""
+"""The .profile format as earlier versions wrote and read it, and what keeps a profile from being
+saved or shown: profile_file.validate, which the editor shows the user instead of saving or
+applying."""
 
 import pytest
 
-from superpaper.geometry.perspective import Default, Disabled, Named
+from superpaper.geometry.perspective import Default, Disabled, Named, parse_choice
 from superpaper.profiles import profile_file
 from superpaper.profiles.profile_file import OffsetsCorrection, Profile
-from superpaper.settings import read_settings, write_settings
-from tests.conftest import load_profile, write_profile
+
+
+@pytest.fixture
+def images(tmp_path):
+    folder = tmp_path / "images"
+    folder.mkdir()
+    (folder / "a.png").touch()
+    return str(folder)
+
+
+def test_a_complete_profile_has_no_problems(images):
+    assert profile_file.validate(Profile(name="work", delay=600.0, sources=((images,),))) == []
+
+
+def test_a_draft_may_use_a_name_saved_profiles_may_not(images):
+    # Only saving checks the name against the profiles directory.
+    assert profile_file.validate(Profile(name="cli", slideshow=False, sources=((images,),))) == []
+
+
+def test_upper_case_image_extensions_are_images(tmp_path):
+    camera = tmp_path / "camera"
+    camera.mkdir()
+    (camera / "IMG_0001.JPG").touch()
+
+    assert profile_file.validate(Profile(name="camera", slideshow=False, sources=((str(camera),),))) == []
+
+
+@pytest.mark.parametrize(
+    ("settings", "problem"),
+    [
+        ({"name": "  "}, "You must enter a name for the profile."),
+        ({"spanmode": "single", "sources": (("a",), ("b",))}, "only one paths field is needed"),
+        ({"spanmode": "multi"}, "each display needs its own paths field"),
+        ({"slideshow": True, "delay": 19.0}, "at least 20 seconds"),
+        ({"sources": ()}, "You must enter at least one path for images."),
+        ({"sources": ((),)}, "At least one path for wallpapers must be given."),
+        ({"spanmode": "multi", "sources": (("a",), ())}, "Add an image source for every display present."),
+        ({"spanmode": "advanced", "spangroups": ((0,), (1,))}, "Add an image source for every span group."),
+    ],
+)
+def test_settings_that_cant_be_used_are_explained(images, settings, problem):
+    profile = Profile(**{"name": "work", "slideshow": False, "sources": ((images,),), **settings})
+
+    assert any(problem in reported for reported in profile_file.validate(profile))
+
+
+@pytest.mark.parametrize(
+    ("source", "message"),
+    [
+        ("gone", "Path '{}' was not recognized as a directory."),
+        ("empty", "Path '{}' does not contain supported image files."),
+        ("notes.txt", "Image '{}' is not a supported image file."),
+    ],
+)
+def test_sources_without_images_are_explained(tmp_path, source, message):
+    (tmp_path / "empty").mkdir()
+    (tmp_path / "notes.txt").touch()
+    path = str(tmp_path / source)
+
+    assert profile_file.validate(Profile(name="work", slideshow=False, sources=((path,),))) == [message.format(path)]
+
+
+def test_every_problem_is_reported_at_once():
+    profile = Profile(name="", spanmode="multi", slideshow=True, delay=5.0, sources=((),))
+
+    assert len(profile_file.validate(profile)) == 4
 
 
 def test_minimal_profile_uses_legacy_defaults(tmp_path):
@@ -19,7 +85,7 @@ def test_minimal_profile_uses_legacy_defaults(tmp_path):
     assert (profile.perspective, profile.zoom, profile.pan) == (Default(), 1.0, (0.0, 0.0))
 
 
-def test_a_profile_is_written_as_the_editor_always_wrote_it():
+def test_a_profile_is_serialized_byte_stable():
     profile = Profile(
         name="canonical",
         spanmode="advanced",
@@ -76,63 +142,12 @@ def test_a_slideshow_profile_reads_back_the_same():
     assert profile_file.parse(profile_file.serialize(profile)) == profile
 
 
-def test_general_settings_round_trip_is_canonical(tmp_path):
-    settings_path = tmp_path / "general_settings"
-    settings_path.write_text(
-        "logging=FALSE\n"
-        "use hotkeys=TrUe\n"
-        "next wallpaper hotkey=control+super+w\n"
-        "pause wallpaper hotkey=control+super+shift+p\n"
-        "show_help_at_start=false\n"
-        "set_command=env FOO=bar setter --arg=a=b {image}\n"
-        "browse_default_dir=/tmp/wallpapers\n"
-        "warn_large_img=false\n"
-        "unknown_setting=retired\n",
-        encoding="utf-8",
-    )
+@pytest.mark.parametrize("text", ["default", "disabled", "desk"])
+def test_a_profile_file_keeps_its_perspective_choice(text):
+    profile = profile_file.parse(f"name=p\nperspective={text}\ndisplay0paths=/a.png\n")
 
-    settings = read_settings(settings_path, "linux")
-    write_settings(settings_path, settings)
-
-    assert settings.set_command == "env FOO=bar setter --arg=a=b {image}"
-    expected = (
-        "logging=false\n"
-        "use hotkeys=true\n"
-        "next wallpaper hotkey=control+super+w\n"
-        "pause wallpaper hotkey=control+super+shift+p\n"
-        "show_help_at_start=false\n"
-        "set_command=env FOO=bar setter --arg=a=b {image}\n"
-        "browse_default_dir=/tmp/wallpapers\n"
-        "warn_large_img=false"
-    )
-    assert settings_path.read_bytes() == expected.encode()
-
-
-def test_loading_a_profile_leaves_its_file_alone(app_paths, tmp_path):
-    image = tmp_path / "wallpaper.png"
-    image.touch()
-    profile_path = app_paths.profiles / "noise.profile"
-    raw = f"name=noise\r\nspanmode=single\r\ndisplay0paths={image}"
-    profile_path.write_bytes(raw.encode())
-
-    stored = load_profile(app_paths, "noise")
-    stored.selection.advance()
-
-    assert stored.profile.sources == ((str(image),),)
-    assert profile_path.read_bytes() == raw.encode()
-
-
-def test_source_paths_may_contain_equals_signs(app_paths, tmp_path):
-    folder = tmp_path / "a=b"
-    folder.mkdir()
-    image = folder / "wallpaper.png"
-    image.touch()
-
-    write_profile(app_paths.profiles / "test.profile", sources=[folder])
-    stored = load_profile(app_paths, "test")
-
-    assert stored.profile.sources == ((str(folder),),)
-    assert stored.selection.current() == [str(image)]
+    assert profile.perspective == parse_choice(text)
+    assert f"perspective={text}\n" in profile_file.serialize(profile)
 
 
 def test_identical_sources_are_written_with_their_own_display_numbers():
@@ -158,6 +173,7 @@ def test_identical_sources_are_written_with_their_own_display_numbers():
         ("spangroups=0,x", ("spangroups", None)),
         ("hotkey=", ("hotkey", None)),
         ("a line without a setting", ("name", "lenient")),
+        ("name", ("name", "lenient")),
         ("unknown=setting", ("name", "lenient")),
     ],
 )

@@ -18,7 +18,7 @@ from superpaper.profiles.profile_file import OffsetsCorrection
 from superpaper.profiles.profile_id import NEW_PROFILE_LABEL, ProfileId
 from superpaper.profiles.profile_store import ProfileStore
 from superpaper.user_input import Problems
-from tests.test_profile_form import blank
+from tests.profiles.conftest import blank
 
 
 class FakeSession:

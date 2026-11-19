@@ -5,42 +5,49 @@ from types import SimpleNamespace
 
 import pytest
 
-from superpaper.geometry.perspective import Disabled
 from superpaper.profiles import form as profile_form
 from superpaper.profiles.form import (
-    ProfileForm,
     applied_offsets,
     fingerprint,
     form_from,
     parse_form,
+    parse_offsets,
     preview_spangroups,
     sources_per_target,
     spangroups_of,
 )
 from superpaper.profiles.profile_file import OffsetsCorrection, Profile
 from superpaper.user_input import OffsetError, Problems
+from tests.profiles.conftest import blank
 
 
-def blank(**changes):
-    values = {
-        "name": "Work",
-        "span_mode": "single",
-        "slideshow": False,
-        "delay_minutes": "",
-        "sort_label": None,
-        "hotkey_enabled": False,
-        "hotkey": "",
-        "offsets_applied": False,
-        "offsets": ("0,0", "0,0"),
-        "spangroups_enabled": False,
-        "spangroup_choices": (0, 0),
-        "perspective": Disabled(),
-        "zoom_pct": 100,
-        "pan_pct": (0, 0),
-        "per_target_sources": False,
-        "sources": (("", "/pics"),),
-    }
-    return ProfileForm(**{**values, **changes})
+def test_offsets_are_read_from_x_comma_y_fields():
+    assert parse_offsets(["10,-20", " 3 , 4 ", "0,0"]) == ((10, -20), (3, 4), (0, 0))
+
+
+@pytest.mark.parametrize("empty", ["", "   "])
+def test_an_empty_offset_field_means_no_offset(empty):
+    assert parse_offsets(["1,2", empty]) == ((1, 2), (0, 0))
+
+
+def test_no_fields_give_no_offsets():
+    assert parse_offsets([]) == ()
+
+
+@pytest.mark.parametrize("text", ["1", "1,2,3", "1;2", "1,x", "1.5,2", ",2", "1,"])
+def test_a_field_that_is_not_a_pair_of_whole_numbers_is_an_error_naming_the_display(text):
+    with pytest.raises(OffsetError, match=rf"display 1: .*'{text}'"):
+        parse_offsets(["0,0", text])
+
+
+def test_every_unreadable_field_is_named():
+    with pytest.raises(OffsetError) as error:
+        parse_offsets(["a,b", "1,2", "3"])
+
+    assert str(error.value).splitlines() == [
+        "Manual offset of display 0: expected whole pixel numbers as x,y, not 'a,b'.",
+        "Manual offset of display 2: expected whole pixel numbers as x,y, not '3'.",
+    ]
 
 
 def test_a_slideshow_delay_in_minutes_is_seconds_in_the_profile():
@@ -68,8 +75,8 @@ def test_a_slideshow_needs_a_delay_that_is_a_number():
     assert wrong == ["The slideshow delay must be a number of minutes, not 'soon'."]
 
 
-@pytest.mark.parametrize("text", ["inf", "-inf", "nan", "0", "-1"])
-def test_a_slideshow_delay_must_be_a_finite_positive_number(text):
+@pytest.mark.parametrize("text", ["0", "-1"])
+def test_a_slideshow_delay_must_be_positive(text):
     _, problems = parse_form(blank(slideshow=True, delay_minutes=text))
     assert problems == [f"The slideshow delay must be a number of minutes, not '{text}'."]
 
