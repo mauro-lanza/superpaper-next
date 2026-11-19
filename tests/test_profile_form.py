@@ -43,11 +43,6 @@ def blank(**changes):
     return ProfileForm(**{**values, **changes})
 
 
-@pytest.fixture
-def layout(display_layout):
-    return display_layout()
-
-
 def test_a_slideshow_delay_in_minutes_is_seconds_in_the_profile():
     profile, problems = parse_form(blank(slideshow=True, delay_minutes="1.5", sort_label="Alphabetical"))
     assert (profile.delay, profile.sortmode, problems) == (90.0, "alphabetical", [])

@@ -53,6 +53,14 @@ def monitor(x, y, width, height, width_mm=500, height_mm=300, name="display"):
 
 # Two displays side by side: 1920x1080 and 1280x1024.
 TWO_DISPLAYS = [monitor(0, 0, 1920, 1080, 531, 299), monitor(1920, 0, 1280, 1024, 376, 301)]
+# Two identical 1920x1080 displays side by side.
+EQUAL_DISPLAYS = [monitor(0, 0, 1920, 1080, 527, 296, "A"), monitor(1920, 0, 1920, 1080, 527, 296, "B")]
+# Two 2x2 displays with a one-pixel gap between them, the second one pixel lower.
+TINY_DISPLAYS = [monitor(0, 0, 2, 2, 10, 10), monitor(3, 1, 2, 2, 10, 10)]
+
+
+def pixels(image):
+    return [image.getpixel((x, y)) for y in range(image.height) for x in range(image.width)]
 
 
 @pytest.fixture
@@ -68,6 +76,11 @@ def display_layout(monkeypatch, tmp_path):
         return display_detection.detect_layout(config_dir or tmp_path / "no-saved-layouts")
 
     return build
+
+
+@pytest.fixture
+def layout(display_layout):
+    return display_layout(EQUAL_DISPLAYS)
 
 
 def write_profile(path: Path, *, spanmode="single", sources=(), selected=()):

@@ -14,17 +14,12 @@ and saved two perspectives.
 
 import configparser
 from dataclasses import FrozenInstanceError, replace
-from types import SimpleNamespace
 
 import pytest
 
 from superpaper.geometry import display_detection, display_store
 from superpaper.geometry.perspective import Default, Disabled, Named, Perspective, Swivel, SwivelAxis, Tilt
-
-
-def monitor(x, y, width, height, width_mm, height_mm, name):
-    return SimpleNamespace(x=x, y=y, width=width, height=height, width_mm=width_mm, height_mm=height_mm, name=name)
-
+from tests.conftest import monitor
 
 DUAL_MONITORS = [
     monitor(0, 0, 2560, 1440, 597, 336, "DP-1"),

@@ -1,19 +1,6 @@
-from types import SimpleNamespace
-
 import pytest
 
-from superpaper.geometry import display_detection
-
-MONITORS = [
-    SimpleNamespace(x=0, y=0, width=1920, height=1080, width_mm=527, height_mm=296, name="A"),
-    SimpleNamespace(x=1920, y=0, width=1920, height=1080, width_mm=527, height_mm=296, name="B"),
-]
-
-
-@pytest.fixture
-def layout(monkeypatch, tmp_path):
-    monkeypatch.setattr(display_detection, "get_monitors", lambda: MONITORS)
-    return display_detection.detect_layout(tmp_path)
+from tests.conftest import monitor
 
 
 def bezel_px(layout, mm):
@@ -92,16 +79,15 @@ def test_a_gap_between_dragged_displays_is_kept_when_a_bezel_changes_back(layout
     assert back.ppi_norm_offsets == ((0, 0), pytest.approx((2400.0, 0)))
 
 
-def test_displays_in_a_column_are_centred_in_it_and_the_columns_in_each_other(monkeypatch, tmp_path):
+def test_displays_in_a_column_are_centred_in_it_and_the_columns_in_each_other(display_layout):
     # A 1920x1080 display with a narrower one below it, and a taller one to the right.
-    monitors = [
-        SimpleNamespace(x=0, y=0, width=1920, height=1080, width_mm=527, height_mm=296, name="top"),
-        SimpleNamespace(x=480, y=1080, width=960, height=540, width_mm=264, height_mm=148, name="below"),
-        SimpleNamespace(x=1920, y=0, width=1080, height=1920, width_mm=296, height_mm=527, name="tall"),
-    ]
-    monkeypatch.setattr(display_detection, "get_monitors", lambda: monitors)
-
-    layout = display_detection.detect_layout(tmp_path)
+    layout = display_layout(
+        [
+            monitor(0, 0, 1920, 1080, 527, 296, "top"),
+            monitor(480, 1080, 960, 540, 264, 148, "below"),
+            monitor(1920, 0, 1080, 1920, 296, 527, "tall"),
+        ]
+    )
 
     # The first column is 1923 wide and 1624 high at the common density, the tall display 1920 high.
     assert layout.ppi_norm_resolutions() == [(1923, 1082), (963, 542), (1080, 1920)]

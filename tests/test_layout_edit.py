@@ -1,24 +1,12 @@
 """The positions and bezel tools' save and cancel, and the display settings band's changes."""
 
-from types import SimpleNamespace
-
 import pytest
 
-from superpaper.geometry import display_detection, display_store, layout_edit
+from superpaper.geometry import display_store, layout_edit
 from superpaper.geometry.display_store import SaveFailed
 from superpaper.geometry.layout_edit import ConfiguringBezels, ConfiguringPositions, Idle
 from superpaper.user_input import Problems
-
-MONITORS = [
-    SimpleNamespace(x=0, y=0, width=1920, height=1080, width_mm=527, height_mm=296, name="A"),
-    SimpleNamespace(x=1920, y=0, width=1920, height=1080, width_mm=527, height_mm=296, name="B"),
-]
-
-
-@pytest.fixture
-def layout(monkeypatch, tmp_path):
-    monkeypatch.setattr(display_detection, "get_monitors", lambda: MONITORS)
-    return display_detection.detect_layout(tmp_path)
+from tests.conftest import monitor
 
 
 def test_positioning_remembers_the_offsets_it_began_with(layout):
@@ -149,13 +137,9 @@ def test_switching_between_equal_sizes_keeps_the_arrangement(layout):
 
 
 @pytest.fixture
-def mixed_layout(monkeypatch, tmp_path):
-    monitors = [
-        SimpleNamespace(x=0, y=0, width=1920, height=1080, width_mm=527, height_mm=296, name="A"),
-        SimpleNamespace(x=1920, y=0, width=1360, height=1088, width_mm=421, height_mm=237, name="B"),
-    ]
-    monkeypatch.setattr(display_detection, "get_monitors", lambda: monitors)
-    return display_detection.detect_layout(tmp_path).with_offsets([(0, 500), (7, 0)])
+def mixed_layout(display_layout):
+    monitors = [monitor(0, 0, 1920, 1080, 527, 296, "A"), monitor(1920, 0, 1360, 1088, 421, 237, "B")]
+    return display_layout(monitors).with_offsets([(0, 500), (7, 0)])
 
 
 def test_switching_to_manual_sizes_keeps_the_arrangement_when_the_shown_sizes_are_unchanged(mixed_layout):

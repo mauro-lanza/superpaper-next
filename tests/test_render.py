@@ -18,7 +18,7 @@ from superpaper.geometry.perspective import (
     get_backprojected_display_system,
 )
 from superpaper.rendering import render, source_image
-from tests.conftest import monitor
+from tests.conftest import TINY_DISPLAYS, monitor, pixels
 
 
 def write_image(path, size, pixel, image_format=None, **options):
@@ -27,14 +27,6 @@ def write_image(path, size, pixel, image_format=None, **options):
         image.putdata([pixel(x, y) for y in range(size[1]) for x in range(size[0])])
         image.save(path, image_format, **options)
     return str(path)
-
-
-def pixels(image):
-    return [image.getpixel((x, y)) for y in range(image.height) for x in range(image.width)]
-
-
-# Two 2x2 displays with a one-pixel gap between them, the second one pixel lower.
-TINY_DISPLAYS = [monitor(0, 0, 2, 2, 10, 10), monitor(3, 1, 2, 2, 10, 10)]
 
 
 def test_an_image_opens_upright_and_in_rgb(tmp_path):

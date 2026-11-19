@@ -21,11 +21,6 @@ from superpaper.user_input import Problems
 from tests.test_profile_form import blank
 
 
-@pytest.fixture
-def layout(display_layout):
-    return display_layout()
-
-
 class FakeSession:
     def __init__(self, store):
         self.store = store

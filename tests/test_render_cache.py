@@ -5,10 +5,7 @@ import os
 from PIL import Image
 
 from superpaper.rendering import render_cache
-from tests.conftest import monitor
-
-# Two 2x2 displays with a one-pixel gap between them, the second one pixel lower.
-TINY_DISPLAYS = [monitor(0, 0, 2, 2, 10, 10), monitor(3, 1, 2, 2, 10, 10)]
+from tests.conftest import TINY_DISPLAYS, pixels
 
 
 def profile_slot(cache, name):
@@ -17,10 +14,6 @@ def profile_slot(cache, name):
 
 def names(directory):
     return sorted(path.name for path in directory.iterdir())
-
-
-def pixels(image):
-    return [image.getpixel((x, y)) for y in range(image.height) for x in range(image.width)]
 
 
 def touch(directory, *filenames, modified=None):
