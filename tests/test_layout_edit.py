@@ -148,6 +148,32 @@ def test_switching_between_equal_sizes_keeps_the_arrangement(layout):
     assert layout_edit.arranged_if_resized(moved, manual).ppi_norm_offsets == moved.ppi_norm_offsets
 
 
+@pytest.fixture
+def mixed_layout(monkeypatch, tmp_path):
+    monitors = [
+        SimpleNamespace(x=0, y=0, width=1920, height=1080, width_mm=527, height_mm=296, name="A"),
+        SimpleNamespace(x=1920, y=0, width=1360, height=1088, width_mm=421, height_mm=237, name="B"),
+    ]
+    monkeypatch.setattr(display_detection, "get_monitors", lambda: monitors)
+    return display_detection.detect_layout(tmp_path).with_offsets([(0, 500), (7, 0)])
+
+
+def test_switching_to_manual_sizes_keeps_the_arrangement_when_the_shown_sizes_are_unchanged(mixed_layout):
+    before = mixed_layout
+    after = layout_edit.with_entered_diagonals(before, [str(d) for d in before.diagonal_inches()])
+
+    assert after is not None
+    assert after.ppi_norm_resolutions() != before.ppi_norm_resolutions()
+    assert layout_edit.arranged_if_resized(before, after).ppi_norm_offsets == before.ppi_norm_offsets
+
+
+def test_entering_a_different_size_arranges_the_displays_afresh(mixed_layout):
+    after = layout_edit.with_entered_diagonals(mixed_layout, ["28.0", "19.0"])
+
+    assert after is not None
+    assert layout_edit.arranged_if_resized(mixed_layout, after).ppi_norm_offsets != mixed_layout.ppi_norm_offsets
+
+
 def test_reverting_restores_the_saved_settings(layout):
     saved = layout.settings()
     edited = layout.with_diagonals([20.0, 20.0]).with_bezels([(3.0, 0.0), (0.0, 0.0)])
