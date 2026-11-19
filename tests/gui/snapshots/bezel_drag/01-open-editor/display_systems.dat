@@ -1,0 +1,7 @@
+[<key>]
+ppi_norm_offsets = 0,4;1920,0
+bezel_mms = 0.0,0.0;0.0,0.0
+user_diagonal_inches = None
+use_perspective = 1
+def_perspective = None
+
