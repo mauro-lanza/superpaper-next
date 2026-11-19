@@ -25,6 +25,8 @@ class DisplayPositionEntry(wx.Frame):
         self.ToggleWindowStyle(wx.STAY_ON_TOP)
         self.SetIcon(wx.Icon(str(resource("superpaper.png")), wx.BITMAP_TYPE_PNG))
         self.Bind(wx.EVT_CLOSE, self.onCancel)
+        # Controls placed straight on a wx.Frame get no tab-traversal container, and clicks make focus jump
+        self.panel = wx.Panel(self)
 
         self.tc_width = 100
         self.preview = preview
@@ -49,7 +51,10 @@ class DisplayPositionEntry(wx.Frame):
 
         sizer_main.Add(self.sizer_pos_conf, 0, wx.ALL | wx.EXPAND, 5)
         sizer_main.Add(self.sizer_buttons, 0, wx.ALL | wx.EXPAND, 5)
-        self.SetSizer(sizer_main)
+        self.panel.SetSizer(sizer_main)
+        frame_sizer = wx.BoxSizer(wx.VERTICAL)
+        frame_sizer.Add(self.panel, 1, wx.EXPAND)
+        self.SetSizer(frame_sizer)
         self.Fit()
         self.populate_fields()
         self.Center()
@@ -63,13 +68,13 @@ class DisplayPositionEntry(wx.Frame):
         self.grid = wx.FlexGridSizer(cols, gap, gap)
 
         # header
-        hd_id = wx.StaticText(self, -1, "Display")
-        self.hd_left = wx.StaticText(self, -1, "Left")
-        self.hd_top = wx.StaticText(self, -1, "Top")
-        self.hd_right = wx.StaticText(self, -1, "Right")
-        self.hd_bott = wx.StaticText(self, -1, "Bottom")
-        self.hd_left_new = wx.StaticText(self, -1, "Left new")
-        self.hd_top_new = wx.StaticText(self, -1, "Top new")
+        hd_id = wx.StaticText(self.panel, -1, "Display")
+        self.hd_left = wx.StaticText(self.panel, -1, "Left")
+        self.hd_top = wx.StaticText(self.panel, -1, "Top")
+        self.hd_right = wx.StaticText(self.panel, -1, "Right")
+        self.hd_bott = wx.StaticText(self.panel, -1, "Bottom")
+        self.hd_left_new = wx.StaticText(self.panel, -1, "Left new")
+        self.hd_top_new = wx.StaticText(self.panel, -1, "Top new")
         self.grid.Add(hd_id, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 1)
         self.grid.Add(self.hd_left, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 1)
         self.grid.Add(self.hd_top, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 1)
@@ -89,12 +94,13 @@ class DisplayPositionEntry(wx.Frame):
 
     def display_opt_widget_row(self, row_id):
         """Return a display position config widget row."""
-        row_id = wx.StaticText(self, -1, str(row_id))
+        row_id = wx.StaticText(self.panel, -1, str(row_id))
         row_edges = [
-            wx.TextCtrl(self, -1, size=wx.Size(self.tc_width, -1), style=wx.TE_RIGHT | wx.TE_READONLY) for _ in range(4)
+            wx.TextCtrl(self.panel, -1, size=wx.Size(self.tc_width, -1), style=wx.TE_RIGHT | wx.TE_READONLY)
+            for _ in range(4)
         ]
         row_new = [
-            wx.TextCtrl(self, -1, size=wx.Size(self.tc_width, -1), style=wx.TE_RIGHT | wx.TE_PROCESS_ENTER)
+            wx.TextCtrl(self.panel, -1, size=wx.Size(self.tc_width, -1), style=wx.TE_RIGHT | wx.TE_PROCESS_ENTER)
             for _ in range(2)
         ]
         for tc in row_edges:
@@ -121,19 +127,19 @@ class DisplayPositionEntry(wx.Frame):
         """Create sizer for bottom row buttons."""
         self.sizer_buttons = wx.BoxSizer(wx.HORIZONTAL)
 
-        self.cb_use_px = wx.CheckBox(self, -1, "Use pixels (exact)")
+        self.cb_use_px = wx.CheckBox(self.panel, -1, "Use pixels (exact)")
         self.cb_use_px.SetValue(False)
         self.cb_use_px.Bind(wx.EVT_CHECKBOX, self.onCbusepx)
 
-        self.button_preview = wx.Button(self, label="Preview")
-        self.button_apply = wx.Button(self, label="Apply")
-        self.button_cancel = wx.Button(self, label="Cancel")
+        self.button_preview = wx.Button(self.panel, label="Preview")
+        self.button_apply = wx.Button(self.panel, label="Apply")
+        self.button_cancel = wx.Button(self.panel, label="Cancel")
 
         self.button_preview.Bind(wx.EVT_BUTTON, self.onPreview)
         self.button_apply.Bind(wx.EVT_BUTTON, self.onApply)
         self.button_cancel.Bind(wx.EVT_BUTTON, self.onCancel)
 
-        self.button_help_pos = wx.BitmapButton(self, bitmap=wx.BitmapBundle(self.help_bmp))
+        self.button_help_pos = wx.BitmapButton(self.panel, bitmap=wx.BitmapBundle(self.help_bmp))
         self.button_help_pos.Bind(wx.EVT_BUTTON, self.onHelpExactPositions)
 
         self.sizer_buttons.Add(self.cb_use_px, 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5)
