@@ -1,6 +1,7 @@
 """Setting the wallpaper on KDE Plasma, where each activity shows the profile named after it."""
 
 import json
+import shutil
 import subprocess
 import sys
 
@@ -13,8 +14,8 @@ PIECES = ["/cache/home-a-crop-0.png", "/cache/home-a-crop-1.png"]
 WORK_PIECES = ["/cache/work-b-crop-0.png", "/cache/work-b-crop-1.png"]
 ACTIVITIES = {"act-home": "home", "act-work": "work", "act-play": "play"}
 # Two displays, showing desktops 1 and 2 of the current activity; the other activities'
-# desktops are on no screen (-1).
-DESKTOPS = "1,0;2,1;3,-1;4,-1;5,-1;6,-1"
+# desktops are on no screen (-1), as before Plasma 6.8.
+DESKTOPS = "1,0,1;2,1,1;3,-1,0;4,-1,0;5,-1,0;6,-1,0"
 
 
 def declared(script, name):
@@ -40,10 +41,11 @@ class FakePlasma:
     def __init__(self):
         self.scripts = []
         self.failure = None
+        self.desktops = DESKTOPS
 
     def evaluateScript(self, script):
         if script == kde.DESKTOPS_SCRIPT:
-            return DESKTOPS
+            return self.desktops
         if self.failure:
             raise self.failure
         self.scripts.append(script)
@@ -182,3 +184,55 @@ def test_image_paths_reach_plasma_as_data_not_code():
 
     assert declared(script, "imagesByDesktop") == {"7": ["file://" + awkward]}
     assert len(script.splitlines()) == len(kde.WALLPAPER_SCRIPT.template.splitlines())
+
+
+def test_plasma_6_8_other_activities_keep_their_learned_desktops(plasma, activity_manager, tmp_path):
+    # Two activities on two screens: every desktop keeps a screen, and desktop 9 is on a removed one.
+    plasma.desktops = "1,0,1;2,1,1;24,0,0;25,1,0;9,2,0"
+    (tmp_path / kde.MAPPING_FILE).write_text(json.dumps({"24": "act-work", "25": "act-work"}))
+
+    desktops = kde.desktop_activities(tmp_path, "qdbus6", ["act-home", "act-work"])
+
+    assert desktops[1] == desktops[2] == "act-home"
+    assert desktops[24] == desktops[25] == "act-work"
+    assert json.loads((tmp_path / kde.MAPPING_FILE).read_text())["24"] == "act-work"
+
+
+def test_a_desktop_on_a_removed_screen_is_not_active(plasma, activity_manager, tmp_path):
+    plasma.desktops = "1,0,1;9,2,0"
+
+    desktops = kde.desktop_activities(tmp_path, "qdbus6", ["act-home"])
+
+    assert desktops[1] == "act-home"
+    assert 9 not in desktops
+
+
+def test_the_wallpaper_script_picks_screens_by_the_current_activity():
+    script = kde.wallpaper_script({}, ["/a.png"])
+
+    assert "desktopForScreen" in script
+    assert "screen != -1" not in script
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="needs node to run the script")
+def test_plasma_6_8_every_screen_gets_its_image_whatever_the_activity():
+    fake_plasma = """
+const screens = [{left: 0, top: 0}, {left: 1920, top: 0}];
+const log = [];
+const make = (id, screen) => ({id, screen, writeConfig: (key, value) => log.push([id, value]), reloadConfig() {}});
+const all = [make(1, 0), make(2, 1), make(24, 0), make(25, 1), make(9, 2)];
+globalThis.screenCount = 2;
+globalThis.desktops = () => all;
+globalThis.desktopForScreen = (i) => all[i];
+globalThis.screenGeometry = (i) => screens[i];
+"""
+    program = fake_plasma + kde.wallpaper_script({}, ["/a.png", "/b.png"]) + "\nconsole.log(JSON.stringify(log));"
+
+    output = subprocess.run(["node", "-e", program], capture_output=True, text=True, check=True).stdout
+
+    assert json.loads(output) == [
+        [1, "file:///a.png"],
+        [2, "file:///b.png"],
+        [24, "file:///a.png"],
+        [25, "file:///b.png"],
+    ]

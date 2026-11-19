@@ -19,44 +19,44 @@ logger = logging.getLogger(__name__)
 # current activity). Kept in the config directory.
 MAPPING_FILE = "kde_desktop_mapping.json"
 
-# Lists every desktop as "id,screen;"; a desktop of an activity that isn't showing is on
-# screen -1.
+# Lists every desktop as "id,screen,current;". "current" is 1 for the desktop the current
+# activity shows on a screen that exists. Since Plasma 6.8 a desktop of another activity
+# keeps its screen, as does one of a removed screen (an index past screenCount); before
+# that, a desktop of an activity that isn't showing is on screen -1.
 DESKTOPS_SCRIPT = """
 var allDesktops = desktops();
 var result = [];
 for(var i = 0; i < allDesktops.length; i++) {
-    result.push(allDesktops[i].id + ',' + allDesktops[i].screen);
+    var screen = allDesktops[i].screen;
+    var shown = screen >= 0 && screen < screenCount ? desktopForScreen(screen) : null;
+    var isCurrent = shown && shown.id == allDesktops[i].id ? 1 : 0;
+    result.push(allDesktops[i].id + ',' + screen + ',' + isCurrent);
 }
 print(result.join(';'));
 """
 
-# Gives each desktop the image for its screen. The desktops on a screen now, sorted by
-# their screen's top and then (deciding) its left edge, order the screens the way
-# Superpaper orders the displays. A desktop without a screen, of an activity that isn't
-# showing, is guessed to be on the screen its position in the list suggests.
+# Gives each desktop the image for its screen. The screens the current activity shows a
+# desktop on, sorted by their left and then top edge, order the screens the way Superpaper
+# orders the displays. A desktop on no screen (-1), of an activity that isn't showing, is
+# guessed to be on the screen its position in the list suggests; one on a screen that no
+# longer exists is left alone.
 WALLPAPER_SCRIPT = Template("""
 var imagesByDesktop = ${images_by_desktop};
 var defaultImages = ${default_images};
 
 var allDesktops = desktops();
 
-var activeDesktops = [];
-for(var idx = 0; idx < allDesktops.length; idx++) {
-    if(allDesktops[idx].screen != -1) {
-        activeDesktops.push(allDesktops[idx]);
+var screenOrder = [];
+for(var i = 0; i < screenCount; i++) {
+    if(desktopForScreen(i)) {
+        screenOrder.push(i);
     }
 }
-
-activeDesktops.sort(function(a, b) {
-    var ga = screenGeometry(a.screen);
-    var gb = screenGeometry(b.screen);
+screenOrder.sort(function(a, b) {
+    var ga = screenGeometry(a);
+    var gb = screenGeometry(b);
     return (ga.left - gb.left) || (ga.top - gb.top);
 });
-
-var screenOrder = [];
-for(var k = 0; k < activeDesktops.length; k++) {
-    screenOrder.push(activeDesktops[k].screen);
-}
 
 for(var idx = 0; idx < allDesktops.length; idx++) {
     var desktop = allDesktops[idx];
@@ -68,13 +68,7 @@ for(var idx = 0; idx < allDesktops.length; idx++) {
     if(screenId == -1 && screenOrder.length > 0) {
         screenId = screenOrder[idx % screenOrder.length];
     }
-    var imageIndex = -1;
-    for(var s = 0; s < screenOrder.length; s++) {
-        if(screenOrder[s] == screenId) {
-            imageIndex = s;
-            break;
-        }
-    }
+    var imageIndex = screenOrder.indexOf(screenId);
     if(imageIndex >= 0 && imageIndex < imageArray.length) {
         desktop.wallpaperPlugin = "org.kde.image";
         desktop.currentConfigGroup = Array("Wallpaper", "org.kde.image", "General");
@@ -161,9 +155,9 @@ def desktop_activities(state_dir: Path, qdbus: str, activity_ids: Sequence[str])
         active_desktop_ids = []
         for item in (desktop_info or "").split(";"):
             if "," in item:
-                desktop_id, screen_id = (int(part) for part in item.split(",")[:2])
+                desktop_id, _screen_id, is_current = (int(part) for part in item.split(","))
                 all_desktop_ids.append(desktop_id)
-                if screen_id != -1:
+                if is_current:
                     active_desktop_ids.append(desktop_id)
     except Exception:  # Plasma answered something else
         logger.exception("Failed to get desktop-activity mapping")
