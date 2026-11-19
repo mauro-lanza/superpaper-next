@@ -181,22 +181,25 @@ class Selection:
             # The same file can be included through overlapping folders, explicit
             # paths or symlinks. Keep its first occurrence only.
             unique = []
+            unique_identities = []
             seen = set()
             for image in images:
                 identity = _file_identity(image)
                 if identity not in seen:
                     seen.add(identity)
                     unique.append(image)
-            lists.append(_ImageList(unique, self._sortmode))
+                    unique_identities.append(identity)
+            lists.append(_ImageList(unique, unique_identities, self._sortmode))
         return lists
 
 
 class _ImageList:
     """One position's images in slideshow order, rearranged each time they have all been shown."""
 
-    def __init__(self, files: list[str], sortmode: SortMode):
+    def __init__(self, files: list[str], identities: list[str], sortmode: SortMode):
         self.counter = 0
         self.files = files
+        self.identities = identities
         self.sortmode = sortmode
         self.arrange()
 
@@ -207,16 +210,19 @@ class _ImageList:
             self.arrange()
 
     def arrange(self) -> None:
+        pairs = list(zip(self.files, self.identities, strict=True))
         match self.sortmode:
             case "shuffle":
-                random.shuffle(self.files)
+                random.shuffle(pairs)
             case "date_seeded_shuffle":
                 today = datetime.datetime.now()  # noqa: DTZ005  # intentional local-time seed
-                random.Random(today.strftime("%Y%m%d%H")).shuffle(self.files)
+                random.Random(today.strftime("%Y%m%d%H")).shuffle(pairs)
             case "alphabetical":
-                self.files.sort()
+                pairs.sort(key=lambda pair: pair[0])
             case _:
                 assert_never(self.sortmode)
+        self.files[:] = [path for path, _ in pairs]
+        self.identities[:] = [identity for _, identity in pairs]
 
 
 def _file_identity(path: str) -> str:
@@ -231,9 +237,7 @@ def _plan_batch(lists: list[_ImageList]) -> tuple[list[str], list[int]]:
     for image_list in lists:
         image_list.prepare_cycle()
         ordered = list(range(image_list.counter, len(image_list.files))) + list(range(image_list.counter))
-        candidates.append(
-            [(image_list.files[index], index + 1, _file_identity(image_list.files[index])) for index in ordered]
-        )
+        candidates.append([(image_list.files[index], index + 1, image_list.identities[index]) for index in ordered])
 
     image_to_position: dict[str, int] = {}
     selected: list[tuple[str, int] | None] = [None] * len(candidates)

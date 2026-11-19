@@ -8,8 +8,15 @@ import PIL
 import pytest
 from PIL import Image
 
-from superpaper.geometry.canvas import canvas_size_with_bezels
-from superpaper.geometry.perspective import Named, Perspective, Swivel, SwivelAxis, Tilt
+from superpaper.geometry.canvas import canvas_size, canvas_size_with_bezels
+from superpaper.geometry.perspective import (
+    Named,
+    Perspective,
+    Swivel,
+    SwivelAxis,
+    Tilt,
+    get_backprojected_display_system,
+)
 from superpaper.rendering import render, source_image
 from tests.conftest import monitor
 
@@ -152,8 +159,8 @@ def test_one_image_per_display_keeps_the_gaps_black(tmp_path, display_layout):
 # them. The digests pin the output exactly; they were recorded with Pillow 12.2.0 and
 # numpy 2.5.0, so a different version of either can change them, and then they are
 # re-recorded deliberately. The perspective case solves a linear system with numpy's
-# OpenBLAS, whose AVX-512 kernels round its last bits differently from the other x86-64
-# kernels. That moves 58 of the 4032 pixels by one level, so it has a digest for each.
+# OpenBLAS, whose AVX-512 kernels may round its last bits differently from the other
+# x86-64 kernels; only the digest from the non-AVX-512 kernels is recorded.
 SMALL_MONITORS = [
     monitor(0, 0, 64, 36, 120, 68, "A"),
     monitor(64, 6, 48, 27, 105, 59, "B"),
@@ -161,10 +168,7 @@ SMALL_MONITORS = [
 ADVANCED_GOLDENS = {
     "offsets": {"d55a711c95670d2e4ad667b5967864f6a4ec9f9d67b2c94d06f43f95075dd618"},
     "span groups": {"49a179d205c35521f306a400e09310146b7b87cc69dcba71f61fb6016e549f98"},
-    "perspective": {
-        "f22045d3fa224a9f60cebf74ea1e1e0e31717313e3f92b785acdd52f288911a2",  # AVX-512 kernels
-        "5ab69aa9661b802a4e11d15221fdcb440d2709d9fddf6cd8331bf411ad1b9f6a",  # the others
-    },
+    "perspective": {"ff5a6b2529f1523302eb0d2eeea79949a5f7563dc0c17b671436d5e4496533a9"},
 }
 
 
@@ -203,3 +207,32 @@ def test_advanced_spanning_golden(tmp_path, display_layout, case, spangroups, pe
     assert image.size == (112, 36)
     digest = hashlib.sha256(image.tobytes()).hexdigest()
     assert digest in ADVANCED_GOLDENS[case], f"pixels changed (Pillow {PIL.__version__}, numpy {numpy.__version__})"
+
+
+def test_transforming_only_a_display_area_matches_transforming_the_whole_canvas():
+    crops = [(0, 0, 160, 90), (170, 10, 330, 100), (340, 0, 500, 90)]
+    desk = Perspective(
+        "desk",
+        1,
+        (0.0, 0.0, 300.0),
+        (
+            Swivel(SwivelAxis.RIGHT, 25.0, 0.0, 0.0),
+            Swivel(SwivelAxis.NONE, 0.0, 0.0, 0.0),
+            Swivel(SwivelAxis.LEFT, -25.0, 0.0, 0.0),
+        ),
+        (Tilt(0.0, 0.0, 0.0),) * 3,
+    )
+    plane_crops, coefficients = get_backprojected_display_system(crops, desk)
+    source = Image.effect_noise(canvas_size(plane_crops), 60).convert("RGB")
+    canvas = canvas_size(crops)
+
+    for coeffs, (left, top, right, bottom) in zip(coefficients, crops, strict=True):
+        whole = source.transform(canvas, Image.Transform.PERSPECTIVE, coeffs, Image.Resampling.BICUBIC)
+        part = source.transform(
+            (right - left, bottom - top),
+            Image.Transform.PERSPECTIVE,
+            render.shift_perspective(coeffs, left, top),
+            Image.Resampling.BICUBIC,
+        )
+        difference = numpy.abs(numpy.asarray(whole.crop((left, top, right, bottom)), int) - numpy.asarray(part, int))
+        assert difference.max() <= 1

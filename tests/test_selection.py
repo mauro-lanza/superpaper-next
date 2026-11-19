@@ -207,6 +207,17 @@ def test_advancing_replaces_a_duplicate_selection(tmp_path, remembered):
     assert len(set(images.advance())) == 2
 
 
+@pytest.mark.parametrize("sortmode", ["shuffle", "date_seeded_shuffle", "alphabetical"])
+def test_identities_stay_aligned_with_their_files_when_arranged(sortmode):
+    original = [f"/photos/{name}.png" for name in "abcdefgh"]
+    image_list = selection._ImageList(list(original), [f"id-{path}" for path in original], sortmode)
+
+    image_list.arrange()
+
+    assert sorted(image_list.files) == original
+    assert image_list.identities == [f"id-{path}" for path in image_list.files]
+
+
 @pytest.mark.parametrize(("name", "supported"), [("photo.JPG", True), ("photo.webp", True), ("notes.txt", False)])
 def test_supported_images_are_recognised_by_extension_in_any_case(name, supported):
     assert selection.is_supported_image(name) is supported

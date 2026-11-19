@@ -18,6 +18,17 @@ from superpaper.rendering.source_image import open_source_image
 logger = logging.getLogger(__name__)
 
 
+def shift_perspective(coeffs: Sequence[float], left: int, top: int) -> list[float]:
+    """Perspective coefficients for the window of the output whose corner is (left, top).
+
+    Substituting x + left, y + top into the mapping leaves a projective map whose
+    denominator no longer starts at 1, so every coefficient is divided by it.
+    """
+    a, b, c, d, e, f, g, h = coeffs
+    w = 1 + g * left + h * top
+    return [a / w, b / w, (c + a * left + b * top) / w, d / w, e / w, (f + d * left + e * top) / w, g / w, h / w]
+
+
 def resize_to_fill(
     img: Image.Image,
     res: tuple[int, int],
@@ -114,16 +125,17 @@ def advanced(
                 grp_crops, perspective.of_displays(grp)
             )
             canvas_tuple_proj = canvas_size(proj_plane_crops)
-            canvas_tuple_trgt = canvas_size(grp_crops)
             logger.info("Back-projected canvas size: %s", canvas_tuple_proj)
             img_workingsize = resize_to_fill(img, canvas_tuple_proj, zoom=zoom, offset=pan)
             for coeffs, ppin_crop, display, res in zip(persp_coeffs, grp_crops, grp, grp_res_arr, strict=True):
-                # The coeffs map the full back-projected plane to the full target canvas, so
-                # the whole image is transformed once per display.
+                left, top, right, bottom = (round(edge) for edge in ppin_crop)
                 persp_crop = img_workingsize.transform(
-                    canvas_tuple_trgt, Image.Transform.PERSPECTIVE, coeffs, Image.Resampling.BICUBIC
+                    (right - left, bottom - top),
+                    Image.Transform.PERSPECTIVE,
+                    shift_perspective(coeffs, left, top),
+                    Image.Resampling.BICUBIC,
                 )
-                crop_img = persp_crop.crop(ppin_crop).resize(res, resample=Image.Resampling.LANCZOS)
+                crop_img = persp_crop.resize(res, resample=Image.Resampling.LANCZOS)
                 combined_image.paste(crop_img, offsets[display])
         else:
             # The canvas includes the outer bezels so the result matches the preview (issue
