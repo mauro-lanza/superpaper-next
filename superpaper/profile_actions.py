@@ -3,16 +3,17 @@ and revert a profile, and show a draft of one. The rules of the form itself are 
 superpaper.profiles.form; these put them to use on a ProfileStore and a Session."""
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
 from superpaper.geometry.displays import Layout
+from superpaper.geometry.perspective import PerspectiveChoice
 from superpaper.profiles import profile_file
 from superpaper.profiles.form import Draft, ProfileForm, chosen_images, parse_form
 from superpaper.profiles.profile_id import NEW_PROFILE_LABEL, ProfileId, ProfileIdError
 from superpaper.profiles.profile_store import ProfileStore, StoredProfile, validate_managed_profile_id
 from superpaper.session import Session
-from superpaper.user_input import Problems
+from superpaper.user_input import Offset, Problems
 
 logger = logging.getLogger(__name__)
 
@@ -106,6 +107,11 @@ def delete_profile(
     session.update(stored.profile_id, None)
     rebind_hotkey(stored, None)
     return None
+
+
+def align_test_profile(image: str, perspective: PerspectiveChoice, offsets: Sequence[Offset]) -> profile_file.Profile:
+    """The one-off profile that shows ``image`` across the displays at ``offsets`` with ``perspective``."""
+    return profile_file.draft([image], spanmode="advanced", perspective=perspective, offsets=offsets)
 
 
 def show_draft(

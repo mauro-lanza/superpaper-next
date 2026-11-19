@@ -3,8 +3,18 @@ deleting and showing a draft of what a form describes."""
 
 import pytest
 
-from superpaper.profile_actions import Saved, delete_profile, revert_profile, save_profile, saved_profile, show_draft
+from superpaper.geometry.perspective import Disabled, Named
+from superpaper.profile_actions import (
+    Saved,
+    align_test_profile,
+    delete_profile,
+    revert_profile,
+    save_profile,
+    saved_profile,
+    show_draft,
+)
 from superpaper.profiles.form import prepare_draft
+from superpaper.profiles.profile_file import OffsetsCorrection
 from superpaper.profiles.profile_id import NEW_PROFILE_LABEL, ProfileId
 from superpaper.profiles.profile_store import ProfileStore
 from superpaper.user_input import Problems
@@ -184,3 +194,18 @@ def test_a_draft_that_failed_to_show_leaves_the_selection_alone(store, session, 
     posted.pop()()
     assert saved.selection.images == before
     assert shown == ["broken"]
+
+
+def test_the_align_test_shows_one_image_with_the_typed_offsets_and_chosen_perspective():
+    profile = align_test_profile("test.png", Named("p"), ((0, 0), (10, 20)))
+    assert profile.spanmode == "advanced"
+    assert profile.sources == (("test.png",),)
+    assert profile.perspective == Named("p")
+    assert profile.corrections == (OffsetsCorrection(((0, 0), (10, 20))),)
+    assert not profile.slideshow
+
+
+def test_the_align_test_without_offsets_has_no_correction():
+    profile = align_test_profile("test.png", Disabled(), ())
+    assert profile.perspective == Disabled()
+    assert profile.corrections == ()
