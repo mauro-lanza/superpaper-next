@@ -102,13 +102,13 @@ RUN python3.14 -m venv "${VIRTUAL_ENV}" \
 # appimagetool packages the finished AppDir into a single-file AppImage.
 # APPIMAGE_EXTRACT_AND_RUN lets it run without FUSE inside the container.
 #
-# AppImage only publishes a rolling "continuous" tag, so we pin by SHA256
-# instead of a version: the build fails if the fetched asset ever differs from
-# the reviewed one, guarding against a silently changed/compromised upstream.
-# To upgrade, download the new asset, verify it, and update APPIMAGETOOL_SHA256.
-ARG APPIMAGETOOL_SHA256=a6d71e2b6cd66f8e8d16c37ad164658985e0cf5fcaa950c90a482890cb9d13e0
+# Pinned to a tagged release (the "continuous" asset is mutable) and verified by
+# SHA256. To upgrade, bump both ARGs; the hash is the release asset's "digest"
+# (gh api repos/AppImage/appimagetool/releases/tags/<tag>), confirmed by sha256sum.
+ARG APPIMAGETOOL_VERSION=1.9.1
+ARG APPIMAGETOOL_SHA256=ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0
 RUN wget -q -O /usr/local/bin/appimagetool \
-        "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage" \
+        "https://github.com/AppImage/appimagetool/releases/download/${APPIMAGETOOL_VERSION}/appimagetool-x86_64.AppImage" \
     && echo "${APPIMAGETOOL_SHA256}  /usr/local/bin/appimagetool" | sha256sum -c - \
     && chmod +x /usr/local/bin/appimagetool
 
