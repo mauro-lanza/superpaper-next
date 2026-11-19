@@ -16,8 +16,8 @@ from typing import Literal, assert_never, get_args
 
 from superpaper.geometry.perspective import Default, Disabled, PerspectiveChoice, choice_label, parse_choice
 from superpaper.geometry.units import MM_PER_INCH
+from superpaper.hotkey_keys import format_hotkey, parse_hotkey
 from superpaper.profiles.selection import SORT_MODES, SortMode, is_supported_image
-from superpaper.settings import format_hotkey, parse_hotkey
 from superpaper.user_input import Offset, parse_float
 
 logger = logging.getLogger(__name__)

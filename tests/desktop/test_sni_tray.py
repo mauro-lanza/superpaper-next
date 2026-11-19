@@ -1,11 +1,11 @@
 """The KDE tray menu (StatusNotifierItem): built without D-Bus from the tray's menu entries."""
 
-from superpaper.desktop.sni_tray import NOTICE_ID, NOTICE_SEPARATOR_ID, _MenuModel
+from superpaper.desktop.sni_tray import NOTICE_ID, NOTICE_SEPARATOR_ID, MenuModel
 from superpaper.desktop.tray_menu import Check, Item, Separator, Submenu, failure_notice
 
 
 def model_of(menu):
-    return _MenuModel(menu, lambda action: action())
+    return MenuModel(menu, lambda action: action())
 
 
 def entries(started, *, paused=False):

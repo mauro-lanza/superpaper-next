@@ -110,10 +110,7 @@ class Runtime:
     def settle(self):
         """Wait until every request made so far is handled, and the slideshow change that
         came due on the fake clock."""
-        done = threading.Event()
-        self.session._post(lambda: None)  # after a request, a change that is due runs
-        self.session._post(done.set)
-        assert done.wait(10)
+        assert self.session.wait_until_handled(10)
 
     def hold_changes(self):
         """Make the next changes wait until release()."""
@@ -252,7 +249,7 @@ def test_slideshow_changes_never_pile_up_behind_a_slow_one(runtime):
     runtime.settle()
     runtime.hold_changes()
     runtime.advance(DELAY)
-    runtime.session._post(lambda: None)  # wakes the worker to find the change due
+    runtime.session.use_displays(runtime.session.layout)  # wakes the worker to find the change due
     assert runtime.holding.wait(10)
 
     # Ten delays pass while that change is under way.
@@ -563,7 +560,7 @@ def test_a_change_that_ends_after_quitting_never_starts_another(runtime):
     runtime.settle()
     runtime.hold_changes()
     runtime.advance(DELAY)
-    runtime.session._post(lambda: None)
+    runtime.session.use_displays(runtime.session.layout)
     assert runtime.holding.wait(10)
     runtime.session.next()  # waiting behind the slideshow's change
 

@@ -16,6 +16,7 @@ from superpaper.profile_actions import carry_on_running
 from superpaper.profiles import profile_store
 from superpaper.profiles.profile_id import ProfileId
 from superpaper.profiles.profile_store import ProfileDiagnosticKind, ProfileStore, StoredProfile
+from superpaper.rendering import render_cache
 from superpaper.session import Session
 from superpaper.settings import SETTINGS_FILE, Settings, write_settings
 
@@ -67,7 +68,9 @@ class Superpaper:
         self._load_profiles()
         # Renders and selections of profiles deleted or renamed since the last start
         # aren't needed.
-        self.store.sweep()
+        kept = self.store.sweep()
+        if kept is not None:
+            render_cache.sweep(paths.cache, [profile_id.value for profile_id in kept])
         self._run_at_startup(startup_profile)
         self.hotkeys = self._start_hotkeys()
         self.tray = shell.make_tray(self)

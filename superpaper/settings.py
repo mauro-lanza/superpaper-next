@@ -9,6 +9,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from superpaper.files import write_atomically
+from superpaper.hotkey_keys import format_hotkey, parse_hotkey
 
 SETTINGS_FILE = "general_settings"
 
@@ -25,17 +26,6 @@ class Settings:
     browse_default_dir: str = ""
     show_help: bool = True
     warn_large_img: bool = True
-
-
-def parse_hotkey(text: str) -> tuple[str, ...] | None:
-    """The keys of a ``key+key`` hotkey text, or None if it is blank."""
-    text = text.strip()
-    return tuple(text.split("+")) if text else None
-
-
-def format_hotkey(keys: tuple[str, ...] | None) -> str:
-    """The ``key+key`` text of a hotkey; empty if there is none."""
-    return "+".join(keys or ())
 
 
 def first_run_settings(platform: str) -> Settings:

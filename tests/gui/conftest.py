@@ -10,7 +10,6 @@ import importlib.util
 import os
 import subprocess
 import sys
-import threading
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -152,10 +151,7 @@ class GuiEnv:
     def settle(self, superpaper):
         """Wait until the session has handled every request made so far, then run what it
         handed back to the main loop."""
-        done = threading.Event()
-        superpaper.session._post(lambda: None)
-        superpaper.session._post(done.set)
-        self.wait_until(done.is_set)
+        assert superpaper.session.wait_until_handled(10)
         self.flush()
 
     def open_editor(self, superpaper):

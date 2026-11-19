@@ -8,29 +8,9 @@ from superpaper import settings as settings_module
 from superpaper.settings import (
     Settings,
     first_run_settings,
-    format_hotkey,
-    parse_hotkey,
     read_settings,
     write_settings,
 )
-
-
-def test_hotkey_text_round_trips():
-    keys = ("control", "super", "w")
-    assert format_hotkey(keys) == "control+super+w"
-    assert parse_hotkey("control+super+w") == keys
-
-
-@pytest.mark.parametrize("text", ["", "   "])
-def test_blank_hotkey_text_is_no_hotkey(text):
-    assert parse_hotkey(text) is None
-    assert format_hotkey(None) == ""
-    assert format_hotkey(()) == ""
-
-
-def test_hotkey_text_is_trimmed_around_but_not_within_and_keeps_case():
-    assert parse_hotkey("  Control+W \n") == ("Control", "W")
-    assert parse_hotkey("control + w") == ("control ", " w")
 
 
 def test_a_missing_file_reads_as_the_first_run_settings_without_creating_it(tmp_path):

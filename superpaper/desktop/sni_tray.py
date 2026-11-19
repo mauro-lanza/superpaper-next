@@ -95,8 +95,9 @@ def _item_node(item: Item) -> _Node:
     return _Node({"label": item.label, "enabled": True}, item.action, ())
 
 
-class _MenuModel:
-    """Builds the dbusmenu layout from the tray's menu and dispatches activations."""
+class MenuModel:
+    """Builds the dbusmenu layout from the tray's menu and dispatches activations. It needs
+    no D-Bus, which is how it is tested."""
 
     def __init__(self, menu: Callable[[], tuple[MenuEntry, ...]], call_soon: Callable[[Callable[[], None]], None]):
         self._menu = menu
@@ -187,7 +188,7 @@ def build_tray(
 if dbus is not None:
 
     class _DBusMenu(dbus.service.Object):
-        """``com.canonical.dbusmenu`` implementation backed by a ``_MenuModel``."""
+        """``com.canonical.dbusmenu`` implementation backed by a ``MenuModel``."""
 
         def __init__(self, bus, model):
             super().__init__(bus, MENU_OBJECT_PATH)
@@ -303,7 +304,7 @@ if dbus is not None:
             self.title = title
             self.tooltip = tooltip
             self.icon_pixmap = _load_icon_pixmap(icon_path)
-            self.model = _MenuModel(menu, call_soon)
+            self.model = MenuModel(menu, call_soon)
             self.menu = _DBusMenu(self.bus, self.model)
 
         def register(self):

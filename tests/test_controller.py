@@ -273,6 +273,38 @@ def test_a_start_with_a_profile_runs_it():
     assert superpaper.session.requests == [("activate", home)]
 
 
+def start(monkeypatch, paths):
+    """Run Superpaper's real start on ``paths``, without the session, hotkeys and windows."""
+    monkeypatch.setattr(controller, "Session", lambda *args, **kwargs: FakeSession())
+    for step in ("_run_at_startup", "_start_hotkeys", "_show_at_start"):
+        monkeypatch.setattr(controller.Superpaper, step, lambda *args: None)
+    shell = application()._shell
+    return controller.Superpaper(shell, paths, Settings(), None)
+
+
+def test_a_start_sweeps_the_renders_of_profiles_that_are_gone(tmp_path, monkeypatch):
+    paths = AppPaths(config=tmp_path, profiles=tmp_path / "profiles", cache=tmp_path / "cache")
+    paths.profiles.mkdir()
+    paths.cache.mkdir()
+    (paths.profiles / "Work.profile").write_text("name=Work\n", encoding="utf-8")
+    for name in ("Work-a.png", "Gone-a.png"):
+        (paths.cache / name).touch()
+
+    start(monkeypatch, paths)
+
+    assert sorted(path.name for path in paths.cache.iterdir()) == ["Work-a.png"]
+
+
+def test_a_start_that_cant_list_the_profiles_keeps_every_render(tmp_path, monkeypatch):
+    paths = AppPaths(config=tmp_path, profiles=tmp_path / "profiles", cache=tmp_path / "cache")
+    paths.cache.mkdir()
+    (paths.cache / "Work-a.png").touch()
+
+    start(monkeypatch, paths)
+
+    assert [path.name for path in paths.cache.iterdir()] == ["Work-a.png"]
+
+
 @pytest.mark.parametrize("startup", [None, ProfileId("Missing")])
 def test_a_start_with_nothing_to_run_runs_nothing(startup):
     superpaper = application(profiles=[profile("Work")])
