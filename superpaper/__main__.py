@@ -1,11 +1,8 @@
-#!/usr/bin/env python3
 """
 Superpaper is a cross-platform multi monitor wallpaper manager.
 
 Written by Henri Hänninen.
 """
-
-__author__ = "Henri Hänninen"
 
 import os
 import sys

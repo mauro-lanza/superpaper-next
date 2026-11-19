@@ -69,7 +69,7 @@ def set_wallpaper(wallpaper: Wallpaper, *, set_command: str, activities: kde.Act
 def run_hook(script: Path, image: str, sources: Sequence[str]) -> Result:
     """Run the user's script after a wallpaper change, with the image and then each source
     image as its own argument."""
-    return run(["python3", str(script), str(image), *map(str, sources)])
+    return run(["python3", str(script), image, *sources])
 
 
 def open_folder(folder: Path) -> Result:

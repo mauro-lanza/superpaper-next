@@ -15,7 +15,7 @@ class DisplayPositionEntry(wx.Frame):
         wx.Frame.__init__(self, preview.GetParent(), -1, "Enter display positions")
         self.ToggleWindowStyle(wx.STAY_ON_TOP)
         self.SetIcon(wx.Icon(str(resource("superpaper.png")), wx.BITMAP_TYPE_PNG))
-        self.Bind(wx.EVT_CLOSE, self.OnClose)
+        self.Bind(wx.EVT_CLOSE, self.onCancel)
 
         self.tc_width = 100
         self.preview = preview
@@ -81,55 +81,20 @@ class DisplayPositionEntry(wx.Frame):
 
     def display_opt_widget_row(self, row_id):
         """Return a display position config widget row."""
-        statbox_disp_opts = self
-        row_id = wx.StaticText(statbox_disp_opts, -1, str(row_id))
-        row_left = wx.TextCtrl(
-            statbox_disp_opts,
-            -1,
-            size=wx.Size(self.tc_width, -1),
-            style=wx.TE_RIGHT | wx.TE_READONLY,
-        )
-        row_top = wx.TextCtrl(
-            statbox_disp_opts,
-            -1,
-            size=wx.Size(self.tc_width, -1),
-            style=wx.TE_RIGHT | wx.TE_READONLY,
-        )
-        row_right = wx.TextCtrl(
-            statbox_disp_opts,
-            -1,
-            size=wx.Size(self.tc_width, -1),
-            style=wx.TE_RIGHT | wx.TE_READONLY,
-        )
-        row_bottom = wx.TextCtrl(
-            statbox_disp_opts,
-            -1,
-            size=wx.Size(self.tc_width, -1),
-            style=wx.TE_RIGHT | wx.TE_READONLY,
-        )
-        row_left_new = wx.TextCtrl(
-            statbox_disp_opts,
-            -1,
-            size=wx.Size(self.tc_width, -1),
-            style=wx.TE_RIGHT | wx.TE_PROCESS_ENTER,
-        )
-        row_top_new = wx.TextCtrl(
-            statbox_disp_opts,
-            -1,
-            size=wx.Size(self.tc_width, -1),
-            style=wx.TE_RIGHT | wx.TE_PROCESS_ENTER,
-        )
+        row_id = wx.StaticText(self, -1, str(row_id))
+        row_edges = [
+            wx.TextCtrl(self, -1, size=wx.Size(self.tc_width, -1), style=wx.TE_RIGHT | wx.TE_READONLY) for _ in range(4)
+        ]
+        row_new = [
+            wx.TextCtrl(self, -1, size=wx.Size(self.tc_width, -1), style=wx.TE_RIGHT | wx.TE_PROCESS_ENTER)
+            for _ in range(2)
+        ]
+        for tc in row_edges:
+            tc.Disable()
+        for tc in row_new:
+            tc.Bind(wx.EVT_TEXT_ENTER, self.onPreview)
 
-        row_left.Disable()
-        row_top.Disable()
-        row_right.Disable()
-        row_bottom.Disable()
-
-        row_left_new.Bind(wx.EVT_TEXT_ENTER, self.OnEnter)
-        row_top_new.Bind(wx.EVT_TEXT_ENTER, self.OnEnter)
-
-        row = [row_id, row_left, row_top, row_right, row_bottom, row_left_new, row_top_new]
-        return row
+        return [row_id, *row_edges, *row_new]
 
     def set_unit_labels(self, use_px):
         """Show units in column labels."""
@@ -170,14 +135,6 @@ class DisplayPositionEntry(wx.Frame):
         self.sizer_buttons.Add(self.button_apply, 0, wx.CENTER | wx.ALL, 5)
         self.sizer_buttons.Add(self.button_cancel, 0, wx.CENTER | wx.ALL, 5)
 
-    def OnEnter(self, evt):
-        """Bind pressing Enter in the txtctrl to update preview."""
-        self.onPreview(evt)
-
-    def OnClose(self, evt):
-        """Make closing out behave as cancellation."""
-        self.onCancel(evt)
-
     def onCbusepx(self, event):
         """Updates units of shown position data."""
         use_px = self.cb_use_px.GetValue()
@@ -199,13 +156,17 @@ class DisplayPositionEntry(wx.Frame):
             return False
 
         self.staged.layout = self.staged.layout.with_offsets(offs)
+        self._redraw()
+
+        self.populate_fields()
+        return True
+
+    def _redraw(self):
+        """Redraw the preview and shapes from the staged layout."""
         self.preview.display_data = self.staged.layout.ppi_norm_areas()
         self.preview.refresh_preview(use_ppi_px=True)
         self.layout_editor.create_shapes()
         self.preview.GetParent().Refresh()
-
-        self.populate_fields()
-        return True
 
     def onPreview(self, event):
         """Updates the display preview based on the entered position values."""
@@ -224,11 +185,7 @@ class DisplayPositionEntry(wx.Frame):
         """Closes display position config, throwing away unsaved contents."""
         # Restore old offsets
         self.staged.layout = self.staged.layout.with_offsets(self.offsets_on_open)
-        # redraw preview with restored data
-        self.preview.display_data = self.staged.layout.ppi_norm_areas()
-        self.preview.refresh_preview(use_ppi_px=True)
-        self.layout_editor.create_shapes()
-        self.preview.GetParent().Refresh()
+        self._redraw()
         # close dialog
         self.layout_editor.button_save.Enable()
         self.layout_editor.button_cancel.Enable()

@@ -116,7 +116,7 @@ class Profile:
             return len(self.spangroups)
         return 1
 
-    def display_corrections(self, resolutions) -> DisplayCorrections:
+    def display_corrections(self, resolutions: Sequence[tuple[int, int]]) -> DisplayCorrections:
         """Work out the position corrections for displays of ``resolutions``.
 
         Profiles from before display layouts existed correct positions with offsets=,
@@ -195,7 +195,8 @@ def parse(text: str) -> Profile:
         elif key == "spangroups":
             try:
                 spangroups = parse_spangroups(value.split(","))
-            except ValueError:
+            except ValueError as error:
+                logger.info("Unusable spangroups '%s' in profile '%s': %s", value, name, error)
                 spangroups = None
         elif key == "slideshow":
             slideshow = value.lower() == "true"
@@ -300,8 +301,8 @@ def draft(
     *,
     spanmode: SpanMode,
     perspective: PerspectiveChoice | None = None,
-    spangroups=None,
-    offsets=(),
+    spangroups: Sequence[Sequence[int]] | None = None,
+    offsets: Sequence[Offset] = (),
 ) -> Profile:
     """Settings to show ``images`` with once, outside any saved profile: from the command
     line or by the align test.
@@ -335,8 +336,8 @@ def validate(profile: Profile) -> list[str]:
         problems.append("When setting a different image on every display, each display needs its own paths field.")
     if profile.slideshow and profile.delay < MIN_DELAY:
         problems.append(
-            "It is advisable to set the slideshow delay to be at least 20 seconds due to the time "
-            "the image processing takes."
+            "It is advisable to set the slideshow delay to be at least "
+            f"{MIN_DELAY} seconds due to the time the image processing takes."
         )
     return problems + _source_problems(profile)
 
@@ -367,7 +368,7 @@ def _source_problems(profile: Profile) -> list[str]:
     return []
 
 
-def _numbers(key: str, value: str, kind):
+def _numbers[T: (int, float)](key: str, value: str, kind: type[T]) -> list[T]:
     """The ';'-separated numbers of a setting."""
     try:
         return [kind(item) for item in value.split(";")]
@@ -400,11 +401,10 @@ def _parse_offset(pair: str) -> tuple[int, int]:
         return (0, 0)
 
 
-def _shift_by_bezels(offsets, ppi_array, bezels, count):
+def _shift_by_bezels(
+    offsets: list[tuple[int, int]], ppi_array: Sequence[float], bezels: Sequence[float], count: int
+) -> list[tuple[int, int]]:
     """Move each display right by the bezels (in mm) between it and the leftmost one."""
-    if not ppi_array:
-        logger.error("Couldn't compute bezel offsets without pixel densities.")
-        return offsets
     max_ppi = max(ppi_array)
     inch_per_mm = 1.0 / MM_PER_INCH
     bezel_px = [0]  # never offset 1st disp, anchor to it.

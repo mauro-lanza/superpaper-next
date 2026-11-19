@@ -115,9 +115,7 @@ class Superpaper:
                 report=lambda message: self._shell.notify(message, "Error"),
             )
         except ImportError as error:
-            logger.info(
-                "WARNING: Could not import keyboard hotkey hook library, hotkeys will not work. Exception: %s", error
-            )
+            logger.warning("Could not import keyboard hotkey hook library, hotkeys will not work. Exception: %s", error)
             return None
         hotkeys.register_general(self.settings)
         hotkeys.register_profiles(self.store.profiles)
@@ -149,7 +147,7 @@ class Superpaper:
         try:
             self._shell.open_editor(self)
         except Exception as error:
-            logger.error("configure_wallpapers error: %s", error, exc_info=True)
+            logger.error("Could not open the wallpaper configuration: %s", error, exc_info=True)
 
     def open_settings(self) -> None:
         """Open the general settings."""
@@ -170,7 +168,7 @@ class Superpaper:
         self.start_profile(stored)
 
     def reload_profiles(self) -> None:
-        """Load the profiles directory again, asking about profiles that can't be loaded."""
+        """Load the profiles again and carry on running the profile that was running."""
         self._load_profiles()
         carry_on_running(self.store, self.session)
 

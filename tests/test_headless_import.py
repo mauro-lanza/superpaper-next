@@ -7,48 +7,20 @@ that is where an environment-dependent import once crashed every entry point.
 """
 
 import os
+import pkgutil
 import re
 import subprocess
 import sys
 from pathlib import Path
 
-HEADLESS_MODULES = (
-    "superpaper.__main__",
-    "superpaper.__version__",
-    "superpaper.cli",
-    "superpaper.controller",
-    "superpaper.desktop",
-    "superpaper.desktop.hotkeys",
-    "superpaper.desktop.kde",
-    "superpaper.desktop.linux",
-    "superpaper.desktop.process",
-    "superpaper.desktop.sni_tray",
-    "superpaper.desktop.wallpaper",
-    "superpaper.files",
-    "superpaper.geometry",
-    "superpaper.geometry.canvas",
-    "superpaper.geometry.display_detection",
-    "superpaper.geometry.display_store",
-    "superpaper.geometry.displays",
-    "superpaper.geometry.layout_edit",
-    "superpaper.geometry.perspective",
-    "superpaper.geometry.perspective_form",
-    "superpaper.geometry.positions",
-    "superpaper.paths",
-    "superpaper.profile_actions",
-    "superpaper.profiles",
-    "superpaper.profiles.form",
-    "superpaper.profiles.profile_file",
-    "superpaper.profiles.profile_id",
-    "superpaper.profiles.selection",
-    "superpaper.profiles.profile_store",
-    "superpaper.rendering",
-    "superpaper.rendering.render_cache",
-    "superpaper.rendering.render",
-    "superpaper.session",
-    "superpaper.settings",
-    "superpaper.desktop.tray_menu",
-    "superpaper.user_input",
+import superpaper
+
+# These import Windows-only and macOS-only packages.
+PLATFORM_MODULES = {"superpaper.desktop.windows", "superpaper.desktop.macos"}
+HEADLESS_MODULES = sorted(
+    module.name
+    for module in pkgutil.walk_packages(superpaper.__path__, "superpaper.")
+    if module.name.split(".")[1] != "ui" and module.name not in PLATFORM_MODULES
 )
 
 

@@ -97,51 +97,55 @@ def parse_arguments(argv: Sequence[str]) -> Request:
         "-s",
         "--setimages",
         nargs="*",
-        help="""List of images to set as wallpaper,
-                                starting from the left most monitor.
-                                If a single image is given, it is spanned
-                                across all monitors.""",
+        help=(
+            "List of images to set as wallpaper, starting from the left most monitor. "
+            "If a single image is given, it is spanned across all monitors."
+        ),
     )
     parser.add_argument(
         "-a",
         "--advanced",
         action="store_true",
-        help="""Span an image across all displays using advanced settings.
-                                These must be configured in the graphical interface.""",
+        help=(
+            "Span an image across all displays using advanced settings. "
+            "These must be configured in the graphical interface."
+        ),
     )
     parser.add_argument(
         "--perspective",
-        help="""Select an existing perspective profile to be used with
-                                advanced spanning. Configure settings in application.""",
+        help=(
+            "Select an existing perspective profile to be used with advanced spanning. "
+            "Configure settings in application."
+        ),
     )
     parser.add_argument(
         "--spangroups",
         nargs="*",
-        help="""Span groups to use with advanced spanning. With this you
-                                can span wallpapers on groups of displays. Syntax is:
-                                0 12 35 4 6, i.e. separate groups by spaces. If display
-                                numbering is unclear, check in the application.""",
+        help=(
+            "Span groups to use with advanced spanning. With this you can span wallpapers on groups of displays. "
+            "Syntax is: 0 12 35 4 6, i.e. separate groups by spaces. "
+            "If display numbering is unclear, check in the application."
+        ),
     )
     parser.add_argument(
         "-p",
         "--profile",
-        help="""Start Superpaper by running an existing wallpaper profile.
-                                Name must match the one configured in the application.""",
+        help=(
+            "Start Superpaper by running an existing wallpaper profile. "
+            "Name must match the one configured in the application."
+        ),
     )
     parser.add_argument(
         "-o",
         "--offsets",
         nargs="*",
-        help="""List of wallpaper offsets. Only supported by advanced
-                                span mode.""",
+        help="List of wallpaper offsets. Only supported by advanced span mode.",
     )
     parser.add_argument(
         "-c",
         "--command",
         nargs="*",
-        help="""Custom command to set the wallpaper.
-                                Substitute /path/to/image.jpg by '{image}'.
-                                Must be in quotes.""",
+        help="Custom command to set the wallpaper. Substitute /path/to/image.jpg by '{image}'. Must be in quotes.",
     )
     parser.add_argument("-d", "--debug", action="store_true", help="Run the full application with debugging.")
     args = parser.parse_args(argv)
@@ -161,7 +165,10 @@ def parse_arguments(argv: Sequence[str]) -> Request:
         )
         raise CliError(message)
     for filename in args.setimages:
-        if filename and not os.path.isfile(filename):
+        if not filename:
+            message = "An image name passed with '-s' or '--setimages' was empty."
+            raise CliError(message)
+        if not os.path.isfile(filename):
             message = f"One of the passed image names was not a file: {filename}"
             raise CliError(message)
     try:

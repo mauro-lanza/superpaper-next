@@ -27,7 +27,7 @@ def source_icon(path, size):
 class BrowsePaths(wx.Dialog):
     """Path picker dialog class."""
 
-    def __init__(self, parent, use_multi_image, defdir, remember_default_dir, num_span_groups=None):
+    def __init__(self, parent, use_multi_image, defdir, remember_default_dir, num_wallpaper_area, wp_area_name):
         wx.Dialog.__init__(
             self,
             parent,
@@ -40,15 +40,10 @@ class BrowsePaths(wx.Dialog):
         self.tsize = (BMP_SIZE, BMP_SIZE)
         self.il = wx.ImageList(BMP_SIZE, BMP_SIZE)
 
-        if num_span_groups:
-            self.num_wallpaper_area = num_span_groups
-            self.wp_area_name = "Group"
-        else:
-            self.num_wallpaper_area = len(parent.staged.layout.displays)
-            self.wp_area_name = "Display"
+        self.num_wallpaper_area = num_wallpaper_area
+        self.wp_area_name = wp_area_name
         self.use_multi_image = use_multi_image
         self.path_list_data = []
-        self.paths = []
         sizer_main = wx.BoxSizer(wx.VERTICAL)
         sizer_browse = wx.BoxSizer(wx.VERTICAL)
         self.sizer_paths_list = wx.BoxSizer(wx.VERTICAL)
@@ -177,8 +172,6 @@ class BrowsePaths(wx.Dialog):
         if is_folder(sel_path):
             self.defdir = sel_path
             self._remember_default_dir(self.defdir.strip())
-        else:
-            pass
 
     def onClrDefDir(self, event):
         self.defdir = ""
@@ -200,4 +193,4 @@ class BrowsePaths(wx.Dialog):
 
     def onCancel(self, event):
         """Closes path picker, throwing away selections."""
-        self.Destroy()
+        self.EndModal(wx.ID_CANCEL)

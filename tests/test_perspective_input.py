@@ -60,10 +60,11 @@ def test_lengths_convert_millimetres_to_pixels_and_keep_angles():
         [(-4.5, 12.0, 40.0)],
     )
 
+    assert perspective.viewer_pos == pytest.approx((0.0, -195.72834645669292, 3208.6614173228345))
     assert perspective == Perspective(
         "desk",
         1,
-        (0.0, -195.72834645669292, 3208.6614173228345),
+        perspective.viewer_pos,
         (Swivel(SwivelAxis.LEFT, 12.0, 46.525590551181104, -19.251968503937007),),
         (Tilt(-4.5, 77.00787401574803, 256.6929133858268),),
     )
@@ -128,7 +129,7 @@ def test_viewer_offsets_are_read_in_millimetres():
 
 @pytest.mark.parametrize("texts", [["", "0", "500"], ["0", "x", "500"], ["0", "0", "1,5"]])
 def test_a_viewer_offset_that_is_not_a_number_is_an_error(texts):
-    with pytest.raises(ValueError, match="lenghts in millimeters"):
+    with pytest.raises(ValueError, match="lengths in millimetres"):
         parse_viewer_offsets_mm(texts)
 
 

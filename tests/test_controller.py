@@ -202,7 +202,7 @@ def test_an_editor_that_fails_to_open_is_logged(caplog):
 
     application(open_editor=broken).open_editor()
 
-    assert "configure_wallpapers error: no window" in caplog.text
+    assert "Could not open the wallpaper configuration: no window" in caplog.text
 
 
 def test_quitting_stops_the_session_before_the_icon_goes():

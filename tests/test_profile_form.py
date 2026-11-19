@@ -130,9 +130,33 @@ def test_applied_offsets_are_zero_unless_applied_and_then_must_be_readable():
 
 
 def test_span_groups_follow_the_choices_only_when_enabled():
-    enabled = parse_form(blank(spangroups_enabled=True, spangroup_choices=(1, 0)))[0].spangroups
-    disabled = parse_form(blank(spangroup_choices=(1, 0)))[0].spangroups
+    enabled = parse_form(blank(span_mode="advanced", spangroups_enabled=True, spangroup_choices=(1, 0)))[0].spangroups
+    disabled = parse_form(blank(span_mode="advanced", spangroup_choices=(1, 0)))[0].spangroups
     assert (enabled, disabled) == (((0,), (1,)), None)
+
+
+def test_span_groups_are_dropped_outside_advanced_mode():
+    form = blank(span_mode="multi", spangroups_enabled=True, spangroup_choices=(1, 0))
+    assert profile_form.applied_spangroups(form) is None
+
+
+def test_a_display_without_sources_keeps_the_later_sources_on_their_display(layout):
+    profile = Profile(name="Gap", slideshow=False, spanmode="multi", sources=((), ("/b",)))
+    assert parse_form(form_from(profile, layout))[0].sources == ((), ("/b",))
+
+
+def test_a_trailing_display_without_sources_survives_the_round_trip(layout):
+    profile = Profile(name="Gap", slideshow=False, spanmode="multi", sources=(("/a",), ()))
+    form = form_from(profile, layout)
+    assert parse_form(form)[0].sources == (("/a",), ())
+    assert fingerprint(form) == fingerprint(form_from(parse_form(form)[0], layout))
+
+
+def test_per_target_sources_are_ordered_by_display_number_not_text():
+    rows = tuple((str(target), f"/{target}") for target in (10, 2))
+    sources = parse_form(blank(span_mode="multi", per_target_sources=True, sources=rows))[0].sources
+    assert sources[2] == ("/2",)
+    assert sources[10] == ("/10",)
 
 
 def test_groups_are_listed_in_the_order_they_first_appear_and_the_preview_wants_two():
@@ -259,7 +283,8 @@ def test_a_profile_without_offsets_or_span_groups_shows_neutral_fields(layout):
 
 
 def test_applied_span_groups_are_none_unless_enabled():
-    assert profile_form.applied_spangroups(blank(spangroups_enabled=True, spangroup_choices=(0, 1))) == ((0,), (1,))
+    form = blank(span_mode="advanced", spangroups_enabled=True, spangroup_choices=(0, 1))
+    assert profile_form.applied_spangroups(form) == ((0,), (1,))
     assert profile_form.applied_spangroups(blank(spangroup_choices=(0, 1))) is None
 
 

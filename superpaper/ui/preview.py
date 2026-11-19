@@ -14,20 +14,24 @@ from superpaper.ui.layout_editor import LayoutEditor
 
 logger = logging.getLogger(__name__)
 
+LABEL_FONT_SIZE = 24
+LABEL_COLOUR = wx.Colour(60, 60, 60, alpha=wx.ALPHA_OPAQUE)
+
+
+def black_bitmap(size):
+    return wx.Bitmap.FromRGBA(size[0], size[1], red=0, green=0, blue=0, alpha=255)
+
+
+def clamped_sub_bitmap(bmp, rect):
+    """The part of ``bmp`` inside ``rect``, which may reach past its right and bottom edges."""
+    right = min(rect.GetRight(), bmp.GetWidth() - 1)
+    bottom = min(rect.GetBottom(), bmp.GetHeight() - 1)
+    return bmp.GetSubBitmap(wx.Rect(rect.GetTopLeft(), wx.Point(right, bottom)))
+
 
 class WallpaperPreviewPanel(wx.Panel):
-    """
-    Wallpaper & monitor preview panel.
-
-    Previews wallpaper settings as applied to the input image.
-    In the advanced mode allows the user to enter their monitor
-    setup, which will then be saved into a file as a monitor
-    configuration. Method looks up saved setups to see if one
-    exists that matches the given resolutions, offsets and sizes.
-
-    ``staged`` is the editor's StagedLayout, which the preview shows and its layout editor
-    changes.
-    """
+    """Wallpaper & monitor preview panel; ``staged`` is the editor's StagedLayout, which it shows and
+    its layout editor changes."""
 
     def __init__(
         self,
@@ -89,40 +93,28 @@ class WallpaperPreviewPanel(wx.Panel):
     # UI drawing methods
     #
     def draw_displays(self, use_ppi_px=False, use_multi_image=False):
-        # draw canvas
-        bmp_canv = wx.Bitmap.FromRGBA(
-            self.dtop_canvas_relsz[0], self.dtop_canvas_relsz[1], red=0, green=0, blue=0, alpha=255
-        )
+        bmp_canv = black_bitmap(self.dtop_canvas_relsz)
         if not self.preview_img_list:
-            # preview StaticBitmaps don't exist yet
             self.bmp_list.append(bmp_canv)
             self.st_bmp_canvas = wx.StaticBitmap(self, wx.ID_ANY, wx.BitmapBundle(bmp_canv))
             self.st_bmp_canvas.SetPosition(wx.Point(self.dtop_canvas_pos))
             self.st_bmp_canvas.Hide()
 
-            # draw monitor previews
-            for disp in self.display_rel_sizes:
-                size = disp[0]
-                offs = disp[1]
-                bmp = wx.Bitmap.FromRGBA(size[0], size[1], red=0, green=0, blue=0, alpha=255)
+            for size, offs in self.display_rel_sizes:
+                bmp = black_bitmap(size)
                 self.bmp_list.append(bmp)
                 st_bmp = wx.StaticBitmap(self, wx.ID_ANY, wx.BitmapBundle(bmp))
                 st_bmp.Hide()
                 st_bmp.SetPosition(wx.Point(*offs))
                 self.preview_img_list.append(st_bmp)
         else:
-            # previews exist and should be blanked
-            self.current_preview_images = []  # drop chached image list
+            self.current_preview_images = []
 
             self.st_bmp_canvas.SetBitmap(wx.BitmapBundle(bmp_canv))
             self.st_bmp_canvas.SetPosition(wx.Point(self.dtop_canvas_pos))
 
-            # blank monitor previews
-            for disp, st_bmp in zip(self.display_rel_sizes, self.preview_img_list, strict=True):
-                size = disp[0]
-                offs = disp[1]
-                bmp = wx.Bitmap.FromRGBA(size[0], size[1], red=0, green=0, blue=0, alpha=255)
-                st_bmp.SetBitmap(bmp)
+            for (size, offs), st_bmp in zip(self.display_rel_sizes, self.preview_img_list, strict=True):
+                st_bmp.SetBitmap(black_bitmap(size))
                 st_bmp.SetPosition(offs)
         self.draw_monitor_numbers(use_ppi_px)
         self.Refresh()
@@ -133,32 +125,26 @@ class WallpaperPreviewPanel(wx.Panel):
                 self.display_rel_sizes, self.img_rel_sizes, self.bz_rel_sizes, self.preview_img_list, strict=True
             ):
                 size, offs = disp
-                bmp = wx.Bitmap.FromRGBA(img_sz[0], img_sz[1], red=0, green=0, blue=0, alpha=255)
-                bmp_w_bez = self.bezels_to_bitmap(bmp, size, bez_szs)
+                bmp_w_bez = self.bezels_to_bitmap(black_bitmap(img_sz), size, bez_szs)
                 st_bmp.SetSize(size)
                 st_bmp.SetPosition(offs)
                 st_bmp.SetBitmap(bmp_w_bez)
         else:
-            for disp, st_bmp in zip(self.display_rel_sizes, self.preview_img_list, strict=True):
-                size = disp[0]
-                offs = disp[1]
-                bmp = wx.Bitmap.FromRGBA(size[0], size[1], red=0, green=0, blue=0, alpha=255)
-                st_bmp.SetBitmap(bmp)
+            for (size, offs), st_bmp in zip(self.display_rel_sizes, self.preview_img_list, strict=True):
+                st_bmp.SetBitmap(black_bitmap(size))
                 st_bmp.SetPosition(offs)
                 st_bmp.SetSize(size)
         self.draw_monitor_numbers(use_ppi_px)
 
     def draw_monitor_numbers(self, use_ppi_px):
-        font = wx.Font(24, wx.FONTFAMILY_SWISS, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_NORMAL)
-        font_clr = wx.Colour(60, 60, 60, alpha=wx.ALPHA_OPAQUE)
+        font = wx.Font(LABEL_FONT_SIZE, wx.FONTFAMILY_SWISS, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_NORMAL)
 
-        for st_bmp in self.preview_img_list:
+        for index, st_bmp in enumerate(self.preview_img_list):
             bmp = st_bmp.GetBitmap()
             dc = wx.MemoryDC(bmp)
-            text = str(self.preview_img_list.index(st_bmp))
-            dc.SetTextForeground(font_clr)
+            dc.SetTextForeground(LABEL_COLOUR)
             dc.SetFont(font)
-            dc.DrawText(text, 5, 5)
+            dc.DrawText(str(index), 5, 5)
             del dc
             st_bmp.SetBitmap(bmp)
 
@@ -166,15 +152,14 @@ class WallpaperPreviewPanel(wx.Panel):
             self.draw_monitor_sizes()
 
     def draw_monitor_sizes(self):
-        font = wx.Font(24, wx.FONTFAMILY_SWISS, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_LIGHT)
-        font_clr = wx.Colour(60, 60, 60, alpha=wx.ALPHA_OPAQUE)
+        font = wx.Font(LABEL_FONT_SIZE, wx.FONTFAMILY_SWISS, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_LIGHT)
 
         diagonals = self.staged.layout.diagonal_inches()
         for st_bmp, img_sz, diagonal in zip(self.preview_img_list, self.img_rel_sizes, diagonals, strict=True):
             bmp = st_bmp.GetBitmap()
             dc = wx.MemoryDC(bmp)
             text = str(diagonal) + '"'
-            dc.SetTextForeground(font_clr)
+            dc.SetTextForeground(LABEL_COLOUR)
             dc.SetFont(font)
             bmp_w, _ = img_sz
             text_w, _ = dc.GetTextExtent(text)
@@ -202,9 +187,7 @@ class WallpaperPreviewPanel(wx.Panel):
             self.bz_rel_sizes = [display.bezel_rects for display in placed]
         else:
             self.display_rel_sizes = canvas.place_displays(self.display_data, self.dtop_canvas_pos, scaling_fac)
-        for disp, st_bmp in zip(self.display_rel_sizes, self.preview_img_list, strict=True):
-            size = disp[0]
-            offs = disp[1]
+        for (size, offs), st_bmp in zip(self.display_rel_sizes, self.preview_img_list, strict=True):
             st_bmp.SetPosition(offs)
             st_bmp.SetSize(size)
 
@@ -246,77 +229,61 @@ class WallpaperPreviewPanel(wx.Panel):
             self.draw_displays(use_ppi_px)
             return
 
-        def safe_sub_bitmap(bm, rect):
-            if rect.GetBottom() >= bm.GetHeight():
-                rect.SetBottom(bm.GetHeight() - 1)
-            if rect.GetRight() >= bm.GetWidth():
-                rect.SetRight(bm.GetWidth() - 1)
-            return bm.GetSubBitmap(rect)
-
         match span_mode:
             case "multi":
-                while len(image_list) < len(self.preview_img_list):
-                    image_list.append(image_list[0])
-                # A profile can list more images than there are displays; the extras are not shown.
-                for img_nm, st_bmp in zip(image_list, self.preview_img_list, strict=False):
-                    prev_sz = st_bmp.GetSize()
-                    st_bmp.SetBitmap(self.resize_and_bitmap(img_nm, prev_sz))
+                # A profile can list more images than there are displays, or fewer; the extras are
+                # not shown and the missing ones repeat the first.
+                images = [*image_list, *[image_list[0]] * (len(self.preview_img_list) - len(image_list))]
+                for img_nm, st_bmp in zip(images, self.preview_img_list, strict=False):
+                    st_bmp.SetBitmap(self.resize_and_bitmap(img_nm, st_bmp.GetSize()))
             case "advanced" if spangroups:
                 self.use_multi_image = True  # disables canvas drawing
-                # for each group of displays, run span wallpaper preview
                 # Images and groups can differ in number; the unpaired ones are not shown.
                 for group, img_nm in zip(spangroups, image_list, strict=False):
                     display_rel_sizes = [self.display_rel_sizes[i] for i in group]
-                    img_rel_sizes = [self.img_rel_sizes[i] for i in group]
-                    bz_rel_sizes = [self.bz_rel_sizes[i] for i in group]
-                    preview_img_list = [self.preview_img_list[i] for i in group]
-
                     canv_sz, canvas_pos = canvas.group_canvas(display_rel_sizes, (0, 0))
-                    bmp_clr, bmp_bw = self.resize_and_bitmap(img_nm, canv_sz, True)
-                    for disp, img_sz, bez_szs, st_bmp in zip(
-                        display_rel_sizes, img_rel_sizes, bz_rel_sizes, preview_img_list, strict=True
-                    ):
-                        sz = disp[0]
-                        pos = (disp[1][0] - canvas_pos[0], disp[1][1] - canvas_pos[1])
-                        crop = safe_sub_bitmap(bmp_clr, wx.Rect(pos, img_sz))
-                        crop_w_bez = self.bezels_to_bitmap(crop, sz, bez_szs)
-                        st_bmp.SetBitmap(crop_w_bez)
+                    bmp_clr, _ = self.resize_and_bitmap(img_nm, canv_sz, True)
+                    self.show_cropped_displays(
+                        bmp_clr,
+                        canvas_pos,
+                        display_rel_sizes,
+                        [self.img_rel_sizes[i] for i in group],
+                        [self.bz_rel_sizes[i] for i in group],
+                        [self.preview_img_list[i] for i in group],
+                    )
             case "advanced":
-                img = image_list[0]
-                # set canvas to fit with keeping aspect the image, with dim/blur
-                # and crop pieces to show on monitor previews unaltered.
-                # In advanced mode any provided bezels will be drawn.
-                canv_sz = self.st_bmp_canvas.GetSize()
-                bmp_clr, bmp_bw = self.resize_and_bitmap(img, canv_sz, True)
+                # The image fills the canvas dimmed; each display shows its unaltered piece, with bezels.
+                bmp_clr, bmp_bw = self.resize_and_bitmap(image_list[0], self.st_bmp_canvas.GetSize(), True)
                 self.st_bmp_canvas.SetBitmap(wx.BitmapBundle(bmp_bw))
-
-                canvas_pos = self.dtop_canvas_pos
-                for disp, img_sz, bez_szs, st_bmp in zip(
-                    self.display_rel_sizes, self.img_rel_sizes, self.bz_rel_sizes, self.preview_img_list, strict=True
-                ):
-                    sz = disp[0]
-                    pos = (disp[1][0] - canvas_pos[0], disp[1][1] - canvas_pos[1])
-                    crop = safe_sub_bitmap(bmp_clr, wx.Rect(pos, img_sz))
-                    crop_w_bez = self.bezels_to_bitmap(crop, sz, bez_szs)
-                    st_bmp.SetBitmap(crop_w_bez)
+                self.show_cropped_displays(
+                    bmp_clr,
+                    self.dtop_canvas_pos,
+                    self.display_rel_sizes,
+                    self.img_rel_sizes,
+                    self.bz_rel_sizes,
+                    self.preview_img_list,
+                )
             case "single":
-                img = image_list[0]
-                # set canvas to fit with keeping aspect the image, with dim/blur
-                # and crop pieces to show on monitor previews unaltered.
-                canv_sz = self.st_bmp_canvas.GetSize()
-                bmp_clr, bmp_bw = self.resize_and_bitmap(img, canv_sz, True)
+                bmp_clr, bmp_bw = self.resize_and_bitmap(image_list[0], self.st_bmp_canvas.GetSize(), True)
                 self.st_bmp_canvas.SetBitmap(wx.BitmapBundle(bmp_bw))
 
                 canvas_pos = self.dtop_canvas_pos
-                for disp, st_bmp in zip(self.display_rel_sizes, self.preview_img_list, strict=True):
-                    sz = disp[0]
-                    pos = (disp[1][0] - canvas_pos[0], disp[1][1] - canvas_pos[1])
-                    crop = safe_sub_bitmap(bmp_clr, wx.Rect(pos, sz))
-                    st_bmp.SetBitmap(crop)
+                for (sz, offs), st_bmp in zip(self.display_rel_sizes, self.preview_img_list, strict=True):
+                    pos = (offs[0] - canvas_pos[0], offs[1] - canvas_pos[1])
+                    st_bmp.SetBitmap(clamped_sub_bitmap(bmp_clr, wx.Rect(pos, sz)))
             case _:
                 assert_never(span_mode)
         self.draw_monitor_numbers(use_ppi_px)
         self.Refresh()
+
+    def show_cropped_displays(self, bmp, canvas_pos, display_rel_sizes, img_rel_sizes, bz_rel_sizes, st_bmps):
+        """Show on each display's StaticBitmap its piece of ``bmp``, with its bezels added."""
+        for (sz, offs), img_sz, bez_szs, st_bmp in zip(
+            display_rel_sizes, img_rel_sizes, bz_rel_sizes, st_bmps, strict=True
+        ):
+            pos = (offs[0] - canvas_pos[0], offs[1] - canvas_pos[1])
+            crop = clamped_sub_bitmap(bmp, wx.Rect(pos, img_sz))
+            st_bmp.SetBitmap(self.bezels_to_bitmap(crop, sz, bez_szs))
 
     def update_zoom_offset(self, zoom, offset):
         """Re-render the current preview with new zoom & offset values."""
@@ -349,7 +316,7 @@ class WallpaperPreviewPanel(wx.Panel):
             )
         except SourceImageError as error:  # unreadable, truncated, too large, or no longer there
             logger.info("Cannot preview image '%s': %s", fname, error)
-            black_bmp = wx.Bitmap.FromRGBA(size[0], size[1], red=0, green=0, blue=0, alpha=255)
+            black_bmp = black_bitmap(size)
             if enhance_color:
                 return (black_bmp, black_bmp)
             return black_bmp
@@ -397,24 +364,6 @@ class WallpaperPreviewPanel(wx.Panel):
         self.refresh_preview()
         self.full_refresh_preview(True, span_mode, spangroups=spangroups)
 
-    def draw_canvas(self, dc, draw=True):
-        if self.st_bmp_canvas:
-            pos = self.st_bmp_canvas.GetPosition()
-            bmp = self.st_bmp_canvas.GetBitmap()
-            bmp_sz = bmp.GetSize()
-            if not draw:
-                bmp = wx.Bitmap.FromRGBA(bmp_sz[0], bmp_sz[1], red=30, green=30, blue=30, alpha=255)
-            op = wx.COPY
-            if bmp.IsOk():
-                memDC = wx.MemoryDC()
-                memDC.SelectObject(bmp)
-
-                dc.Blit(pos[0], pos[1], bmp_sz[0], bmp_sz[1], memDC, 0, 0, op, True)
-
-                return True
-            else:
-                return False
-
     def draw_st_bmps(self, dc):
         for st_bmp in self.preview_img_list:
             pos = st_bmp.GetPosition()
@@ -422,25 +371,19 @@ class WallpaperPreviewPanel(wx.Panel):
             self.draw_bmp(dc, pos, bmp)
 
     def draw_bmp(self, dc, pos, bmp):
-        bmp_sz = bmp.GetSize()
-        op = wx.COPY
         if bmp.IsOk():
             memDC = wx.MemoryDC()
             memDC.SelectObject(bmp)
-
-            dc.Blit(pos[0], pos[1], bmp_sz[0], bmp_sz[1], memDC, 0, 0, op, True)
-            return True
-        else:
-            return False
+            bmp_sz = bmp.GetSize()
+            dc.Blit(pos[0], pos[1], bmp_sz[0], bmp_sz[1], memDC, 0, 0, wx.COPY, True)
 
     def OnPaint(self, evt):
         dc = wx.PaintDC(self)
 
-        # Canvas drawing
-        if not self.layout_editor.config_mode and not self.use_multi_image and self.current_preview_images:
-            self.draw_canvas(dc)
-        else:
-            self.draw_canvas(dc, False)
+        canvas_bmp = self.st_bmp_canvas.GetBitmap()
+        if self.layout_editor.config_mode or self.use_multi_image or not self.current_preview_images:
+            canvas_bmp = wx.Bitmap.FromRGBA(*canvas_bmp.GetSize(), red=30, green=30, blue=30, alpha=255)
+        self.draw_bmp(dc, self.st_bmp_canvas.GetPosition(), canvas_bmp)
 
         # Display drawing
         if self.layout_editor.config_mode:

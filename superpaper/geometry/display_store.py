@@ -25,17 +25,19 @@ from superpaper.geometry.perspective import Perspective, Swivel, SwivelAxis, Til
 logger = logging.getLogger(__name__)
 
 LAYOUTS_FILE = "display_systems.dat"
+NO_DEFAULT_PERSPECTIVE = "None"
+"""How display_systems.dat spells a layout without a default perspective."""
 
 
 @dataclass(frozen=True, slots=True)
 class _SavedLayout:
     """What display_systems.dat keeps about one layout."""
 
-    ppi_norm_offsets: list[Point]
+    ppi_norm_offsets: tuple[Point, ...]
     """Each display's position on the density-normalised canvas, bezels included."""
-    bezel_mms: list[Point]
+    bezel_mms: tuple[Point, ...]
     """Each display's (right, bottom) bezel in millimetres."""
-    user_diagonal_inches: list[float] | None
+    user_diagonal_inches: tuple[float, ...] | None
     """The diagonals the user entered, or None for the detected sizes."""
     use_perspective: bool
     default_perspective: str | None
@@ -107,13 +109,13 @@ def _read_layout(config_dir: Path, key: str) -> _SavedLayout | None:
         return None
     section = config[key]
     try:
-        default_perspective = section.get("def_perspective", "None")
+        default_perspective = section.get("def_perspective", NO_DEFAULT_PERSPECTIVE)
         layout = _SavedLayout(
             ppi_norm_offsets=_str_to_points(section["ppi_norm_offsets"]),
-            bezel_mms=[(round(x, 2), round(y, 2)) for x, y in _str_to_points(section["bezel_mms"])],
+            bezel_mms=tuple((round(x, 2), round(y, 2)) for x, y in _str_to_points(section["bezel_mms"])),
             user_diagonal_inches=_str_to_numbers(section["user_diagonal_inches"]),
             use_perspective=bool(int(section.get("use_perspective", 0))),
-            default_perspective=None if default_perspective == "None" else default_perspective,
+            default_perspective=None if default_perspective == NO_DEFAULT_PERSPECTIVE else default_perspective,
         )
     except (KeyError, ValueError, TypeError) as error:
         message = f"{config_dir / LAYOUTS_FILE}, layout {key}: {error!r}"
@@ -131,7 +133,7 @@ def _write_layout(config_dir: Path, key: str, layout: _SavedLayout) -> None:
         "bezel_mms": _rows_to_str(layout.bezel_mms),
         "user_diagonal_inches": _numbers_to_str(layout.user_diagonal_inches),
         "use_perspective": str(int(layout.use_perspective)),
-        "def_perspective": str(layout.default_perspective),
+        "def_perspective": layout.default_perspective or NO_DEFAULT_PERSPECTIVE,
     }
     logger.info("Saving the layout %s: %s", key, layout)
     _write(path, config)
@@ -172,9 +174,9 @@ def _write_perspectives(config_dir: Path, key: str, perspectives: Sequence[Persp
 
 def _as_saved(layout: Layout) -> _SavedLayout:
     return _SavedLayout(
-        ppi_norm_offsets=list(layout.ppi_norm_offsets),
-        bezel_mms=layout.bezels_in_mm(),
-        user_diagonal_inches=list(layout.user_diagonal_inches) if layout.user_diagonal_inches else None,
+        ppi_norm_offsets=layout.ppi_norm_offsets,
+        bezel_mms=tuple(layout.bezels_in_mm()),
+        user_diagonal_inches=layout.user_diagonal_inches or None,
         use_perspective=layout.use_perspective,
         default_perspective=layout.default_perspective,
     )
@@ -186,11 +188,11 @@ def _with_saved(layout: Layout, saved: _SavedLayout) -> Layout:
     if any(bez < 0 for bez_pair in saved.bezel_mms for bez in bez_pair):
         logger.warning("Ignoring the saved bezels, which can't be negative: %s", saved.bezel_mms)
     else:
-        bezels_mm = tuple(saved.bezel_mms)
-    diagonals = tuple(saved.user_diagonal_inches) if saved.user_diagonal_inches else None
+        bezels_mm = saved.bezel_mms
+    diagonals = saved.user_diagonal_inches or None
     return replace(
         layout,
-        ppi_norm_offsets=tuple(saved.ppi_norm_offsets),
+        ppi_norm_offsets=saved.ppi_norm_offsets,
         bezels_mm=bezels_mm,
         user_diagonal_inches=diagonals,
         use_perspective=saved.use_perspective,
@@ -256,13 +258,13 @@ def _rows_to_str(rows: Sequence[Sequence[float]]) -> str:
     return ";".join(",".join(map(str, row)) for row in rows)
 
 
-def _str_to_numbers(text: str) -> list[float] | None:
+def _str_to_numbers(text: str) -> tuple[float, ...] | None:
     """The ','-separated numbers of ``text``; None for "None"."""
     if text == "None":
         return None
-    return [_number(item) for item in text.split(",")]
+    return tuple(_number(item) for item in text.split(","))
 
 
-def _str_to_points(text: str) -> list[Point]:
+def _str_to_points(text: str) -> tuple[Point, ...]:
     """The ';'-separated (x, y) pairs of ``text``."""
-    return [(x, y) for x, y in _number_rows(text, 2)]
+    return tuple((x, y) for x, y in _number_rows(text, 2))

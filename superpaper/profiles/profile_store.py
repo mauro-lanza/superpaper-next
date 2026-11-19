@@ -126,7 +126,7 @@ class ProfileStore:
         for loaded in inventory.entries:
             kept = previous.get(loaded.profile_id)
             unchanged = kept is not None and kept.path == loaded.path and kept.digest == loaded.digest
-            self._records[loaded.profile_id] = kept if kept is not None and unchanged else loaded
+            self._records[loaded.profile_id] = kept if unchanged else loaded
         return inventory.diagnostics
 
     def save(
@@ -372,24 +372,18 @@ def _selection_to_carry_over(selection_file: Path, source_content: bytes) -> lis
     stored = _read_stored_selection(selection_file)
     if stored is not None:
         return stored or None
-    legacy_lines = [
-        line.partition("=")[2]
-        for line in source_content.decode("utf-8", errors="replace").splitlines()
-        if line.startswith("selected=")
-    ]
-    if not legacy_lines:
-        return None
-    return [path for path in legacy_lines[-1].strip().split(";") if path] or None
+    selected = profile_file.parse(source_content.decode("utf-8")).selected
+    return list(selected) if selected else None
 
 
 def _save_managed_profile(
     paths: AppPaths,
     profile: Profile,
     *,
-    selected: list[str] | None = None,
-    current_profile_id: ProfileId | None = None,
-    expected_source_digest: bytes | None = None,
-    update_active: bool = False,
+    selected: list[str] | None,
+    current_profile_id: ProfileId | None,
+    expected_source_digest: bytes | None,
+    update_active: bool,
 ) -> Path:
     """Create, update, or rename a managed profile and return its path.
 

@@ -25,7 +25,6 @@ class DisplayDetectionError(RuntimeError):
 
     def __init__(self, attempts: int):
         super().__init__(f"Unable to detect any displays after {attempts} attempts.")
-        self.attempts = attempts
 
 
 def detect_layout(config_dir: Path) -> Layout:

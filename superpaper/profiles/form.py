@@ -9,7 +9,6 @@ changed. Saving, deleting, reverting and showing what it describes is superpaper
 import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
-from operator import itemgetter
 from typing import assert_never
 
 from superpaper.geometry.canvas import DisplayArea
@@ -116,7 +115,7 @@ def applied_offsets(applied: bool, fields: Sequence[str]) -> tuple[Offset, ...]:
 
 def applied_spangroups(form: ProfileForm) -> SpanGroups | None:
     """The span groups ``form`` chose; None unless it uses span groups."""
-    return spangroups_of(form.spangroup_choices) if form.spangroups_enabled else None
+    return spangroups_of(form.spangroup_choices) if uses_spangroups(form.span_mode, form.spangroups_enabled) else None
 
 
 def blank_form(layout: Layout) -> ProfileForm:
@@ -220,10 +219,12 @@ def parse_form(form: ProfileForm) -> tuple[Profile, list[str]]:
         pan = (form.pan_pct[0] / 100.0, form.pan_pct[1] / 100.0)
 
     if form.per_target_sources:
-        by_display: dict[str, list[str]] = {}
-        for target, path in sorted(form.sources, key=itemgetter(0)):
-            by_display.setdefault(target, []).append(path)
-        sources = tuple(tuple(paths) for paths in by_display.values())
+        by_target: dict[int, list[str]] = {}
+        for target, path in form.sources:
+            by_target.setdefault(int(target), []).append(path)
+        targets = len(form.spangroup_choices) if form.span_mode == "multi" else len(applied_spangroups(form) or ())
+        count = max(targets, max(by_target, default=-1) + 1)
+        sources = tuple(tuple(by_target.get(target, ())) for target in range(count))
     else:
         sources = (tuple(path for _, path in form.sources),)
 

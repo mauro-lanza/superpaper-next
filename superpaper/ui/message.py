@@ -20,7 +20,7 @@ def show_message_dialog(
     return True
 
 
-def draft_shown(problem):
+def draft_shown(problem: str | None):
     """Finish a draft (Apply, an align test) on the main thread once it is done: end the
     busy cursor it started, and say why it wasn't shown, if it wasn't. The dialog that
     asked for it may be closed by then."""

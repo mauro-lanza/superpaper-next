@@ -39,15 +39,14 @@ def open_source_image(path) -> Image.Image:
         raise SourceImageError(message) from error
     with source:
         width, height = source.size
-        if width * height > MAX_PIXELS:
+        if _is_too_large(source):
             message = (
                 f"The image {path} is too large: {width} x {height} pixels, more than the "
                 f"{MAX_PIXELS // 1_000_000} megapixels Superpaper opens."
             )
             raise SourceImageError(message)
         try:
-            upright = ImageOps.exif_transpose(source)
-            image = upright if upright.mode == "RGB" else upright.convert("RGB")
+            image = _upright_rgb(source)
         except (OSError, ValueError) as error:  # truncated or corrupt image data
             message = f"The image {path} can't be read: {error}"
             raise SourceImageError(message) from error
@@ -83,17 +82,25 @@ def source_icon_image(path, size: tuple[int, int]) -> Image.Image | None:
     """
     try:
         with Image.open(path) as source:
-            if source.width * source.height > MAX_PIXELS:
+            if _is_too_large(source):
                 return None
             source.draft("RGB", size)
-            upright = ImageOps.exif_transpose(source)
-            image = upright if upright.mode == "RGB" else upright.convert("RGB")
+            image = _upright_rgb(source)
     except OSError, ValueError:
         return None
     width, height = image.size
     scale = min(size[0] / width, size[1] / height)
     fitted = (max(1, round(width * scale)), max(1, round(height * scale)))
     return image.resize(fitted, Image.Resampling.BOX)
+
+
+def _is_too_large(source: Image.Image) -> bool:
+    return source.width * source.height > MAX_PIXELS
+
+
+def _upright_rgb(source: Image.Image) -> Image.Image:
+    upright = ImageOps.exif_transpose(source)
+    return upright if upright.mode == "RGB" else upright.convert("RGB")
 
 
 def _downscaled(image: Image.Image) -> Image.Image:

@@ -88,7 +88,6 @@ class TaskBarIcon(wx.adv.TaskBarIcon):
         self._start_profile = start_profile
         self._quit = quit
         self.Bind(wx.adv.EVT_TASKBAR_LEFT_DOWN, self.on_left_down)
-        self.Bind(wx.adv.EVT_TASKBAR_RIGHT_DOWN, self.on_right_down)
         # On Linux, prefer a native StatusNotifierItem tray (works on Wayland);
         # the wx TaskBarIcon renders but is non-interactive on KDE Plasma 6.
         self._sni_tray = None
@@ -159,10 +158,6 @@ class TaskBarIcon(wx.adv.TaskBarIcon):
         logger.info("Tray icon was left-clicked.")
         # Open configuration on left click as fallback
         self._open_editor()
-
-    def on_right_down(self, event):
-        """Handle right click event."""
-        logger.info("Tray icon was right-clicked.")
 
     def open_config(self):
         """Opens Superpaper's config folder."""
