@@ -110,6 +110,13 @@ def with_entered_diagonals(layout: Layout, texts: Sequence[str]) -> Layout | Non
     return None if inches is None else layout.with_diagonals(inches)
 
 
+def arranged_if_resized(before: Layout, after: Layout) -> Layout:
+    """``after``, with its displays arranged afresh only if switching from ``before`` changed their sizes."""
+    if after.ppi_norm_resolutions() == before.ppi_norm_resolutions():
+        return after
+    return after.with_initial_offsets()
+
+
 def with_entered_bezels(layout: Layout, entered: Sequence[tuple[str, str]]) -> Layout | Problems:
     """The layout with the (right, bottom) bezel thicknesses the field texts of each display
     spell, in millimetres; else a message for each text that isn't a valid thickness."""

@@ -128,14 +128,24 @@ def test_invalid_entered_diagonals_change_nothing(layout, texts):
     assert layout_edit.with_entered_diagonals(layout, texts) is None
 
 
-def test_returning_to_detected_sizes_arranges_the_displays_afresh(layout):
-    manual = layout.with_diagonals([20.0, 20.0]).with_offsets([(0, 500), (7, 0)])
+def test_returning_to_detected_sizes_arranges_the_displays_afresh_when_the_sizes_change(layout):
+    manual = layout.with_diagonals([20.0, 30.0]).with_offsets([(0, 500), (7, 0)])
 
-    back = manual.with_detected_sizes().with_initial_offsets()
+    back = layout_edit.arranged_if_resized(manual, manual.with_detected_sizes())
 
-    assert back == layout.with_offsets(back.ppi_norm_offsets)
     assert back.user_diagonal_inches is None
     assert back.ppi_norm_offsets == layout.ppi_norm_offsets
+
+
+def test_switching_between_equal_sizes_keeps_the_arrangement(layout):
+    detected = layout.diagonal_inches()
+    moved = layout.with_offsets([(0, 500), (7, 0)])
+    manual = moved.with_diagonals(detected)
+
+    assert (
+        layout_edit.arranged_if_resized(manual, manual.with_detected_sizes()).ppi_norm_offsets == moved.ppi_norm_offsets
+    )
+    assert layout_edit.arranged_if_resized(moved, manual).ppi_norm_offsets == moved.ppi_norm_offsets
 
 
 def test_reverting_restores_the_saved_settings(layout):
