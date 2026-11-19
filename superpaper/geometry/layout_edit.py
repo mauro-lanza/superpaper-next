@@ -14,7 +14,7 @@ from superpaper.geometry import display_store
 from superpaper.geometry.canvas import Point
 from superpaper.geometry.display_store import SaveFailed
 from superpaper.geometry.displays import Layout
-from superpaper.user_input import Problems, parse_bezel, parse_diagonals
+from superpaper.user_input import Problems, parse_float
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,6 +108,19 @@ def with_entered_diagonals(layout: Layout, texts: Sequence[str]) -> Layout | Non
     """The layout with the diagonals the field ``texts`` spell, or None while they aren't all valid."""
     inches = parse_diagonals(texts)
     return None if inches is None else layout.with_diagonals(inches)
+
+
+def parse_diagonals(texts: Sequence[str]) -> list[float] | None:
+    """The diagonal sizes in inches ``texts`` spell, or None unless every one is a positive number."""
+    entered = [parse_float(text) for text in texts]
+    inches = [inch for inch in entered if inch is not None and inch > 0]
+    return inches if inches and len(inches) == len(entered) else None
+
+
+def parse_bezel(text: str) -> float | None:
+    """The bezel thickness in millimetres ``text`` spells, or None unless it is a non-negative number."""
+    value = parse_float(text)
+    return value if value is not None and value >= 0 else None
 
 
 def arranged_if_resized(before: Layout, after: Layout) -> Layout:

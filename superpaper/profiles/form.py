@@ -19,7 +19,7 @@ from superpaper.profiles.profile_file import Correction, OffsetsCorrection, Prof
 from superpaper.profiles.profile_store import StoredProfile
 from superpaper.profiles.selection import Selection, SortMode, is_file
 from superpaper.settings import format_hotkey, parse_hotkey
-from superpaper.user_input import Offset, OffsetError, Problems, parse_float, parse_offsets
+from superpaper.user_input import Offset, OffsetError, Problems, parse_float
 
 logger = logging.getLogger(__name__)
 
@@ -111,6 +111,36 @@ def applied_offsets(applied: bool, fields: Sequence[str]) -> tuple[Offset, ...]:
     if not applied:
         return len(fields) * ((0, 0),)
     return parse_offsets(fields)
+
+
+def parse_offsets(fields: Sequence[str]) -> tuple[Offset, ...]:
+    """Each display's "x,y" offset in pixels from its field; an empty field is 0,0.
+
+    Raises OffsetError naming every display whose field can't be read.
+    """
+    offsets = []
+    problems = []
+    for display, text in enumerate(fields):
+        offset = _parse_offset(text)
+        if offset is None:
+            problems.append(f"Manual offset of display {display}: expected whole pixel numbers as x,y, not '{text}'.")
+        else:
+            offsets.append(offset)
+    if problems:
+        raise OffsetError("\n".join(problems))
+    return tuple(offsets)
+
+
+def _parse_offset(text: str) -> Offset | None:
+    if not text.strip():
+        return (0, 0)
+    parts = text.split(",")
+    if len(parts) != 2:
+        return None
+    try:
+        return (int(parts[0]), int(parts[1]))
+    except ValueError:
+        return None
 
 
 def applied_spangroups(form: ProfileForm) -> SpanGroups | None:

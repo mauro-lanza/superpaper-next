@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import pytest
 from PIL import Image
 
-import superpaper.session as session
+import superpaper.wallpaper_change as wallpaper_change
 from superpaper.desktop.process import Result
 from superpaper.desktop.wallpaper import Pieces, Spanned
 from superpaper.geometry.perspective import Default, Disabled, Named, Perspective, Swivel, SwivelAxis, Tilt
@@ -54,21 +54,21 @@ class FakeDesktop:
 @pytest.fixture
 def desktop(monkeypatch):
     fake = FakeDesktop()
-    monkeypatch.setattr(session.desktop, "set_wallpaper", fake.set_wallpaper)
-    monkeypatch.setattr(session.desktop, "takes_pieces", lambda set_command: fake.takes_pieces)
-    monkeypatch.setattr(session.desktop, "keeps_wallpaper", lambda: fake.keeps_wallpaper)
+    monkeypatch.setattr(wallpaper_change.desktop, "set_wallpaper", fake.set_wallpaper)
+    monkeypatch.setattr(wallpaper_change.desktop, "takes_pieces", lambda set_command: fake.takes_pieces)
+    monkeypatch.setattr(wallpaper_change.desktop, "keeps_wallpaper", lambda: fake.keeps_wallpaper)
     return fake
 
 
 def change(name, files, paths, layout):
     """Show the saved profile ``name``'s ``files``, as a change of the running profile does."""
-    return session.show(
+    return wallpaper_change.show(
         settings(name), files, paths, layout=layout, set_command="", profile_id=ProfileId(name), running=name
     )
 
 
 def draft(profile, images, paths, layout):
-    return session.show(profile, images, paths, layout=layout, set_command="")
+    return wallpaper_change.show(profile, images, paths, layout=layout, set_command="")
 
 
 def cached(paths):
@@ -185,13 +185,15 @@ def test_a_render_that_cant_be_kept_isnt_shown(tmp_path, app_paths, display_layo
 
 def test_a_wallpaper_goes_to_the_desktop_and_then_to_the_hook(app_paths, display_layout, desktop, monkeypatch, caplog):
     hooked = []
-    monkeypatch.setattr(session.desktop, "run_hook", lambda *args: hooked.append(args) or Result("python3 is missing"))
+    monkeypatch.setattr(
+        wallpaper_change.desktop, "run_hook", lambda *args: hooked.append(args) or Result("python3 is missing")
+    )
     desktop.answer = Result("the setter failed")
     script = app_paths.config / "run-after-wp-change.py"
     script.touch()
     image = app_paths.cache / "p-a.png"
 
-    taken = session.set_wallpaper(
+    taken = wallpaper_change.set_wallpaper(
         image, ["/a.png", "/b c.png"], layout=display_layout(), paths=app_paths, set_command="setter {image}"
     )
 
@@ -207,7 +209,7 @@ def test_a_desktop_that_takes_pieces_gets_one_per_display(app_paths, display_lay
     image = app_paths.cache / "p-a.png"
     write_image(image)
 
-    assert session.set_wallpaper(image, [], layout=display_layout(TINY_DISPLAYS), paths=app_paths).ok
+    assert wallpaper_change.set_wallpaper(image, [], layout=display_layout(TINY_DISPLAYS), paths=app_paths).ok
 
     pieces = (str(app_paths.cache / "p-a-crop-0.png"), str(app_paths.cache / "p-a-crop-1.png"))
     assert desktop.handed == [Pieces(str(image), pieces)]
@@ -225,7 +227,7 @@ def startup(app_paths, display_layout, desktop):
     main = SimpleNamespace(profile=settings("main"), profile_id=ProfileId("main"))
 
     def restore():
-        return session.show_again(main, app_paths, layout=display_layout(TINY_DISPLAYS), set_command="")
+        return wallpaper_change.show_again(main, app_paths, layout=display_layout(TINY_DISPLAYS), set_command="")
 
     return restore
 
@@ -291,7 +293,7 @@ def test_a_perspective_that_no_longer_exists_isnt_rendered_again_at_startup(
         profile=replace(settings("main", spanmode="advanced"), perspective=perspective), profile_id=ProfileId("main")
     )
 
-    assert session.show_again(main, app_paths, layout=layout, set_command="") is True
+    assert wallpaper_change.show_again(main, app_paths, layout=layout, set_command="") is True
     assert bool(desktop.handed) is rendered_again
 
 

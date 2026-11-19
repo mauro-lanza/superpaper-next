@@ -5,10 +5,11 @@ import logging
 import wx  # ty:ignore[unresolved-import]
 
 from superpaper.geometry import canvas, layout_edit
+from superpaper.geometry.layout_edit import parse_bezel
 from superpaper.paths import resource
 from superpaper.ui.message import show_message_dialog
 from superpaper.ui.positions_dialog import DisplayPositionEntry
-from superpaper.user_input import Problems, parse_bezel
+from superpaper.user_input import Problems
 
 logger = logging.getLogger(__name__)
 

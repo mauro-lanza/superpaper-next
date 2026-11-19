@@ -17,9 +17,9 @@ from superpaper.geometry.perspective import Named
 from superpaper.paths import AppPaths, ensure_dirs
 from superpaper.profiles import profile_file, profile_store
 from superpaper.profiles.profile_id import ProfileId, ProfileIdError
-from superpaper.session import show
 from superpaper.settings import SETTINGS_FILE, read_settings, write_settings
 from superpaper.user_input import Offset, OffsetError
+from superpaper.wallpaper_change import show
 
 logger = logging.getLogger(__name__)
 _PACKAGE_LOGGER = logging.getLogger("superpaper")

@@ -12,7 +12,8 @@ from pathlib import Path
 from superpaper.geometry import canvas, display_store
 from superpaper.geometry.display_store import SaveFailed
 from superpaper.geometry.displays import Layout
-from superpaper.geometry.perspective import Perspective, Swivel, SwivelAxis, Tilt, mm_to_pixels, pixels_to_mm
+from superpaper.geometry.perspective import Perspective, Swivel, SwivelAxis, Tilt
+from superpaper.geometry.units import mm_to_pixels, pixels_to_mm
 from superpaper.user_input import Offset, Problems, parse_float
 
 # "default" and "disabled" clash with the editor's perspective choices.

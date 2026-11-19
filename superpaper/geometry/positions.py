@@ -5,7 +5,7 @@ from collections.abc import Sequence
 from superpaper.geometry import canvas
 from superpaper.geometry.canvas import Point
 from superpaper.geometry.displays import Layout
-from superpaper.geometry.perspective import mm_to_pixels, pixels_to_mm
+from superpaper.geometry.units import mm_to_pixels, pixels_to_mm
 from superpaper.user_input import parse_float
 
 Edges = tuple[float, float, float, float]
