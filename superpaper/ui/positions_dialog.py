@@ -1,5 +1,7 @@
 """Entering display positions exactly, in millimetres or pixels."""
 
+from collections.abc import Callable
+
 import wx  # ty:ignore[unresolved-import]
 
 from superpaper.geometry import positions
@@ -11,7 +13,14 @@ from superpaper.ui.message import show_message_dialog
 class DisplayPositionEntry(wx.Frame):
     """Display position fine control dialog."""
 
-    def __init__(self, preview, layout_editor, dragged_positions=False):
+    def __init__(
+        self,
+        preview,
+        *,
+        set_save_cancel_enabled: Callable[[bool], None],
+        create_shapes: Callable[[], None],
+        on_applied: Callable[[], None],
+    ):
         wx.Frame.__init__(self, preview.GetParent(), -1, "Enter display positions")
         self.ToggleWindowStyle(wx.STAY_ON_TOP)
         self.SetIcon(wx.Icon(str(resource("superpaper.png")), wx.BITMAP_TYPE_PNG))
@@ -19,12 +28,11 @@ class DisplayPositionEntry(wx.Frame):
 
         self.tc_width = 100
         self.preview = preview
-        self.layout_editor = layout_editor
-        self.layout_editor.button_save.Disable()
-        self.layout_editor.button_cancel.Disable()
+        self._set_save_cancel_enabled = set_save_cancel_enabled
+        self._create_shapes = create_shapes
+        self._on_applied = on_applied
+        self._set_save_cancel_enabled(False)
         self.staged = preview.staged
-        if dragged_positions:
-            self.staged.layout = self.layout_editor.dragged_layout(self.staged.layout)  # use dragged offsets first
         self.offsets_on_open = self.staged.layout.ppi_norm_offsets
 
         self.help_bmp = wx.ArtProvider.GetBitmap(wx.ART_QUESTION, wx.ART_BUTTON, wx.Size(20, 20))
@@ -165,7 +173,7 @@ class DisplayPositionEntry(wx.Frame):
         """Redraw the preview and shapes from the staged layout."""
         self.preview.display_data = self.staged.layout.ppi_norm_areas()
         self.preview.refresh_preview(use_ppi_px=True)
-        self.layout_editor.create_shapes()
+        self._create_shapes()
         self.preview.GetParent().Refresh()
 
     def onPreview(self, event):
@@ -176,9 +184,8 @@ class DisplayPositionEntry(wx.Frame):
         """Apply display positions and close dialog."""
         res = self.update_offsets_and_redraw()
         if res:
-            self.layout_editor.button_save.Enable()
-            self.layout_editor.button_cancel.Enable()
-            self.layout_editor.positions_dragged = False
+            self._set_save_cancel_enabled(True)
+            self._on_applied()
             self.Destroy()
 
     def onCancel(self, event):
@@ -187,8 +194,7 @@ class DisplayPositionEntry(wx.Frame):
         self.staged.layout = self.staged.layout.with_offsets(self.offsets_on_open)
         self._redraw()
         # close dialog
-        self.layout_editor.button_save.Enable()
-        self.layout_editor.button_cancel.Enable()
+        self._set_save_cancel_enabled(True)
         self.Destroy()
 
     def onHelpExactPositions(self, evt):

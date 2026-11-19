@@ -12,8 +12,15 @@ from superpaper.geometry import canvas, layout_edit
 from superpaper.geometry.displays import Layout
 from superpaper.geometry.perspective import Default, Disabled, choice_label, parse_choice
 from superpaper.paths import resource
-from superpaper.profile_actions import delete_profile, revert_profile, save_profile, saved_profile, show_draft
-from superpaper.profiles import form, profile_file
+from superpaper.profile_actions import (
+    align_test_profile,
+    delete_profile,
+    revert_profile,
+    save_profile,
+    saved_profile,
+    show_draft,
+)
+from superpaper.profiles import form
 from superpaper.profiles.form import parse_offsets
 from superpaper.profiles.profile_file import SPAN_MODES, SpanMode
 from superpaper.profiles.profile_id import NEW_PROFILE_LABEL
@@ -1118,7 +1125,7 @@ class WallpaperSettingsPanel(wx.Panel):
         wx.BeginBusyCursor()
         # With the saved display settings, detected again before the draft is rendered.
         self.refresh_displays()
-        profile = profile_file.draft(testimage, spanmode="advanced", perspective=perspective, offsets=offsets)
+        profile = align_test_profile(testimage[0], perspective, offsets)
         self.session.apply_draft(profile, testimage, on_done=lambda problem: wx.CallAfter(draft_shown, problem))
 
     def onPerspectives(self, event):
@@ -1127,7 +1134,21 @@ class WallpaperSettingsPanel(wx.Panel):
         if typed_offsets is None:
             return
         applied_offsets = typed_offsets if self.cb_offsets.GetValue() else len(typed_offsets) * ((0, 0),)
-        dlg = PerspectiveConfig(self, applied_offsets, typed_offsets)
+        dlg = PerspectiveConfig(
+            self,
+            applied_offsets,
+            typed_offsets,
+            layout=self.session.layout,
+            staged_layout=lambda: self.staged.layout,
+            paths=self.paths,
+            warn_large_img=self.settings.warn_large_img,
+            browse_default_dir=self.settings.browse_default_dir,
+            adopt_perspectives=self.adopt_perspectives,
+            refresh_displays=self.refresh_displays,
+            show_test_profile=lambda profile, images: self.session.apply_draft(
+                profile, images, on_done=lambda problem: wx.CallAfter(draft_shown, problem)
+            ),
+        )
         dlg.ShowModal()
         dlg.Destroy()
         # Update perspective profile choices

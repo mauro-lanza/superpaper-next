@@ -153,7 +153,22 @@ class LayoutEditor:
 
     def onEntry(self, evt):
         """Opens display positions accurate entry dialog."""
-        DisplayPositionEntry(self.preview, self, dragged_positions=self.positions_dragged)
+        staged = self.preview.staged
+        if self.positions_dragged:
+            staged.layout = self.dragged_layout(staged.layout)
+        DisplayPositionEntry(
+            self.preview,
+            set_save_cancel_enabled=self._set_save_cancel_enabled,
+            create_shapes=self.create_shapes,
+            on_applied=self._clear_positions_dragged,
+        )
+
+    def _set_save_cancel_enabled(self, enable: bool) -> None:
+        self.button_save.Enable(enable)
+        self.button_cancel.Enable(enable)
+
+    def _clear_positions_dragged(self) -> None:
+        self.positions_dragged = False
 
     def onCancel(self, evt):
         """Cancel out of display position config mode."""

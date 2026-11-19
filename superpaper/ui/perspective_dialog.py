@@ -1,19 +1,22 @@
 """Creating, editing, deleting and testing perspectives."""
 
 import os
+from collections.abc import Callable, Sequence
 
 import wx  # ty:ignore[unresolved-import]
 
 from superpaper.geometry import perspective_form
 from superpaper.geometry.display_store import SaveFailed
+from superpaper.geometry.displays import Layout
 from superpaper.geometry.perspective import Named
-from superpaper.paths import resource
-from superpaper.profiles import profile_file
+from superpaper.paths import AppPaths, resource
+from superpaper.profile_actions import align_test_profile
+from superpaper.profiles.profile_file import Profile
 from superpaper.profiles.profile_id import NEW_PROFILE_LABEL
 from superpaper.profiles.selection import real_file
 from superpaper.ui.help import show_help_popup
-from superpaper.ui.message import draft_shown, show_message_dialog
-from superpaper.user_input import Problems
+from superpaper.ui.message import show_message_dialog
+from superpaper.user_input import Offset, Problems
 
 
 class PerspectiveConfig(wx.Dialog):
@@ -25,7 +28,21 @@ class PerspectiveConfig(wx.Dialog):
     applied or not, which the align test uses.
     """
 
-    def __init__(self, parent, offsets, typed_offsets):
+    def __init__(
+        self,
+        parent,
+        offsets: Sequence[Offset],
+        typed_offsets: Sequence[Offset],
+        *,
+        layout: Layout,
+        staged_layout: Callable[[], Layout],
+        paths: AppPaths,
+        warn_large_img: bool,
+        browse_default_dir: str,
+        adopt_perspectives: Callable[[Layout], None],
+        refresh_displays: Callable[[], None],
+        show_test_profile: Callable[[Profile, list[str]], None],
+    ):
         wx.Dialog.__init__(
             self,
             parent,
@@ -33,14 +50,19 @@ class PerspectiveConfig(wx.Dialog):
             "Configure wallpaper perspective rotations",
         )
         self.tc_width = 150
-        self.frame = parent
         self.offsets = offsets
         self.typed_offsets = typed_offsets
-        self.layout = parent.session.layout
+        self.layout = layout
+        self._staged_layout = staged_layout
+        self._config_dir = paths.config
+        self._browse_default_dir = browse_default_dir
+        self._adopt_perspectives = adopt_perspectives
+        self._refresh_displays = refresh_displays
+        self._show_test_profile = show_test_profile
         self._load_choice()
         self.test_image = None
         self.help_bmp = wx.ArtProvider.GetBitmap(wx.ART_QUESTION, wx.ART_BUTTON, wx.Size(20, 20))
-        self.warn_large_img = parent.settings.warn_large_img
+        self.warn_large_img = warn_large_img
 
         sizer_main = wx.BoxSizer(wx.VERTICAL)
 
@@ -281,13 +303,13 @@ class PerspectiveConfig(wx.Dialog):
         """Start from the editor's perspective choice. The geometry the perspectives are
         converted with is the saved layout's, as the session held it when the dialog opened,
         never the editor's unsaved band edits."""
-        self.layout = self.layout.with_perspectives_of(self.frame.staged.layout)
+        self.layout = self.layout.with_perspectives_of(self._staged_layout())
 
     def _save_choice(self, layout):
         """Save the perspective choice of ``layout`` alone, without the editor's unsaved
         layout; the editor and the session then use it. Returns False, with the dialog back
         at the editor's choice, if it could not be saved."""
-        failure = perspective_form.save_choice(self.frame.paths.config, layout)
+        failure = perspective_form.save_choice(self._config_dir, layout)
         if failure is not None:
             self._show_save_failure(failure)
             return False
@@ -296,8 +318,8 @@ class PerspectiveConfig(wx.Dialog):
 
     def _adopt_saved(self, layout):
         self.layout = layout
-        self.frame.adopt_perspectives(self.layout)
-        self.frame.refresh_displays()
+        self._adopt_perspectives(self.layout)
+        self._refresh_displays()
 
     def _show_save_failure(self, failure):
         show_message_dialog(failure.message, "Error")
@@ -333,7 +355,7 @@ class PerspectiveConfig(wx.Dialog):
                 offsets=self.offsets,
                 warn_large=self.warn_large_img,
                 confirmed=confirmed,
-                config_dir=self.frame.paths.config,
+                config_dir=self._config_dir,
             )
 
         result = save(confirmed=False)
@@ -417,11 +439,9 @@ class PerspectiveConfig(wx.Dialog):
         perspective = Named(self.choice_profiles.GetString(self.choice_profiles.GetSelection()))
 
         # The session takes the layout onSave reloaded, then shows the draft.
-        profile = profile_file.draft(
-            testimage, spanmode="advanced", perspective=perspective, offsets=self.typed_offsets
-        )
+        profile = align_test_profile(found, perspective, self.typed_offsets)
         wx.BeginBusyCursor()
-        self.frame.session.apply_draft(profile, testimage, on_done=lambda problem: wx.CallAfter(draft_shown, problem))
+        self._show_test_profile(profile, testimage)
 
     def onChooseTestImage(self, event):
         """Open a file dialog to choose a test image."""
@@ -432,7 +452,7 @@ class PerspectiveConfig(wx.Dialog):
                 "Image files (*.jpg;*.jpeg;*.png;*.bmp;*.gif;*.tiff;*.webp)"
                 "|*.jpg;*.jpeg;*.png;*.bmp;*.gif;*.tiff;*.webp"
             ),
-            defaultDir=self.frame.settings.browse_default_dir,
+            defaultDir=self._browse_default_dir,
             style=wx.FD_OPEN | wx.FD_FILE_MUST_EXIST,
         ) as file_dialog:
             if file_dialog.ShowModal() == wx.ID_CANCEL:
