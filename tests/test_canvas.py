@@ -68,7 +68,7 @@ def test_displays_with_bezels_are_placed_with_their_image_and_bezel_rectangles()
 def test_a_group_of_displays_has_a_canvas_that_holds_them():
     group = [((100, 50), (10, 20)), ((100, 50), (110, 30))]
 
-    assert canvas.group_canvas(group, (5, 5)) == ((195, 55), (15, 25))
+    assert canvas.group_canvas(group) == ((200, 60), (10, 20))
 
 
 def test_the_source_image_of_displays_without_perspective_is_their_canvas():

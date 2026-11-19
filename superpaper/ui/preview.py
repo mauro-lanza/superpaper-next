@@ -241,7 +241,7 @@ class WallpaperPreviewPanel(wx.Panel):
                 # Images and groups can differ in number; the unpaired ones are not shown.
                 for group, img_nm in zip(spangroups, image_list, strict=False):
                     display_rel_sizes = [self.display_rel_sizes[i] for i in group]
-                    canv_sz, canvas_pos = canvas.group_canvas(display_rel_sizes, (0, 0))
+                    canv_sz, canvas_pos = canvas.group_canvas(display_rel_sizes)
                     bmp_clr, _ = self.resize_and_bitmap(img_nm, canv_sz, True)
                     self.show_cropped_displays(
                         bmp_clr,

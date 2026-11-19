@@ -14,6 +14,7 @@ from superpaper.geometry.perspective import Default, Disabled, choice_label, par
 from superpaper.paths import resource
 from superpaper.profile_actions import delete_profile, revert_profile, save_profile, saved_profile, show_draft
 from superpaper.profiles import form, profile_file
+from superpaper.profiles.form import parse_offsets
 from superpaper.profiles.profile_file import SPAN_MODES, SpanMode
 from superpaper.profiles.profile_id import NEW_PROFILE_LABEL
 from superpaper.profiles.selection import first_image, is_file
@@ -23,7 +24,7 @@ from superpaper.ui.help import HelpFrame, image_quality_advice, show_help_popup
 from superpaper.ui.message import draft_shown, show_message_dialog
 from superpaper.ui.perspective_dialog import PerspectiveConfig
 from superpaper.ui.preview import WallpaperPreviewPanel
-from superpaper.user_input import Offset, OffsetError, Problems, parse_offsets
+from superpaper.user_input import Offset, OffsetError, Problems
 
 logger = logging.getLogger(__name__)
 

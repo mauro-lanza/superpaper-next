@@ -4,9 +4,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from superpaper.geometry import canvas, display_detection, positions
+from superpaper.geometry import canvas, display_detection, positions, units
 from superpaper.geometry.canvas import DisplayArea
-from superpaper.user_input import parse_bezel, parse_diagonals
+from superpaper.geometry.layout_edit import parse_bezel, parse_diagonals
 
 MONITORS = [
     SimpleNamespace(x=0, y=0, width=1920, height=1080, width_mm=527, height_mm=296, name="A"),
@@ -22,8 +22,8 @@ def layout(monkeypatch, tmp_path):
 
 def test_units_convert_between_millimetres_and_pixels(layout):
     ppi = layout.max_ppi()
-    assert positions.mm_to_pixels(25.4, ppi) == pytest.approx(ppi)
-    assert positions.pixels_to_mm(ppi, ppi) == pytest.approx(25.4)
+    assert units.mm_to_pixels(25.4, ppi) == pytest.approx(ppi)
+    assert units.pixels_to_mm(ppi, ppi) == pytest.approx(25.4)
 
 
 def test_the_edges_of_each_display_include_the_bezels_at_right_and_bottom(layout):

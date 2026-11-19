@@ -161,13 +161,11 @@ def dragged_offsets(
     return [(x * scaling, y * scaling) for x, y in translate_to_origin(shape_positions)]
 
 
-def group_canvas(
-    sizes_positions: Sequence[tuple[PixelPoint, PixelPoint]], major_canvas_pos: PixelPoint
-) -> tuple[PixelPoint, PixelPoint]:
+def group_canvas(sizes_positions: Sequence[tuple[PixelPoint, PixelPoint]]) -> tuple[PixelPoint, PixelPoint]:
     """The (size, position) of the canvas that holds a group of displays given as (size, position)."""
     pos = (
-        round(min(position[0] for _, position in sizes_positions) + major_canvas_pos[0]),
-        round(min(position[1] for _, position in sizes_positions) + major_canvas_pos[1]),
+        round(min(position[0] for _, position in sizes_positions)),
+        round(min(position[1] for _, position in sizes_positions)),
     )
     size = (
         round(max(size[0] + position[0] for size, position in sizes_positions) - pos[0]),

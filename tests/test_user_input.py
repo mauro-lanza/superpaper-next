@@ -1,6 +1,7 @@
 import pytest
 
-from superpaper.user_input import OffsetError, parse_float, parse_offsets
+from superpaper.profiles.form import parse_offsets
+from superpaper.user_input import OffsetError, parse_float
 
 
 def test_offsets_are_read_from_x_comma_y_fields():
