@@ -52,6 +52,9 @@ class DisplayBand(wx.CollapsiblePane):
         # The settings as last saved or loaded: Save and Revert are enabled only while
         # the staged layout differs from them.
         self._clean = None
+        # The field texts typed before manual sizes were unchecked, for checking them again;
+        # forgotten whenever the settings are saved or reverted.
+        self._typed_diagonals = None
         self._reverting = False
         self.Bind(wx.EVT_COLLAPSIBLEPANE_CHANGED, self.onToggle)
         pane = self.GetPane()
@@ -155,6 +158,7 @@ class DisplayBand(wx.CollapsiblePane):
     def set_baseline(self):
         """Record the current display-wide settings as the saved, clean baseline."""
         self._clean = self.staged.layout.settings()
+        self._typed_diagonals = None
         self.button_system_save.Enable(False)
         self.button_system_revert.Enable(False)
 
@@ -198,6 +202,7 @@ class DisplayBand(wx.CollapsiblePane):
             return
         self._reverting = True
         self._restore(self._clean)
+        self._typed_diagonals = None
         self._show_diagonals()
         self._reverting = False
         self.update_dirty()
@@ -208,22 +213,29 @@ class DisplayBand(wx.CollapsiblePane):
     def onCheckboxDiaginch(self, event):
         """Toggle manual display sizes. Changes are staged, not saved to disk.
 
-        Checking enables the inch fields and applies their current values to the
-        preview; unchecking returns to auto-detected sizes. Either way the change
-        is only persisted when the band's Save is pressed.
+        Unchecking shows the auto-detected sizes and remembers the typed ones; checking
+        brings them back. Displays are only arranged afresh when the sizes change. Either
+        way the change is only persisted when the band's Save is pressed.
         """
         cb_state = self.cb_diaginch.GetValue()
         for tc in self.tc_list_diaginch:
             tc.Enable(cb_state)
+        before = self.staged.layout
         if cb_state:
-            # Apply the current field values (if valid) so the preview updates.
-            self._on_diagonal_changed(None)
+            if self._typed_diagonals is not None:
+                for tc, text in zip(self.tc_list_diaginch, self._typed_diagonals, strict=True):
+                    tc.ChangeValue(text)
+            after = layout_edit.with_entered_diagonals(before, [tc.GetValue() for tc in self.tc_list_diaginch])
+            if after is None:
+                self.update_dirty()
+                return
         else:
-            # Back to auto-detected sizes (staged only), with the displays arranged afresh.
-            self.staged.layout = self.staged.layout.with_detected_sizes().with_initial_offsets()
-            self._show_diagonals()
-            self._refresh_preview()
-            self.update_dirty()
+            self._typed_diagonals = [tc.GetValue() for tc in self.tc_list_diaginch]
+            after = before.with_detected_sizes()
+        self.staged.layout = layout_edit.arranged_if_resized(before, after)
+        self._show_diagonals()
+        self._refresh_preview()
+        self.update_dirty()
 
     def enable_diagonals(self, enable):
         """Enable the diagonal-size controls, or disable them while display positions or
