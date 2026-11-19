@@ -105,6 +105,18 @@ def test_a_unit_switch_with_a_non_number_is_reported_and_changes_nothing(gui_env
     assert entry.grid_rows[0][1].GetValue() == "abc"
 
 
+def test_the_positions_dialog_controls_sit_in_a_panel_not_straight_on_the_frame(gui_env, editor):
+    layout_editor = editor.wpprev_pnl.layout_editor
+    layout_editor.onConfigure(None)
+    layout_editor.onEntry(None)
+    (entry,) = [
+        window for window in gui_env.ui.wx.GetTopLevelWindows() if type(window).__name__ == "DisplayPositionEntry"
+    ]
+    assert list(entry.GetChildren()) == [entry.panel]
+    assert entry.panel.HasFlag(gui_env.ui.wx.TAB_TRAVERSAL)
+    assert entry.grid_rows[0][5].GetParent() is entry.panel
+
+
 @pytest.fixture
 def perspective_dialog(gui_env, editor):
     return gui_env.open_perspectives(editor)
