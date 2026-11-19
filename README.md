@@ -85,7 +85,7 @@ The AppImage will run once you make it executable.
 3. Install Superpaper with its Linux extras: `pip install -e '.[gui,linux]'`
 4. Run: `python -m superpaper`
 
-For other installation options see: [installing on linux](./docs/installation-linux.md). To run the GUI tests, see [running GUI tests](./docs/development-gui-tests.md).
+For other installation options see: [installing on linux](./docs/installation-linux.md). To set up a development environment, see [development-linux](./docs/development-linux.md). To run the GUI tests, see [running GUI tests](./docs/development-gui-tests.md).
 
 ### Windows 10 & 11
 
