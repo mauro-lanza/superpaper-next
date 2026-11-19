@@ -1,6 +1,8 @@
 """Which images a profile shows now and which come next: the order, the selection, and
 when the sources are listed."""
 
+from pathlib import Path
+
 import pytest
 
 from superpaper.profiles import selection
@@ -209,14 +211,22 @@ def test_advancing_replaces_a_duplicate_selection(tmp_path, remembered):
 
 
 @pytest.mark.parametrize("sortmode", ["shuffle", "date_seeded_shuffle", "alphabetical"])
-def test_identities_stay_aligned_with_their_files_when_arranged(sortmode):
-    original = [f"/photos/{name}.png" for name in "abcdefgh"]
-    image_list = selection._ImageList(list(original), [f"id-{path}" for path in original], sortmode)
+def test_two_positions_never_show_the_same_file_while_there_are_others_however_the_order_is_arranged(
+    tmp_path, sortmode
+):
+    originals = tmp_path / "originals"
+    links = tmp_path / "links"
+    originals.mkdir()
+    links.mkdir()
+    for name in "abcdefgh":
+        original = originals / f"{name}.png"
+        original.touch()
+        (links / f"{name}.png").symlink_to(original)
+    images = Selection([[str(originals)], [str(links)]], sortmode, 2)
 
-    image_list.arrange()
-
-    assert sorted(image_list.files) == original
-    assert image_list.identities == [f"id-{path}" for path in image_list.files]
+    for _ in range(24):
+        first, second = images.advance()
+        assert Path(first).resolve() != Path(second).resolve()
 
 
 @pytest.mark.parametrize(("name", "supported"), [("photo.JPG", True), ("photo.webp", True), ("notes.txt", False)])

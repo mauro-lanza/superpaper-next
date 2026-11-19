@@ -4,7 +4,7 @@ from dataclasses import replace
 
 import wx  # ty:ignore[unresolved-import]
 
-from superpaper.settings import format_hotkey, parse_hotkey
+from superpaper.hotkey_keys import format_hotkey, parse_hotkey
 
 
 class SettingsFrame(wx.Frame):

@@ -3,9 +3,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from superpaper.profiles import profile_store
 from superpaper.profiles.form import spangroups_of
 from superpaper.profiles.profile_id import ProfileId
+from superpaper.profiles.profile_store import ProfileStore
 
 
 def slideshow_armed(superpaper):
@@ -42,10 +42,12 @@ def test_apply_renders_a_draft_and_leaves_the_running_render_alone(gui_env, runn
 @pytest.fixture
 def applied_then_saved(gui_env, running_work, editor):
     gui_env.shown()
+    assert "selected=" not in gui_env.profile_file("Work").read_text(encoding="utf-8")
     editor.onApply(None)
     gui_env.settle(running_work)
-    cache = gui_env.paths.cache
-    stored = profile_store._read_stored_selection(profile_store._selection_path(cache, ProfileId("Work")))
+    store = ProfileStore(gui_env.paths)
+    store.reload()
+    stored = store.get(ProfileId("Work")).selection.images
     editor.tc_sshow_delay.SetValue("15")
     editor.onSave(None)
     gui_env.settle(running_work)

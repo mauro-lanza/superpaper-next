@@ -21,7 +21,6 @@ from superpaper.profiles import profile_file
 from superpaper.profiles.profile_file import Profile
 from superpaper.profiles.profile_id import ManagedPathError, ProfileId, ProfileIdError, collision_key, profile_path
 from superpaper.profiles.selection import Selection
-from superpaper.rendering import render_cache
 
 logger = logging.getLogger(__name__)
 
@@ -154,22 +153,23 @@ class ProfileStore:
             raise ProfileTransactionError(_DESTINATION_WRITE, ValueError(message))
         return stored
 
-    def sweep(self) -> None:
-        """Forget the renders and selections of profiles whose files are gone, whether or
-        not the files still load. Does nothing if the profiles directory can't be read."""
+    def sweep(self) -> list[ProfileId] | None:
+        """Forget the selections of profiles whose files are gone, whether or not the files
+        still load; returns the ids whose files are there, for the caller to keep their
+        other state. Does nothing and returns None if the profiles directory can't be read."""
         try:
             stems = [path.stem for path in self.paths.profiles.iterdir() if path.suffix == ".profile"]
         except OSError as error:
             logger.warning("Could not list the profiles in %s: %s", self.paths.profiles, error)
-            return
+            return None
         keep = []
         for stem in stems:
             try:
                 keep.append(ProfileId.parse(stem))
             except ProfileIdError:
                 continue
-        render_cache.sweep(self.paths.cache, [profile_id.value for profile_id in keep])
         _sweep_selections(self.paths.cache, keep)
+        return keep
 
     def delete(self, stored: StoredProfile) -> None:
         """Delete a profile and forget what it showed, unless its file changed after it was

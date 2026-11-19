@@ -176,6 +176,14 @@ class Session:
         if not self._post(draft) and on_done is not None:
             on_done("Superpaper is quitting.")
 
+    def wait_until_handled(self, timeout: float) -> bool:
+        """Wait up to ``timeout`` seconds until every request made so far is handled, and a
+        slideshow change that is due has run; whether it was."""
+        handled = threading.Event()
+        self._post(lambda: None)  # the worker looks for a due change after each request
+        self._post(handled.set)
+        return handled.wait(timeout)
+
     def shutdown(self, timeout: float = SHUTDOWN_TIMEOUT) -> None:
         """Stop: requests not handled yet are dropped, and later ones refused. Waits up to
         ``timeout`` seconds for a change under way; one that takes longer is abandoned."""

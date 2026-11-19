@@ -9,8 +9,9 @@ from collections.abc import Callable, Iterable, Sequence
 from typing import Any, Protocol
 
 from superpaper.desktop.linux import running_kde
+from superpaper.hotkey_keys import format_hotkey
 from superpaper.profiles.profile_id import ProfileId
-from superpaper.settings import Settings, format_hotkey
+from superpaper.settings import Settings
 
 logger = logging.getLogger(__name__)
 

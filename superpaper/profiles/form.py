@@ -14,11 +14,11 @@ from typing import assert_never
 from superpaper.geometry.canvas import DisplayArea
 from superpaper.geometry.displays import Layout
 from superpaper.geometry.perspective import Default, PerspectiveChoice
+from superpaper.hotkey_keys import format_hotkey, parse_hotkey
 from superpaper.profiles import profile_file
 from superpaper.profiles.profile_file import Correction, OffsetsCorrection, Profile, SpanMode
 from superpaper.profiles.profile_store import StoredProfile
 from superpaper.profiles.selection import Selection, SortMode, is_file
-from superpaper.settings import format_hotkey, parse_hotkey
 from superpaper.user_input import Offset, OffsetError, Problems, parse_float
 
 logger = logging.getLogger(__name__)
