@@ -3,7 +3,7 @@
 import ast
 from pathlib import Path
 
-UI = Path(__file__).parent.parent / "superpaper" / "ui"
+UI = Path(__file__).parents[2] / "superpaper" / "ui"
 
 BANNED_MODULES = {"subprocess", "threading", "shutil", "tempfile", "glob", "pathlib", "io"}
 BANNED_OS = {

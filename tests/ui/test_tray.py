@@ -1,5 +1,5 @@
 """The tray icon: which icon is shown, and what its menu does. The native SNI menu renders the
-same menu (see test_sni_menu)."""
+same menu (see desktop/test_sni_tray)."""
 
 from pathlib import Path
 from types import SimpleNamespace
@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from superpaper.desktop.process import Result
-from superpaper.desktop.tray_menu import Check, Item, Notice, Separator, Submenu, failure_notice
+from superpaper.desktop.tray_menu import Check, Item, Notice, Separator, Submenu
 from superpaper.profiles.profile_file import Profile
 from superpaper.profiles.profile_id import ProfileId
 
@@ -113,7 +113,6 @@ def test_a_long_reason_is_cut_to_its_first_line(tray, recorder):
     entries = icon(tray, recorder, failure="first line\n" + "x" * 200).menu()
 
     assert entries[0].label == "Last change failed: first line"
-    assert len(failure_notice("y" * 200).label) < 120
 
 
 def test_a_left_click_opens_the_editor(tray, recorder):

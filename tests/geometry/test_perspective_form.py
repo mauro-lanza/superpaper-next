@@ -1,5 +1,6 @@
 """Saving a perspective from the dialog's fields."""
 
+import re
 from dataclasses import astuple
 
 import pytest
@@ -12,7 +13,11 @@ from superpaper.geometry.perspective_form import (
     PerspectiveForm,
     Saved,
     blank_form,
+    check_new_perspective_name,
     form_from,
+    parse_rotations_mm,
+    parse_viewer_offsets_mm,
+    perspective_from_mm,
     save_choice,
     save_perspective,
 )
@@ -187,3 +192,90 @@ def test_showing_a_perspective_and_saving_it_again_gives_the_same_perspective(la
 
     assert isinstance(result, Saved)
     assert flatten(result.layout.perspective("desk")) == pytest.approx(flatten(stored))
+
+
+@pytest.mark.parametrize("name", ["default", "DEFAULT", "Default", "disabled", "Disabled", "None", "none", "NONE"])
+def test_reserved_perspective_names_are_rejected(name):
+    with pytest.raises(ValueError, match="reserved"):
+        check_new_perspective_name(name)
+
+
+@pytest.mark.parametrize("name", ["desk", "defaults", "none of them", "My default"])
+def test_other_perspective_names_are_accepted(name):
+    check_new_perspective_name(name)
+
+
+def test_lengths_convert_millimetres_to_pixels_and_keep_angles():
+    perspective = perspective_from_mm(
+        "desk",
+        163.0,
+        1,
+        [0.0, -30.5, 500.0],
+        [(SwivelAxis.LEFT, 12.0, 7.25, -3.0)],
+        [(-4.5, 12.0, 40.0)],
+    )
+
+    assert perspective.viewer_pos == pytest.approx((0.0, -195.72834645669292, 3208.6614173228345))
+    assert perspective == Perspective(
+        "desk",
+        1,
+        perspective.viewer_pos,
+        (Swivel(SwivelAxis.LEFT, 12.0, 46.525590551181104, -19.251968503937007),),
+        (Tilt(-4.5, 77.00787401574803, 256.6929133858268),),
+    )
+
+
+def test_no_displays_rows_give_empty_swivels_and_tilts():
+    perspective = perspective_from_mm("desk", 96.0, 0, [0.0, 0.0, 1.0], [], [])
+
+    assert (perspective.swivels, perspective.tilts) == ((), ())
+
+
+def test_the_grid_cells_become_swivels_and_tilts_per_display():
+    swivels, tilts = parse_rotations_mm(
+        [1, 0],
+        [["10", "1.5", "-2", "-4.5", "12", "40"], ["0", "0", "0", "0", "0", "0"]],
+    )
+
+    assert swivels == [(SwivelAxis.LEFT, 10.0, 1.5, -2.0), (SwivelAxis.NONE, 0.0, 0.0, 0.0)]
+    assert tilts == [(-4.5, 12.0, 40.0), (0.0, 0.0, 0.0)]
+
+
+def test_a_grid_without_displays_gives_nothing():
+    assert parse_rotations_mm([], []) == ([], [])
+
+
+@pytest.mark.parametrize(
+    ("column", "name"),
+    [
+        (0, "Swivel angle"),
+        (1, "Sw. ax. lat. off."),
+        (2, "Sw. ax. dep. off."),
+        (3, "Tilt angle"),
+        (4, "Ti. ax. ver. off."),
+        (5, "Ti. ax. dep. off."),
+    ],
+)
+def test_a_grid_cell_that_is_not_a_number_is_named_by_display_and_column(column, name):
+    row = ["0"] * 6
+    row[column] = "1,5"
+
+    with pytest.raises(ValueError, match=rf"Display 1, '{re.escape(name)}': '1,5' is not a number") as error:
+        parse_rotations_mm([0, 0], [["0"] * 6, row])
+
+    assert "separate decimals with a point" in str(error.value)
+
+
+def test_viewer_offsets_are_read_in_millimetres():
+    assert parse_viewer_offsets_mm(["0", "-30.5", "500"]) == [0.0, -30.5, 500.0]
+
+
+def test_a_viewer_offset_that_is_not_a_number_is_an_error():
+    with pytest.raises(ValueError, match="lengths in millimetres"):
+        parse_viewer_offsets_mm(["0", "x", "500"])
+
+
+@pytest.mark.parametrize("distance", ["0", "-1"])
+def test_the_viewer_distance_must_be_positive(distance):
+    with pytest.raises(ValueError, match="Viewer distance must be entered and positive"):
+        parse_viewer_offsets_mm(["0", "0", distance])

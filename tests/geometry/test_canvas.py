@@ -103,3 +103,19 @@ def test_a_swivelled_display_needs_a_larger_source_image_with_perspective():
 def test_a_perspective_canvas_over_12000_pixels_on_a_side_is_too_large(size, too_large):
     assert canvas.MAX_PERSPECTIVE_CANVAS == 12000
     assert canvas.exceeds_perspective_limit(size) is too_large
+
+
+AREAS = [DisplayArea((1000, 500), (0, 0), (0, 0)), DisplayArea((1000, 500), (1000, 0), (0, 0))]
+
+
+def test_dragged_displays_scale_up_to_the_true_canvas_and_anchor_at_the_origin():
+    offsets = canvas.dragged_offsets([(110, 60), (210, 60)], AREAS, 200)
+
+    assert offsets == [(0, 0), (1000, 0)]
+
+
+def test_resetting_places_the_displays_as_they_are_drawn_in_the_panel():
+    _, canvas_pos, scale = canvas.fit_to_panel(canvas.desktop_extent_with_bezels(AREAS), (500, 400))
+    expected = [display.position for display in canvas.place_displays_with_bezels(AREAS, canvas_pos, scale)]
+
+    assert canvas.initial_shape_positions(AREAS, (500, 400)) == expected
