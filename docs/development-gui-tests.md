@@ -2,7 +2,8 @@
 
 The tests in `tests/gui` drive the real wx windows (tray application, editor, dialogs,
 hotkey bindings) on a display. They carry the `gui` marker and are deselected by default, so
-`uv run pytest` and CI don't need wxPython.
+`uv run pytest` doesn't need wxPython. CI runs them in a separate `gui` job under `xvfb-run`
+with the wxPython wheel from the wxPython extras index.
 
 ```sh
 uv run pytest -m gui

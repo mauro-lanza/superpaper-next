@@ -66,6 +66,7 @@ dev = [
     "ty>=0.0.58",
     "pre-commit>=4.6.0",
     "pytest>=9.0.2",
+    "pytest-cov>=7.1.0",
 ]
 build = [
     "pyinstaller==6.21.0",
@@ -76,6 +77,14 @@ testpaths = ["tests"]
 xfail_strict = true
 addopts = ["--strict-markers", "--strict-config", "-m", "not gui"]
 markers = ["gui: drives real wx windows on a display; run with `pytest -m gui` (needs wxPython)"]
+
+[tool.coverage.run]
+source = ["superpaper"]
+omit = ["superpaper/ui/*", "superpaper/__main__.py"]
+
+[tool.coverage.report]
+fail_under = 84
+skip_empty = true
 
 [tool.ruff]
 target-version = "py314"
