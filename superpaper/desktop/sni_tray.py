@@ -1,24 +1,11 @@
-"""Native StatusNotifierItem (SNI) system tray for Linux desktops.
+"""Native StatusNotifierItem (SNI) system tray for Linux.
 
-wxPython's ``wx.adv.TaskBarIcon`` is a legacy X11 ``GtkStatusIcon``. On modern
-Wayland desktops (notably KDE Plasma 6) there is no X11 systray, only the
-StatusNotifierItem (SNI) D-Bus protocol. ``xembedsniproxy`` bridges the *rendering*
-of the legacy icon, but it does not deliver click/activation events back to the
-wx icon, so the wx tray icon is visible yet completely non-interactive.
-
-This module talks the SNI protocol directly over D-Bus (via ``dbus-python``),
-exporting both an ``org.kde.StatusNotifierItem`` object and the
-``com.canonical.dbusmenu`` context menu. Incoming D-Bus calls are dispatched
-through the GUI toolkit's GLib main loop (``DBusGMainLoop`` set as the default by
-the application), and menu actions are handed on to the GUI's main loop with
-``call_soon``, so they may touch the GUI directly.
-
-It is intentionally self-contained and Linux-only; Windows and macOS keep using
-the toolkit's own tray icon.
+wx's ``TaskBarIcon`` is a legacy X11 status icon: on Wayland desktops such as KDE Plasma 6
+the proxy that draws it never delivers clicks back, so the icon is dead. Talking SNI and
+dbusmenu over D-Bus directly keeps the tray interactive; actions run through ``call_soon``.
 """
 
 import logging
-import os
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from itertools import count
@@ -50,7 +37,7 @@ NOTICE_ID = 1_000_000
 NOTICE_SEPARATOR_ID = 1_000_001
 
 
-def sni_supported():
+def sni_supported() -> bool:
     """Return True if a StatusNotifierWatcher is available on the session bus."""
     if dbus is None:
         return False
@@ -62,35 +49,30 @@ def sni_supported():
         return False
 
 
-def load_argb32(path) -> tuple[int, int, bytes] | None:
-    """The PNG at ``path`` as (width, height, ARGB32 bytes, big-endian), or None if it can't be read."""
-    if not path or not os.path.isfile(path):
-        return None
+def _load_icon_pixmap(path: str) -> list[tuple[int, int, Any]]:
+    """The PNG at ``path`` as a one-entry SNI IconPixmap (width, height, big-endian ARGB32); empty if unreadable."""
     try:
         with Image.open(path) as img:
             rgba = img.convert("RGBA")
     except (OSError, ValueError) as error:
         logger.info("Failed to load the icon %s: %s", path, error)
-        return None
+        return []
     raw = rgba.tobytes("raw", "RGBA")
     argb = bytearray(len(raw))
     argb[0::4] = raw[3::4]
     argb[1::4] = raw[0::4]
     argb[2::4] = raw[1::4]
     argb[3::4] = raw[2::4]
-    return (*rgba.size, bytes(argb))
+    return [(*rgba.size, dbus.ByteArray(bytes(argb)))]
 
 
-def _load_icon_pixmap(path):
-    """Load a PNG into the SNI IconPixmap format: (width, height, ARGB32 big-endian).
-
-    Returns a list with a single pixmap entry, or an empty list on failure.
-    """
-    pixmap = load_argb32(path)
-    if pixmap is None:
-        return []
-    width, height, argb = pixmap
-    return [(width, height, dbus.ByteArray(argb))]
+def _variant(key: str, value: str | int | bool) -> Any:
+    """A dbusmenu property value typed as the spec has it: booleans, the toggle state as int32, else strings."""
+    if isinstance(value, bool):
+        return dbus.Boolean(value)
+    if key == "toggle-state":
+        return dbus.Int32(value)
+    return dbus.String(value)
 
 
 def _run_action(action: Callable[[], None]) -> None:
@@ -114,10 +96,7 @@ def _item_node(item: Item) -> _Node:
 
 
 class _MenuModel:
-    """Builds the dbusmenu layout from the tray's menu and dispatches activations.
-
-    It is rebuilt on demand so the profile list and pause state are always current.
-    """
+    """Builds the dbusmenu layout from the tray's menu and dispatches activations."""
 
     def __init__(self, menu: Callable[[], tuple[MenuEntry, ...]], call_soon: Callable[[Callable[[], None]], None]):
         self._menu = menu
@@ -220,10 +199,7 @@ if dbus is not None:
             for key, value in props.items():
                 if property_names and key not in property_names:
                     continue
-                if key == "toggle-state":
-                    out[key] = dbus.Int32(value)
-                else:
-                    out[key] = dbus.String(value)
+                out[key] = _variant(key, value)
             return out
 
         def _build_node(self, item_id, recursion_depth, property_names):
@@ -273,8 +249,7 @@ if dbus is not None:
             self.model.rebuild()
             node = self.model.nodes.get(id)
             if node and name in node.props:
-                value = node.props[name]
-                return dbus.Int32(value) if name == "toggle-state" else dbus.String(value)
+                return _variant(name, node.props[name])
             return dbus.String("")
 
         @dbus.service.method(MENU_IFACE, in_signature="isvu", out_signature="")

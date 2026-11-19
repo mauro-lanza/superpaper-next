@@ -9,7 +9,6 @@ from superpaper.profiles.profile_id import (
     ManagedPathError,
     ProfileId,
     ProfileIdError,
-    _assert_managed_leaf,
     profile_path,
 )
 
@@ -158,50 +157,30 @@ def test_profile_path_accepts_relative_root(tmp_path, monkeypatch):
     assert profile_path(root, ProfileId("Work")) == root.resolve() / "Work.profile"
 
 
-def test_managed_leaf_rejects_outside_path(tmp_path):
-    root = tmp_path / "profiles"
-    root.mkdir()
-    outside = tmp_path / "outside.profile"
-
-    with pytest.raises(ManagedPathError, match="not a direct leaf"):
-        _assert_managed_leaf(root, outside, allow_missing=True)
-
-
-@pytest.mark.parametrize("relative", [Path("nested/file.profile"), Path("nested/../file.profile"), Path("..")])
-def test_managed_leaf_rejects_non_direct_or_dot_paths(tmp_path, relative):
-    root = tmp_path / "profiles"
-    root.mkdir()
-
-    with pytest.raises(ManagedPathError, match="not a direct leaf"):
-        _assert_managed_leaf(root, root / relative, allow_missing=True)
-
-
-def test_managed_leaf_accepts_symlinked_profile(tmp_path):
+def test_profile_path_accepts_symlinked_profile(tmp_path):
     root = tmp_path / "profiles"
     root.mkdir()
     dotfile = tmp_path / "dotfiles" / "linked.profile"
     dotfile.parent.mkdir()
     dotfile.write_text("name=linked\n", encoding="utf-8")
-    link = root / "linked.profile"
-    link.symlink_to(dotfile)
+    (root / "linked.profile").symlink_to(dotfile)
 
-    assert _assert_managed_leaf(root, link, allow_missing=False) == link
+    assert profile_path(root, ProfileId("linked"), allow_missing=False) == root.resolve() / "linked.profile"
 
 
-def test_managed_leaf_allow_missing_accepts_missing_or_regular_file(tmp_path):
-    path = tmp_path / "managed.profile"
+def test_profile_path_allow_missing_accepts_missing_or_regular_file(tmp_path):
+    path = tmp_path.resolve() / "managed.profile"
 
-    assert _assert_managed_leaf(tmp_path, path, allow_missing=True) == path
+    assert profile_path(tmp_path, ProfileId("managed")) == path
     path.write_text("profile", encoding="utf-8")
-    assert _assert_managed_leaf(tmp_path, path, allow_missing=True) == path
+    assert profile_path(tmp_path, ProfileId("managed")) == path
 
 
-def test_managed_leaf_allow_missing_rejects_directory(tmp_path):
-    path = tmp_path / "managed.profile"
-    path.mkdir()
+def test_profile_path_allow_missing_rejects_directory(tmp_path):
+    (tmp_path / "managed.profile").mkdir()
 
     with pytest.raises(ManagedPathError, match="must be regular files"):
-        _assert_managed_leaf(tmp_path, path, allow_missing=True)
+        profile_path(tmp_path, ProfileId("managed"))
 
 
 def test_profile_path_requires_existing_regular_file(tmp_path):

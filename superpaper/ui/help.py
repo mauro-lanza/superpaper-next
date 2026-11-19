@@ -130,9 +130,6 @@ class HelpPopup(wx.PopupTransientWindow):
         sizer.Fit(self)
         self.Layout()
 
-    def ProcessLeftDown(self, event):
-        return wx.PopupTransientWindow.ProcessLeftDown(self, event)
-
     def OnDismiss(self):
         self.Destroy()
 

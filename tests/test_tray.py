@@ -133,6 +133,17 @@ def test_a_config_folder_that_cant_be_opened_is_reported(tray, recorder, monkeyp
     assert shown == ["There was an error trying to open the config folder."]
 
 
+def test_the_config_folder_menu_item_opens_the_config_folder(tray, recorder, monkeypatch):
+    opened = []
+    monkeypatch.setattr(tray.desktop, "open_folder", lambda folder: opened.append(folder) or Result())
+    entries = icon(tray, recorder).menu()
+
+    (item,) = (entry for entry in entries if isinstance(entry, Item) and entry.label == "Open Config Folder")
+    item.action()
+
+    assert opened == [CONFIG_DIR]
+
+
 @pytest.mark.parametrize(
     ("supported", "registers", "kde", "native", "clickable"),
     [

@@ -5,19 +5,11 @@ from collections.abc import Sequence
 from superpaper.geometry import canvas
 from superpaper.geometry.canvas import Point
 from superpaper.geometry.displays import Layout
-from superpaper.geometry.perspective import MM_PER_INCH
+from superpaper.geometry.perspective import mm_to_pixels, pixels_to_mm
 from superpaper.user_input import parse_float
 
 Edges = tuple[float, float, float, float]
 """(left, top, right, bottom) of a display, bezels included at right and bottom."""
-
-
-def mm_to_pixels(value: float, max_ppi: float) -> float:
-    return value * (max_ppi / MM_PER_INCH)
-
-
-def pixels_to_mm(value: float, max_ppi: float) -> float:
-    return value * (1 / (max_ppi / MM_PER_INCH))
 
 
 def edges_in_unit(layout: Layout, *, use_px: bool) -> list[Edges]:

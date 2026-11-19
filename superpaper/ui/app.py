@@ -71,7 +71,8 @@ class App(wx.App):
         return True
 
     def InitLocale(self):
-        """Override with nothing (or impliment local if actually needed)"""
+        # Skip wx's locale setup, which Superpaper has no use for.
+        pass
 
 
 def _fail_startup(message: str) -> bool:

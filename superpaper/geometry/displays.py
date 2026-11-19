@@ -12,7 +12,15 @@ from dataclasses import dataclass, replace
 from typing import assert_never
 
 from superpaper.geometry.canvas import Crop, DisplayArea, Point, canvas_size
-from superpaper.geometry.perspective import MM_PER_INCH, Default, Disabled, Named, Perspective, PerspectiveChoice
+from superpaper.geometry.perspective import (
+    MM_PER_INCH,
+    Default,
+    Disabled,
+    Named,
+    Perspective,
+    PerspectiveChoice,
+    mm_to_pixels,
+)
 
 SIZE_HINT = (
     "Detection of the diagonal size of a display has failed. It will show up as a 23 inch "
@@ -144,8 +152,8 @@ class Layout:
         # Unset bezels stay integers, so a fresh layout saves byte-identically.
         if all(bezel == (0, 0) for bezel in self.bezels_mm):
             return [(0, 0)] * len(self.displays)
-        px_per_mm = self.max_ppi() / MM_PER_INCH
-        return [(bezel[0] * px_per_mm, bezel[1] * px_per_mm) for bezel in self.bezels_mm]
+        max_ppi = self.max_ppi()
+        return [(mm_to_pixels(bezel[0], max_ppi), mm_to_pixels(bezel[1], max_ppi)) for bezel in self.bezels_mm]
 
     def ppi_norm_crops(self, manual_offsets: Sequence[Point]) -> list[Crop]:
         """Each display's (left, top, right, bottom) to cut from the density-normalised
@@ -254,7 +262,7 @@ class Layout:
     def settings(self) -> DisplaySettings:
         """What the display settings band edits, rounded as it shows them, to compare or restore."""
         return DisplaySettings(
-            bezels_mm=tuple((round(bezel[0], 2), round(bezel[1], 2)) for bezel in self.bezels_in_mm()),
+            bezels_mm=tuple(self.bezels_in_mm()),
             offsets=self.ppi_norm_offsets,
             use_user_diagonals=self.uses_user_diagonals,
             diagonal_inches=tuple(round(diagonal, 2) for diagonal in self.diagonal_inches()),

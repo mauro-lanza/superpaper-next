@@ -62,11 +62,13 @@ def desktop(monkeypatch):
 
 def change(name, files, paths, layout):
     """Show the saved profile ``name``'s ``files``, as a change of the running profile does."""
-    return session.show(settings(name), files, paths, layout=layout, profile_id=ProfileId(name), running=name)
+    return session.show(
+        settings(name), files, paths, layout=layout, set_command="", profile_id=ProfileId(name), running=name
+    )
 
 
 def draft(profile, images, paths, layout):
-    return session.show(profile, images, paths, layout=layout)
+    return session.show(profile, images, paths, layout=layout, set_command="")
 
 
 def cached(paths):
@@ -223,7 +225,7 @@ def startup(app_paths, display_layout, desktop):
     main = SimpleNamespace(profile=settings("main"), profile_id=ProfileId("main"))
 
     def restore():
-        return session.show_again(main, app_paths, layout=display_layout(TINY_DISPLAYS))
+        return session.show_again(main, app_paths, layout=display_layout(TINY_DISPLAYS), set_command="")
 
     return restore
 
@@ -289,7 +291,7 @@ def test_a_perspective_that_no_longer_exists_isnt_rendered_again_at_startup(
         profile=replace(settings("main", spanmode="advanced"), perspective=perspective), profile_id=ProfileId("main")
     )
 
-    assert session.show_again(main, app_paths, layout=layout) is True
+    assert session.show_again(main, app_paths, layout=layout, set_command="") is True
     assert bool(desktop.handed) is rendered_again
 
 

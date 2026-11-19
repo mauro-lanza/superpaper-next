@@ -338,7 +338,7 @@ def show(
     paths: AppPaths,
     *,
     layout: Layout,
-    set_command: str = "",
+    set_command: str,
     profile_id: ProfileId | None = None,
     running: str | None = None,
 ) -> str | None:
@@ -437,7 +437,7 @@ def set_wallpaper(
     return result
 
 
-def show_again(stored: StoredProfile, paths: AppPaths, *, layout: Layout, set_command="") -> bool:
+def show_again(stored: StoredProfile, paths: AppPaths, *, layout: Layout, set_command: str) -> bool:
     """Show the last wallpaper again at startup, without rendering anything.
 
     That is the last render of the profile ``stored``, or a draft shown after it: the

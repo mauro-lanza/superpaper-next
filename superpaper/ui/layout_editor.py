@@ -64,16 +64,10 @@ class LayoutEditor:
         self.button_cancel.Show(False)
 
     def move_buttons(self):
-        """Position display config buttons in the bottom-right corner.
-
-        Each button is right-aligned using its own width so wider labels such as
-        "Positions" and "Exact entry" stay fully inside the panel. Using
-        ``GetDefaultSize`` here clipped them, as it returns wx's generic button
-        width and ignores the actual label.
-        """
+        """Position the display config buttons in the bottom-right corner, each right-aligned
+        by its own best width: ``GetDefaultSize`` ignores the label and clipped wide ones."""
         sz_area = self.preview.GetSize()
-        self.butt_gap = 10
-        gap = self.butt_gap
+        gap = 10
         row_h = self.button_config.GetBestSize()[1]
         right = sz_area[0] - gap
         bottom_y = sz_area[1] - row_h - gap
@@ -110,7 +104,7 @@ class LayoutEditor:
         self.button_cancel.Show(in_config)
 
     def onConfigure(self, evt):
-        """Start diplay position config mode."""
+        """Start display position config mode."""
         self.state = layout_edit.start_positions(self.state, self.preview.staged.layout)
         self._set_profile_controls_enabled(False)
         self._toggle_bezel_buttons(False, False)
@@ -161,7 +155,7 @@ class LayoutEditor:
         DisplayPositionEntry(self.preview, self, dragged_positions=self.positions_dragged)
 
     def onCancel(self, evt):
-        """Cancel out of diplay position config mode."""
+        """Cancel out of display position config mode."""
         self.bind_movement_binds(False)
         self.toggle_buttons(True, False)
         self.draggable_shapes = []  # Destroys DragShapes
@@ -189,10 +183,7 @@ class LayoutEditor:
 
     def show_staticbmps(self, show):
         """Show/Hide StaticBitmaps."""
-        if self.preview.current_preview_images:
-            self.preview.st_bmp_canvas.Show(show)
-        else:
-            self.preview.st_bmp_canvas.Show(False)
+        self.preview.st_bmp_canvas.Show(show and bool(self.preview.current_preview_images))
         for st_bmp in self.preview.preview_img_list:
             st_bmp.Show(show)
 
@@ -218,8 +209,6 @@ class LayoutEditor:
             self.bmp = bmp
             self.pos: tuple[int, int] = (0, 0)
             self.shown = True
-            self.text = None
-            self.fullscreen = False
 
         def HitTest(self, pt):
             rect = self.GetRect()
@@ -249,7 +238,7 @@ class LayoutEditor:
             else:
                 return False
 
-    def create_shapes(self, enable_movement=True):
+    def create_shapes(self):
         """Create draggable objects from display previews."""
         self.draggable_shapes = []
         self.drag_image = None
@@ -261,8 +250,7 @@ class LayoutEditor:
             self.draggable_shapes.append(shape)
 
         self.preview.Bind(wx.EVT_PAINT, self.preview.OnPaint)
-        if enable_movement:
-            self.bind_movement_binds(True)
+        self.bind_movement_binds(True)
 
     def bind_movement_binds(self, toggle):
         """Bind or unbind DragImage dragging bindings."""
@@ -341,11 +329,10 @@ class LayoutEditor:
             self.preview.RefreshRect(self.drag_shape.GetRect(), True)
             self.preview.Update()
 
-            item = self.drag_shape.text or self.drag_shape.bmp
-            self.drag_image = wx.DragImage(item, wx.Cursor(wx.CURSOR_HAND))
+            self.drag_image = wx.DragImage(self.drag_shape.bmp, wx.Cursor(wx.CURSOR_HAND))
 
             hotspot = self.dragStartPos - self.drag_shape.pos
-            self.drag_image.BeginDrag(hotspot, self.preview, self.drag_shape.fullscreen)
+            self.drag_image.BeginDrag(hotspot, self.preview, False)
 
             self.drag_image.Move(pt)
             self.drag_image.Show()
@@ -432,20 +419,12 @@ class LayoutEditor:
     def create_bezel_popups(self):
         self.bezel_popups = []
         bezel_mm = self.preview.staged.layout.bezels_in_mm()
-        for butts, bez_mm in zip(self.bez_buttons, bezel_mm, strict=True):
-            pop_rb = self.popup_at_button(butts[0])
+        for _butts, bez_mm in zip(self.bez_buttons, bezel_mm, strict=True):
+            pop_rb = self.BezelEntryPopup(self.preview, self)
             pop_rb.set_bezel_value(bez_mm[0])
-            pop_bb = self.popup_at_button(butts[1])
+            pop_bb = self.BezelEntryPopup(self.preview, self)
             pop_bb.set_bezel_value(bez_mm[1])
             self.bezel_popups.append((pop_rb, pop_bb))
-
-    def popup_at_button(self, button):
-        """Initialize a popup at button position."""
-        try:
-            pop = self.BezelEntryPopup(self.preview, wx.SIMPLE_BORDER | wx.PU_CONTAINS_CONTROLS, self)
-        except AttributeError:
-            pop = self.BezelEntryPopup(self.preview, wx.SIMPLE_BORDER, self)
-        return pop
 
     def move_popup_to_button(self, pop, button):
         """Move pop next to its associated button."""
@@ -517,15 +496,15 @@ class LayoutEditor:
     class BezelEntryPopup(wx.PopupTransientWindow):
         """Popup that is shown when a bezel button is pressed in bezel config."""
 
-        def __init__(self, parent, style, layout_editor):
-            wx.PopupWindow.__init__(self, parent, style)
+        def __init__(self, parent, layout_editor):
+            wx.PopupTransientWindow.__init__(self, parent, wx.SIMPLE_BORDER | wx.PU_CONTAINS_CONTROLS)
             self.layout_editor = layout_editor
             pnl = wx.Panel(self)
 
             st = wx.StaticText(pnl, -1, "Enter the size of adjacent bezels and gap\nin millimeters:")
             self.tc_bez = wx.TextCtrl(pnl, -1, size=wx.Size(60, -1), style=wx.TE_RIGHT | wx.TE_PROCESS_ENTER)
             self.tc_bez.Bind(wx.EVT_TEXT_ENTER, self.OnEnter)
-            self.current_bez_val = None
+            self.current_bez_val = "0.0"
             butt_save = wx.Button(pnl, label="Apply")
             butt_canc = wx.Button(pnl, label="Cancel")
             butt_save.Bind(wx.EVT_BUTTON, self.onApply)
@@ -560,15 +539,14 @@ class LayoutEditor:
             entered = [(pair[0].tc_bez.GetValue(), pair[1].tc_bez.GetValue()) for pair in pops]
             result = layout_edit.with_entered_bezels(preview.staged.layout, entered)
             if isinstance(result, Problems):
-                # Abort applying and alert user but don't
-                # Dismiss popup to fascilitate fixing.
+                # Abort applying and alert the user, but keep the popup so the value can be fixed.
                 msg = result.messages[0]
                 logger.info(msg)
                 self.Hide()
                 show_message_dialog(msg, "Error", parent=self)
                 self.Show()
-                return -1
-            self.current_bez_val = self.test_bezel_value()
+                return
+            self.current_bez_val = str(self.test_bezel_value())
             self.Hide()
             # propagate values and refresh preview
             preview.staged.layout = result
@@ -576,10 +554,7 @@ class LayoutEditor:
             preview.full_refresh_preview(True, "advanced")
 
         def onCancel(self, event):
-            if self.current_bez_val:
-                self.tc_bez.SetValue(str(self.current_bez_val))
-            else:
-                self.tc_bez.SetValue("0.0")
+            self.tc_bez.SetValue(self.current_bez_val)
             self.Hide()
 
         def set_bezel_value(self, val):

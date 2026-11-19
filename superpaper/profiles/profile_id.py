@@ -129,21 +129,11 @@ class ManagedPathError(ValueError):
     """A managed profile path escaped its root or is not a regular file."""
 
 
-def _assert_managed_leaf(root: Path, path: Path, *, allow_missing: bool) -> Path:
-    """Validate one leaf directly below root.
-
-    A symlinked leaf is accepted (dotfile managers link profiles into place); reading
-    and writing follow the link. This check cannot stop the leaf from changing
-    before a later filesystem operation, and doesn't try to: the profiles directory
-    belongs to the user running Superpaper.
-    """
-    if path.parent != root or path.name in {"", ".", ".."} or ".." in path.parts:
-        message = f"Managed path is not a direct leaf below profile root: {path}"
-        raise ManagedPathError(message)
-    resolved_root = root.resolve()
-    if path.parent.resolve() != resolved_root:
-        message = f"Managed path escapes profile root: {path}"
-        raise ManagedPathError(message)
+def profile_path(root: Path, profile_id: ProfileId, *, allow_missing: bool = True) -> Path:
+    """The path of a profile's file in ``root``, which must be a regular file if it exists
+    (or must exist, unless ``allow_missing``). A symlinked file is accepted: dotfile managers
+    link profiles into place."""
+    path = root.resolve() / f"{profile_id.value}.profile"
     if allow_missing and path.exists() and not path.is_file():
         message = f"Managed profile paths must be regular files: {path}"
         raise ManagedPathError(message)
@@ -151,10 +141,3 @@ def _assert_managed_leaf(root: Path, path: Path, *, allow_missing: bool) -> Path
         message = f"Managed profile file does not exist: {path}"
         raise ManagedPathError(message)
     return path
-
-
-def profile_path(root: Path, profile_id: ProfileId, *, allow_missing: bool = True) -> Path:
-    """Build a contained profile path for a validated identifier."""
-    resolved_root = root.resolve()
-    candidate = resolved_root / f"{profile_id.value}.profile"
-    return _assert_managed_leaf(resolved_root, candidate, allow_missing=allow_missing)

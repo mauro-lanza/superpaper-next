@@ -620,6 +620,13 @@ def test_missing_image_exits_nonzero(tmp_path, app_paths):
     assert cli.run(["--setimages", str(tmp_path / "missing.png")], app_paths) == 1
 
 
+def test_an_empty_image_name_is_refused(app_paths, caplog):
+    from superpaper import cli
+
+    assert cli.run(["--setimages", ""], app_paths) == 1
+    assert "was empty" in caplog.text
+
+
 @pytest.mark.parametrize(
     ("filename", "content", "named"),
     [

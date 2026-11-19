@@ -12,12 +12,11 @@ from pathlib import Path
 from superpaper.geometry import canvas, display_store
 from superpaper.geometry.display_store import SaveFailed
 from superpaper.geometry.displays import Layout
-from superpaper.geometry.perspective import MM_PER_INCH, Perspective, Swivel, SwivelAxis, Tilt
+from superpaper.geometry.perspective import Perspective, Swivel, SwivelAxis, Tilt, mm_to_pixels, pixels_to_mm
 from superpaper.user_input import Offset, Problems, parse_float
 
-# "none" is display_store's no-default sentinel; "default" and "disabled" clash with the
-# editor's perspective choices.
-_RESERVED_PERSPECTIVE_NAMES = frozenset({"default", "disabled", "none"})
+# "default" and "disabled" clash with the editor's perspective choices.
+_RESERVED_PERSPECTIVE_NAMES = frozenset({"default", "disabled", display_store.NO_DEFAULT_PERSPECTIVE.casefold()})
 ROTATION_CELL_NAMES = (
     "Swivel angle",
     "Sw. ax. lat. off.",
@@ -74,17 +73,17 @@ def blank_form(layout: Layout) -> PerspectiveForm:
 
 def form_from(perspective: Perspective, layout: Layout) -> PerspectiveForm:
     """The form that shows ``perspective``, its lengths in millimetres at the densest display of ``layout``."""
-    px_per_mm = layout.max_ppi() / MM_PER_INCH
+    max_ppi = layout.max_ppi()
 
     def mm(pixels: float) -> str:
-        return str(round(pixels / px_per_mm, 1))
+        return str(round(pixels_to_mm(pixels, max_ppi), 1))
 
     return PerspectiveForm(
         name=perspective.name,
         use_perspective=layout.use_perspective,
         is_default=perspective.name == layout.default_perspective,
         central_display=perspective.central_display,
-        viewer_offsets=tuple(str(offset / px_per_mm) for offset in perspective.viewer_pos),
+        viewer_offsets=tuple(mm(offset) for offset in perspective.viewer_pos),
         swivel_axes=tuple(swivel.axis.value for swivel in perspective.swivels),
         rotation_cells=tuple(
             (
@@ -162,7 +161,7 @@ def parse_viewer_offsets_mm(texts: Sequence[str]) -> list[float]:
     numbers = [parse_float(text) for text in texts]
     offsets = [number for number in numbers if number is not None]
     if len(offsets) != len(numbers):
-        message = "Viewer offsets should be lenghts in millimeters, separate decimals with a point."
+        message = "Viewer offsets should be lengths in millimetres, separate decimals with a point."
         raise ValueError(message)
     if offsets[2] <= 0:
         message = "Viewer distance must be entered and positive."
@@ -204,14 +203,16 @@ def perspective_from_mm(
 ) -> Perspective:
     """The perspective for the dialog's lengths in millimetres, converted to pixels at
     ``max_ppi``; angles and axes are kept."""
-    px_per_mm = max_ppi / MM_PER_INCH
-    lateral, vertical, depth = (px_per_mm * length for length in viewer_offset_mm)
+    lateral, vertical, depth = (mm_to_pixels(length, max_ppi) for length in viewer_offset_mm)
     return Perspective(
         name,
         central_display,
         (lateral, vertical, depth),
-        tuple(Swivel(axis, angle, px_per_mm * lat, px_per_mm * dep) for axis, angle, lat, dep in swivels_mm),
-        tuple(Tilt(angle, px_per_mm * ver, px_per_mm * dep) for angle, ver, dep in tilts_mm),
+        tuple(
+            Swivel(axis, angle, mm_to_pixels(lat, max_ppi), mm_to_pixels(dep, max_ppi))
+            for axis, angle, lat, dep in swivels_mm
+        ),
+        tuple(Tilt(angle, mm_to_pixels(ver, max_ppi), mm_to_pixels(dep, max_ppi)) for angle, ver, dep in tilts_mm),
     )
 
 

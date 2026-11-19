@@ -27,7 +27,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-DRAFTS = "preview"
+_DRAFTS = "preview"
 """The cache subdirectory of the drafts."""
 
 # <stem>-<turn>[-crop-<display>].<extension>. No file name can be read two ways, because
@@ -67,7 +67,7 @@ def slot(cache_dir: Path, profile_id_value: str) -> Slot:
 
 def draft_slot(cache_dir: Path) -> Slot:
     """The drafts' renders."""
-    return Slot(cache_dir / DRAFTS, "draft")
+    return Slot(cache_dir / _DRAFTS, "draft")
 
 
 def save(slot: Slot, image: Image.Image, *, platform: str = sys.platform) -> Path:

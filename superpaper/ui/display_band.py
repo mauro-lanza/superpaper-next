@@ -97,21 +97,17 @@ class DisplayBand(wx.CollapsiblePane):
         self.sizer_setting_diaginch.Add(self.cb_diaginch, 0, wx.ALIGN_LEFT | wx.BOTTOM, 5)
         self.sizer_setting_diaginch.Add(self.st_diaginch, 0, wx.ALIGN_LEFT | wx.LEFT, 10)
         layout = self.staged.layout
-        diags = [str(diagonal) for diagonal in layout.diagonal_inches()]
         tc_list_sizer_diag = wx.WrapSizer(wx.HORIZONTAL)
         self.tc_list_diaginch = [
             wx.TextCtrl(parent, -1, size=wx.Size(field_width, -1), style=wx.TE_RIGHT) for _ in layout.displays
         ]
-        use_user_diags = layout.uses_user_diagonals
-        for tc, diag in zip(self.tc_list_diaginch, diags, strict=True):
+        for tc in self.tc_list_diaginch:
             tc_list_sizer_diag.Add(tc, 0, wx.ALIGN_LEFT | wx.ALL, 5)
-            tc.ChangeValue(diag)
-            tc.Enable(use_user_diags)
             # Dedicated handler consumes the event so display-size edits don't
             # reach the profile field handler (these are system-wide settings).
             tc.Bind(wx.EVT_TEXT, self._on_diagonal_changed)
         self.sizer_setting_diaginch.Add(tc_list_sizer_diag, 0, wx.ALIGN_LEFT | wx.LEFT, 5)
-        self.cb_diaginch.SetValue(use_user_diags)
+        self._show_diagonals()
 
     def _build_bezel_controls(self, parent):
         """Build the bezel configuration controls."""
@@ -254,26 +250,20 @@ class DisplayBand(wx.CollapsiblePane):
         """Start bezel size config mode."""
         self._enable_profile_editing(False)
         self._layout_editor.start_bezel_config()
-        self.button_bezels.Disable()
-        self.button_bezels_save.Enable()
-        self.button_bezels_canc.Enable()
+        self.toggle_bezel_buttons(bezel_mode=True, enable_config_butt=False)
 
     def onConfigureBezelsSave(self, event):
         """Exit bezel config mode, staging the new bezel sizes (not saved yet)."""
         self._enable_profile_editing(True)
         self._layout_editor.bezel_config_save()
-        self.button_bezels_save.Disable()
-        self.button_bezels_canc.Disable()
-        self.button_bezels.Enable()
+        self.toggle_bezel_buttons()
         self.update_dirty()
 
     def onConfigureBezelsCanc(self, event):
         """Cancel out of bezel size config mode."""
         self._enable_profile_editing(True)
         self._layout_editor.bezel_config_cancel()
-        self.button_bezels_save.Disable()
-        self.button_bezels_canc.Disable()
-        self.button_bezels.Enable()
+        self.toggle_bezel_buttons()
 
     def onHelpBezels(self, evt):
         """Popup bezel config help."""

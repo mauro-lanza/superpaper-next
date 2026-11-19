@@ -15,7 +15,6 @@ class SettingsFrame(wx.Frame):
         self.frame_sizer = wx.BoxSizer(wx.VERTICAL)
         settings_panel = SettingsPanel(self, get_settings, save_settings)
         self.frame_sizer.Add(settings_panel, 1, wx.EXPAND)
-        self.SetAutoLayout(True)
         self.SetSizer(self.frame_sizer)
         self.Fit()
         self.Layout()
@@ -29,7 +28,6 @@ class SettingsPanel(wx.Panel):
 
     def __init__(self, parent, get_settings, save_settings):
         wx.Panel.__init__(self, parent)
-        self.frame = parent
         self._get_settings = get_settings
         self._save_settings = save_settings
         self.sizer_main = wx.BoxSizer(wx.VERTICAL)
@@ -65,7 +63,13 @@ class SettingsPanel(wx.Panel):
                 (self.tc_setcmd, 0, wx.ALIGN_LEFT),
             ]
         )
-        self.update_fields(get_settings())
+        g_settings = get_settings()
+        self.cb_logging.SetValue(g_settings.logging)
+        self.cb_usehotkeys.SetValue(g_settings.use_hotkeys)
+        self.cb_warn_large.SetValue(g_settings.warn_large_img)
+        self.tc_hk_next.ChangeValue(format_hotkey(g_settings.hk_binding_next))
+        self.tc_hk_pause.ChangeValue(format_hotkey(g_settings.hk_binding_pause))
+        self.tc_setcmd.ChangeValue(g_settings.set_command)
         self.button_save = wx.Button(self, label="Save")
         self.button_close = wx.Button(self, label="Close")
         self.button_save.Bind(wx.EVT_BUTTON, self.onSave)
@@ -77,15 +81,6 @@ class SettingsPanel(wx.Panel):
         self.sizer_main.Add(self.sizer_buttons, 0, wx.EXPAND)
         self.SetSizer(self.sizer_main)
         self.sizer_main.Fit(parent)
-
-    def update_fields(self, g_settings):
-        """Updates dialog field contents."""
-        self.cb_logging.SetValue(g_settings.logging)
-        self.cb_usehotkeys.SetValue(g_settings.use_hotkeys)
-        self.cb_warn_large.SetValue(g_settings.warn_large_img)
-        self.tc_hk_next.ChangeValue(format_hotkey(g_settings.hk_binding_next))
-        self.tc_hk_pause.ChangeValue(format_hotkey(g_settings.hk_binding_pause))
-        self.tc_setcmd.ChangeValue(g_settings.set_command)
 
     def onSave(self, event):
         """Saves settings to file."""
@@ -103,4 +98,4 @@ class SettingsPanel(wx.Panel):
 
     def onClose(self, event):
         """Closes settings panel."""
-        self.frame.Close(True)
+        self.GetParent().Close(True)

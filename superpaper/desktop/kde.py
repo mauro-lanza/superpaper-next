@@ -47,29 +47,11 @@ for(var idx = 0; idx < allDesktops.length; idx++) {
     }
 }
 
-var i = 1;
-while(i < activeDesktops.length) {
-    var j = i;
-    while(j > 0 && screenGeometry(activeDesktops[j-1].screen).top > screenGeometry(activeDesktops[j].screen).top) {
-        var temp = activeDesktops[j];
-        activeDesktops[j] = activeDesktops[j-1];
-        activeDesktops[j-1] = temp;
-        j = j-1;
-    }
-    i = i+1;
-}
-
-i = 1;
-while(i < activeDesktops.length) {
-    var j = i;
-    while(j > 0 && screenGeometry(activeDesktops[j-1].screen).left > screenGeometry(activeDesktops[j].screen).left) {
-        var temp = activeDesktops[j];
-        activeDesktops[j] = activeDesktops[j-1];
-        activeDesktops[j-1] = temp;
-        j = j-1;
-    }
-    i = i+1;
-}
+activeDesktops.sort(function(a, b) {
+    var ga = screenGeometry(a.screen);
+    var gb = screenGeometry(b.screen);
+    return (ga.left - gb.left) || (ga.top - gb.top);
+});
 
 var screenOrder = [];
 for(var k = 0; k < activeDesktops.length; k++) {
@@ -128,12 +110,13 @@ def set_wallpaper(pieces: Sequence[str], activities: Activities) -> Result:
     With activities, each activity shows the last wallpaper of the profile named after
     it, or else ``pieces``, which the running profile's activity always gets.
     """
-    names = activity_names()
-    if not names:
+    listed = _list_activities()
+    names = activity_names(*listed) if listed else {}
+    if not listed or not names:
         return _evaluate(wallpaper_script({}, pieces))
     images = {activity: _activity_images(name, pieces, activities) for activity, name in names.items()}
     try:
-        desktops = desktop_activities(activities.state_dir)
+        desktops = desktop_activities(activities.state_dir, *listed)
     except PlasmaScriptingUnavailable as error:
         return Result(str(error))
     if not desktops:
@@ -149,12 +132,8 @@ def wallpaper_script(images_by_desktop: Mapping[int, Sequence[str]], default_ima
     return WALLPAPER_SCRIPT.substitute(images_by_desktop=json.dumps(by_desktop), default_images=json.dumps(default))
 
 
-def activity_names() -> dict[str, str]:
-    """The KDE activities, id to name; empty when they can't be listed."""
-    listed = _list_activities()
-    if listed is None:
-        return {}
-    qdbus, activity_ids = listed
+def activity_names(qdbus: str, activity_ids: Sequence[str]) -> dict[str, str]:
+    """The KDE activities, id to name."""
     names = {}
     for activity_id in activity_ids:
         named = _activity_manager(qdbus, "ActivityName", activity_id)
@@ -164,7 +143,7 @@ def activity_names() -> dict[str, str]:
     return names
 
 
-def desktop_activities(state_dir: Path) -> dict[int, str]:
+def desktop_activities(state_dir: Path, qdbus: str, activity_ids: Sequence[str]) -> dict[int, str]:
     """Which activity each Plasma desktop belongs to, desktop id to activity id.
 
     Plasma only tells which desktops belong to the current activity, so what was learned
@@ -172,14 +151,11 @@ def desktop_activities(state_dir: Path) -> dict[int, str]:
     other activities' desktops are taken to follow each other, one per screen.
     """
     desktop_to_activity = _load_mapping(state_dir)
-    listed = _list_activities()
-    if listed is None:
-        return desktop_to_activity
-    qdbus, activity_ids = listed
     current = _activity_manager(qdbus, "CurrentActivity")
     current_activity_id = current.output.strip() if current.ok else None
+    plasma_shell = _plasma_shell()
     try:
-        desktop_info = _plasma_shell().evaluateScript(DESKTOPS_SCRIPT)
+        desktop_info = plasma_shell.evaluateScript(DESKTOPS_SCRIPT)
         logger.info("Desktop info from plasma: %s", desktop_info)
         all_desktop_ids = []
         active_desktop_ids = []
@@ -189,8 +165,6 @@ def desktop_activities(state_dir: Path) -> dict[int, str]:
                 all_desktop_ids.append(desktop_id)
                 if screen_id != -1:
                     active_desktop_ids.append(desktop_id)
-    except PlasmaScriptingUnavailable:
-        raise
     except Exception:  # Plasma answered something else
         logger.exception("Failed to get desktop-activity mapping")
         return {}

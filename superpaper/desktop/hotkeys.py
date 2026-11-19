@@ -5,7 +5,7 @@ GUI's main loop with ``call_soon`` before it runs.
 """
 
 import logging
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Sequence
 from typing import Any, Protocol
 
 from superpaper.desktop.linux import running_kde
@@ -137,7 +137,7 @@ class Hotkeys:
         except Exception as error:
             logger.warning("Could not unregister hotkey %s: %s", format_hotkey(keys), error)
 
-    def _on_profile_hotkey(self, event, hotkey, bound_args):
+    def _on_profile_hotkey(self, event: Any, hotkey: Any, bound_args: Sequence[Sequence[ProfileId]]) -> None:
         """system_hotkey's consumer: start the profile bound to ``hotkey``. Called on its
         listener thread with the arguments the keys were registered with."""
         profile_id = bound_args[0][0]

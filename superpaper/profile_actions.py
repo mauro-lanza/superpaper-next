@@ -124,9 +124,7 @@ def show_draft(
     """
 
     def applied(problem: str | None) -> None:
-        # The applied image becomes the current selection so reopening the dialog (or a
-        # later render) shows the same wallpaper instead of reverting to the previously
-        # saved one.
+        # Pin the applied image so reopening the dialog shows it, not the previously saved one.
         if problem is None and draft.chosen and loaded is not None:
             loaded.selection.pin(draft.chosen)
         on_shown(problem)

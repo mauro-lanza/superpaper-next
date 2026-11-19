@@ -3,6 +3,7 @@ displays and the display settings band."""
 
 import logging
 from dataclasses import replace
+from functools import partial
 from typing import assert_never
 
 import wx  # ty:ignore[unresolved-import]
@@ -43,7 +44,7 @@ class ConfigFrame(wx.Frame):
 
     def __init__(self, paths, get_settings, store, session, *, update_settings, refresh_displays, rebind_hotkey):
         wx.Frame.__init__(self, parent=None, title="Superpaper Wallpaper Configuration")
-        self.frame_sizer = wx.BoxSizer(wx.VERTICAL)
+        frame_sizer = wx.BoxSizer(wx.VERTICAL)
         config_panel = WallpaperSettingsPanel(
             self,
             paths,
@@ -54,9 +55,8 @@ class ConfigFrame(wx.Frame):
             refresh_displays=refresh_displays,
             rebind_hotkey=rebind_hotkey,
         )
-        self.frame_sizer.Add(config_panel, 1, wx.EXPAND)
-        self.SetAutoLayout(True)
-        self.SetSizer(self.frame_sizer)
+        frame_sizer.Add(config_panel, 1, wx.EXPAND)
+        self.SetSizer(frame_sizer)
         self.SetIcon(wx.Icon(str(resource("superpaper.png")), wx.BITMAP_TYPE_PNG))
         self.Fit()
         self.Layout()
@@ -115,12 +115,9 @@ class WallpaperSettingsPanel(wx.Panel):
 
         # top half
         self.resized = False
-        # Profile change tracking. ``_clean_serial`` holds the serialized form of
-        # the profile as last saved/loaded; the Save and Revert buttons enable
-        # only when the current fields serialize differently. The wallpaper
-        # (background) selection is deliberately excluded (see
-        # _collect_temp_profile). ``_loading`` suppresses tracking while fields
-        # are being (re)populated programmatically.
+        # ``_clean_serial`` is the fingerprint of the profile as last saved/loaded: Save and
+        # Revert enable only when the fields differ. ``_loading`` suppresses tracking while
+        # fields are populated programmatically.
         self._clean_serial = None
         self._loading = False
         # This is staged dialog state. Do not publish it until Apply/Save; live
@@ -153,7 +150,7 @@ class WallpaperSettingsPanel(wx.Panel):
         self.create_sizer_settings_advanced()
 
         # settings sizer right contents
-        self.create_sizer_settings_right()
+        self.create_sizer_paths()
 
         # bottom button row contents
         self.create_sizer_bottom_buttonrow()
@@ -195,11 +192,8 @@ class WallpaperSettingsPanel(wx.Panel):
 
         self.sizer_setting_sizers.Hide(self.sizer_setting_adv)
 
-        # Change tracking: text fields and naked choices propagate their command
-        # events up to the panel, so a single panel-level binding covers them
-        # without per-control wiring. Controls that already have a dedicated
-        # handler (checkboxes, span radio, sliders, the path list) call
-        # _update_dirty_state() from within that handler instead.
+        # Controls with their own handler (checkboxes, span radio, sliders, the path list)
+        # call _update_dirty_state() from it; text fields and choices are caught here.
         self.Bind(wx.EVT_TEXT, self._on_field_changed)
         self.Bind(wx.EVT_COMBOBOX, self._on_field_changed)
 
@@ -370,9 +364,22 @@ class WallpaperSettingsPanel(wx.Panel):
         self.sizer_settings_left.Add(self.sizer_setting_hotkey, 0, wx.EXPAND, 5)
         self.sizer_settings_left.Add(self.sizer_setting_zoom, 0, wx.EXPAND, 5)
 
-    def create_sizer_settings_right(self):
-        # paths sizer contents
-        self.create_sizer_paths()
+    def _new_path_listctrl(self, multi_column, target_label="Display"):
+        """A source list: with a display or group column for ``multi_column``, else a bare list."""
+        if multi_column:
+            path_listctrl = wx.ListCtrl(
+                self.statbox_parent_paths, -1, style=wx.LC_REPORT | wx.BORDER_SIMPLE | wx.LC_SORT_ASCENDING
+            )
+            path_listctrl.InsertColumn(0, target_label, wx.LIST_FORMAT_RIGHT, width=100)
+            path_listctrl.InsertColumn(1, "Source", width=400)
+        else:
+            path_listctrl = wx.ListCtrl(
+                self.statbox_parent_paths, -1, style=wx.LC_REPORT | wx.BORDER_SIMPLE | wx.LC_NO_HEADER
+            )
+            path_listctrl.InsertColumn(0, "Source", width=500)
+        path_listctrl.SetImageList(self.image_list, wx.IMAGE_LIST_SMALL)
+        path_listctrl.Bind(wx.EVT_LIST_ITEM_SELECTED, self.onWallpaperItemSelected)
+        return path_listctrl
 
     def create_sizer_paths(self):
         self.sizer_setting_paths = wx.StaticBoxSizer(wx.VERTICAL, self, "Wallpaper paths")
@@ -382,24 +389,7 @@ class WallpaperSettingsPanel(wx.Panel):
             -1,
             "Browse to add your wallpaper files or source folders here:",
         )
-        if self.span_mode == "multi":
-            self.path_listctrl = wx.ListCtrl(
-                self.statbox_parent_paths,
-                -1,
-                style=wx.LC_REPORT | wx.BORDER_SIMPLE | wx.LC_SORT_ASCENDING,
-            )
-            self.path_listctrl.InsertColumn(0, "Display", wx.LIST_FORMAT_RIGHT, width=100)
-            self.path_listctrl.InsertColumn(1, "Source", width=400)
-        else:
-            # show simpler listing without header if only one wallpaper target
-            self.path_listctrl = wx.ListCtrl(
-                self.statbox_parent_paths,
-                -1,
-                style=wx.LC_REPORT | wx.BORDER_SIMPLE | wx.LC_NO_HEADER,
-            )
-            self.path_listctrl.InsertColumn(0, "Source", width=500)
-        self.path_listctrl.SetImageList(self.image_list, wx.IMAGE_LIST_SMALL)
-        self.path_listctrl.Bind(wx.EVT_LIST_ITEM_SELECTED, self.onWallpaperItemSelected)
+        self.path_listctrl = self._new_path_listctrl(self.span_mode == "multi")
 
         self.sizer_setting_paths.Add(st_paths_info, 0, wx.ALIGN_LEFT | wx.ALL, 5)
         self.sizer_setting_paths.Add(self.path_listctrl, 1, wx.CENTER | wx.EXPAND | wx.TOP | wx.LEFT | wx.RIGHT, 5)
@@ -439,9 +429,13 @@ class WallpaperSettingsPanel(wx.Panel):
         self.sizer_setting_offsets.Add(self.cb_offsets, 0, wx.ALIGN_LEFT | wx.BOTTOM, 5)
         self.sizer_setting_offsets.Add(st_offsets, 0, wx.ALIGN_LEFT | wx.LEFT, 10)
         tc_list_sizer_offs = wx.WrapSizer(wx.HORIZONTAL)
-        self.tc_list_offsets = self.list_of_textctrl(statbox_parent_offsets, len(self.staged.layout.displays))
-        for tc in self.tc_list_offsets:
-            st = wx.StaticText(statbox_parent_offsets, -1, str(self.tc_list_offsets.index(tc)) + ":")
+        num_displays = len(self.staged.layout.displays)
+        self.tc_list_offsets = [
+            wx.TextCtrl(statbox_parent_offsets, -1, size=wx.Size(self.tc_width // 2, -1), style=wx.TE_RIGHT)
+            for _ in range(num_displays)
+        ]
+        for idx, tc in enumerate(self.tc_list_offsets):
+            st = wx.StaticText(statbox_parent_offsets, -1, f"{idx}:")
             tc_st_sizer = wx.BoxSizer(wx.HORIZONTAL)
             tc_st_sizer.Add(st, 0, wx.ALIGN_CENTER_VERTICAL | wx.LEFT | wx.TOP | wx.BOTTOM, 5)
             tc_st_sizer.Add(tc, 0, wx.ALIGN_LEFT | wx.ALL, 5)
@@ -462,14 +456,17 @@ class WallpaperSettingsPanel(wx.Panel):
         sizer_spangroups_cb.AddStretchSpacer()
         sizer_spangroups_cb.Add(self.button_help_spang, 0, wx.RIGHT, 5)
         sizer_spangroups_data = wx.WrapSizer(wx.HORIZONTAL)
-        self.ch_list_spangroups = self.list_of_wxchoice(self, len(self.staged.layout.displays), 0.4)
-        for ch in self.ch_list_spangroups:
-            st = wx.StaticText(self, -1, str(self.ch_list_spangroups.index(ch)) + ":")
+        self.ch_list_spangroups = [
+            wx.ComboBox(self, -1, size=wx.Size(int(self.tc_width * 0.4), -1), style=wx.CB_READONLY)
+            for _ in range(num_displays)
+        ]
+        for idx, ch in enumerate(self.ch_list_spangroups):
+            st = wx.StaticText(self, -1, f"{idx}:")
             ch_st_sizer = wx.BoxSizer(wx.HORIZONTAL)
             ch_st_sizer.Add(st, 0, wx.ALIGN_CENTER_VERTICAL | wx.LEFT | wx.TOP | wx.BOTTOM, 5)
             ch_st_sizer.Add(ch, 0, wx.ALIGN_LEFT | wx.ALL, 5)
             sizer_spangroups_data.Add(ch_st_sizer, 0, wx.ALIGN_LEFT | wx.ALL, 0)
-            ch.SetItems([str(idx) for idx in range(self.ch_list_spangroups.index(ch) + 1)])
+            ch.SetItems([str(group) for group in range(idx + 1)])
             ch.SetSelection(0)
             st.Disable()
             ch.Disable()
@@ -686,23 +683,22 @@ class WallpaperSettingsPanel(wx.Panel):
             return Default()
         return parse_choice(self.ch_persp.GetString(selection))
 
-    def _typed_offsets(self) -> tuple[Offset, ...] | None:
-        """The offsets typed in the fields, applied or not. Tells the user and returns None
-        if a field can't be read."""
+    def _read_offsets(self, parse) -> tuple[Offset, ...] | None:
+        """``parse`` applied to the offset fields; tells the user and returns None if one can't be read."""
         try:
-            return parse_offsets(self._offset_fields())
+            return parse(self._offset_fields())
         except OffsetError as error:
             show_message_dialog(str(error), "Error")
             return None
 
+    def _typed_offsets(self) -> tuple[Offset, ...] | None:
+        """The offsets typed in the fields, applied or not; None if a field can't be read."""
+        return self._read_offsets(parse_offsets)
+
     def _applied_offsets(self) -> tuple[Offset, ...] | None:
-        """The manual offsets of the displays: none (0,0) unless they are applied. Fields
-        are only read when applied; None as for _typed_offsets."""
-        try:
-            return form.applied_offsets(self.cb_offsets.GetValue(), self._offset_fields())
-        except OffsetError as error:
-            show_message_dialog(str(error), "Error")
-            return None
+        """The manual offsets of the displays: none (0,0) unless they are applied, when the
+        fields are read; None if a field can't be."""
+        return self._read_offsets(partial(form.applied_offsets, self.cb_offsets.GetValue()))
 
     def _offset_fields(self):
         return [tc.GetLineText(0) for tc in self.tc_list_offsets]
@@ -720,32 +716,6 @@ class WallpaperSettingsPanel(wx.Panel):
     def update_choiceprofile(self):
         """Reload profile list into the choice box."""
         self.choice_profiles.SetItems(self._profile_choices())
-
-    def list_of_textctrl(self, ctrl_parent, num_disp, fraction=1 / 2):
-        tcrtl_list = []
-        for _i in range(num_disp):
-            tcrtl_list.append(
-                wx.TextCtrl(
-                    ctrl_parent,
-                    -1,
-                    size=wx.Size(int(self.tc_width * fraction), -1),
-                    style=wx.TE_RIGHT,
-                )
-            )
-        return tcrtl_list
-
-    def list_of_wxchoice(self, ctrl_parent, num_disp, fraction=1 / 2):
-        ch_list = []
-        for _i in range(num_disp):
-            ch_list.append(
-                wx.ComboBox(
-                    ctrl_parent,
-                    -1,
-                    size=wx.Size(int(self.tc_width * fraction), -1),
-                    style=wx.CB_READONLY,
-                )
-            )
-        return ch_list
 
     def sizer_toggle_children(self, sizer, bool_state, toggle_cb=False):
         for child in sizer.GetChildren():
@@ -798,29 +768,8 @@ class WallpaperSettingsPanel(wx.Panel):
                     return False
             self.path_listctrl.Destroy()
             self.image_list.RemoveAll()
-            if multi_column:
-                self.multi_column_listc = True
-                self.path_listctrl = wx.ListCtrl(
-                    self.statbox_parent_paths,
-                    -1,
-                    style=wx.LC_REPORT | wx.BORDER_SIMPLE | wx.LC_SORT_ASCENDING,
-                )
-                col0_str = "Display"
-                if self.use_spangroups():
-                    col0_str = "Group"
-                self.path_listctrl.InsertColumn(0, col0_str, wx.LIST_FORMAT_RIGHT, width=100)
-                self.path_listctrl.InsertColumn(1, "Source", width=400)
-            else:
-                self.multi_column_listc = False
-                # show simpler listing without header if only one wallpaper target
-                self.path_listctrl = wx.ListCtrl(
-                    self.statbox_parent_paths,
-                    -1,
-                    style=wx.LC_REPORT | wx.BORDER_SIMPLE | wx.LC_NO_HEADER,
-                )
-                self.path_listctrl.InsertColumn(0, "Source", width=500)
-            self.path_listctrl.SetImageList(self.image_list, wx.IMAGE_LIST_SMALL)
-            self.path_listctrl.Bind(wx.EVT_LIST_ITEM_SELECTED, self.onWallpaperItemSelected)
+            self.multi_column_listc = bool(multi_column)
+            self.path_listctrl = self._new_path_listctrl(multi_column, "Group" if self.use_spangroups() else "Display")
             self.sizer_setting_paths.Insert(1, self.path_listctrl, 1, wx.CENTER | wx.EXPAND | wx.ALL, 5)
             self.path_listctrl.InvalidateBestSize()
             self.sizer_main.Layout()
@@ -913,11 +862,7 @@ class WallpaperSettingsPanel(wx.Panel):
         self.onZoomOffsetChange(None)
 
     def onResetZoom(self, event):
-        """Reset the image scaling & position to defaults.
-
-        Only the zoom/position controls are affected; the rest of the profile
-        configuration is left untouched.
-        """
+        """Reset the image scaling & position to defaults, leaving the rest of the profile as is."""
         self.reset_zoom_offset()
 
     def toggle_zoom_widgets(self, enable):
@@ -958,7 +903,7 @@ class WallpaperSettingsPanel(wx.Panel):
             self.path_listctrl.SetItem(index, 1, data_row[1])
         elif self.span_mode != "multi" and len(data_row) == 1:
             img_id = self.add_to_imagelist(data_row[0])
-            index = self.path_listctrl.InsertItem(self.path_listctrl.GetItemCount(), data_row[0], img_id)
+            self.path_listctrl.InsertItem(self.path_listctrl.GetItemCount(), data_row[0], img_id)
         else:
             logger.info("Span mode: %s. Bad data_row: %s", self.span_mode, data_row)
 
@@ -1005,20 +950,21 @@ class WallpaperSettingsPanel(wx.Panel):
 
     def onBrowsePaths(self, event):
         """Opens the pick paths dialog."""
-        num_groups = len(form.spangroups_of(self._spangroup_choices())) if self.use_spangroups() else None
+        if self.use_spangroups():
+            num_wallpaper_area = len(form.spangroups_of(self._spangroup_choices()))
+        else:
+            num_wallpaper_area = len(self.staged.layout.displays)
         dlg = BrowsePaths(
             self,
             self.has_sources_per_target(),
             self.settings.browse_default_dir,
             lambda path: self.update_settings(replace(self.settings, browse_default_dir=path)),
-            num_groups,
+            num_wallpaper_area,
+            "Group" if self.use_spangroups() else "Display",
         )
-        res = dlg.ShowModal()
-        if res == wx.ID_OK:
+        if dlg.ShowModal() == wx.ID_OK:
             self.populate_lc_browse(dlg.path_list_data)
-            dlg.Destroy()
-        else:
-            pass
+        dlg.Destroy()
 
     def onRemoveSource(self, event):
         """Removes selection from wallpaper source ListCtrl."""
@@ -1033,15 +979,11 @@ class WallpaperSettingsPanel(wx.Panel):
 
     def onSelect(self, event):
         """Acts once a profile is picked in the dropdown menu."""
-        event_object = event.GetEventObject()
-        if event_object.GetName() == "ProfileChoice":
-            item = event.GetSelection()
+        if event.GetEventObject().GetName() == "ProfileChoice":
             if event.GetString() == NEW_PROFILE_LABEL:
                 self.onCreateNewProfile(event)
             else:
-                self.populate_fields(self.list_of_profiles[item])
-        else:
-            pass
+                self.populate_fields(self.list_of_profiles[event.GetSelection()])
 
     def onRevert(self, event):
         """Discards unsaved changes and loads the saved profile from disk again, with any
@@ -1093,44 +1035,38 @@ class WallpaperSettingsPanel(wx.Panel):
         return self.path_listctrl.GetItemText(item_idx, 1 if columns == 2 else 0)
 
     def onSave(self, event):
-        """Saves the profile the fields describe, if it is valid; returns its path."""
+        """Saves the profile the fields describe, if it is valid."""
         with wx.BusyCursor():
-            return self._save_profile()
-
-    def _save_profile(self):
-        current = self._read_form()
-        result = save_profile(
-            current,
-            focused_path=self._focused_path(),
-            loaded=self.loaded_profile,
-            store=self.store,
-            session=self.session,
-            rebind_hotkey=self._rebind_hotkey,
-        )
-        if isinstance(result, Problems):
-            self._show_problems(result)
-            return None
-        saved_profile = result.stored
-        self.update_choiceprofile()
-        self.choice_profiles.SetSelection(self.choice_profiles.FindString(current.name))
-        # The editor goes on with the store's record of the saved profile.
-        self.loaded_profile = saved_profile
-        spangroups = form.applied_spangroups(current)
-        self.wpprev_pnl.preview_wallpaper(
-            saved_profile.selection.current(), self.span_mode, self._display_areas(), spangroups
-        )
-        # Saved state becomes the new clean baseline.
-        self.list_of_profiles = self.store.profiles
-        self._set_clean_baseline()
-        return saved_profile.path
+            current = self._read_form()
+            result = save_profile(
+                current,
+                focused_path=self._focused_path(),
+                loaded=self.loaded_profile,
+                store=self.store,
+                session=self.session,
+                rebind_hotkey=self._rebind_hotkey,
+            )
+            if isinstance(result, Problems):
+                self._show_problems(result)
+                return
+            self.update_choiceprofile()
+            self.choice_profiles.SetSelection(self.choice_profiles.FindString(current.name))
+            # The editor goes on with the store's record of the saved profile.
+            self.loaded_profile = result.stored
+            self.wpprev_pnl.preview_wallpaper(
+                result.stored.selection.current(),
+                self.span_mode,
+                self._display_areas(),
+                form.applied_spangroups(current),
+            )
+            self.list_of_profiles = self.store.profiles
+            self._set_clean_baseline()
 
     def onCreateNewProfile(self, event):
         """Empties the wallpaper profile config fields."""
         self._loading = True
         self.loaded_profile = None
         self.choice_profiles.SetSelection(self.choice_profiles.FindString(NEW_PROFILE_LABEL))
-
-        self.tc_name.ChangeValue("")
 
         self.refresh_path_listctrl(False, migrate_paths=False)
 
@@ -1171,10 +1107,10 @@ class WallpaperSettingsPanel(wx.Panel):
         testimage = [str(resource("test.png"))]
         if not is_file(testimage[0]):
             show_message_dialog(f"Test image not found in {testimage}.", "Error")
-            return -1
+            return
         offsets = self._typed_offsets()
         if offsets is None:
-            return -1
+            return
 
         perspective = self._selected_perspective()
 
@@ -1189,7 +1125,7 @@ class WallpaperSettingsPanel(wx.Panel):
         typed_offsets = self._typed_offsets()
         if typed_offsets is None:
             return
-        applied_offsets = typed_offsets if self.cb_offsets.GetValue() else self._applied_offsets()
+        applied_offsets = typed_offsets if self.cb_offsets.GetValue() else len(typed_offsets) * ((0, 0),)
         dlg = PerspectiveConfig(self, applied_offsets, typed_offsets)
         dlg.ShowModal()
         dlg.Destroy()
@@ -1235,7 +1171,7 @@ class WallpaperSettingsPanel(wx.Panel):
         """Popup hotkey help."""
         text = (
             "Bind a hotkey to start this profile. Choose max 3\n"
-            "modfiers out of: control, alt, shift, super(=win).\n"
+            "modifiers out of: control, alt, shift, super(=win).\n"
             "Example: control+super+x"
         )
         show_help_popup(self, text, evt.GetEventObject())
