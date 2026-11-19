@@ -61,6 +61,10 @@ RUN wget -q -O /tmp/python.tar.xz \
          --enable-shared --disable-test-modules --with-ensurepip=install \
     && make -j"$(nproc)" \
     && make install \
+    && strip --strip-unneeded \
+        "/opt/python/${PYTHON_VERSION}/bin/python3.14" \
+        "/opt/python/${PYTHON_VERSION}"/lib/libpython3.14.so.1.0 \
+        "/opt/python/${PYTHON_VERSION}"/lib/python3.14/lib-dynload/*.so \
     && rm -rf /tmp/python-src /tmp/python.tar.xz
 
 ENV PATH="/opt/python/${PYTHON_VERSION}/bin:${PATH}"
