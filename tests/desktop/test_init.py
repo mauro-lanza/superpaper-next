@@ -17,6 +17,21 @@ def test_linux_is_chosen_on_linux(monkeypatch):
     assert desktop.current() is linux
 
 
+def test_macos_is_chosen_on_darwin(monkeypatch, appkit):
+    appkit(screens=[(0, 0, 1920, 1080)])
+    monkeypatch.setattr(sys, "platform", "darwin")
+
+    from superpaper.desktop import macos
+
+    assert desktop.current() is macos
+
+
+def test_windows_is_chosen_on_win32(monkeypatch, windows):
+    monkeypatch.setattr(sys, "platform", "win32")
+
+    assert desktop.current() is windows
+
+
 def test_an_unknown_platform_gets_the_module_that_sets_nothing(monkeypatch):
     monkeypatch.setattr(sys, "platform", "plan9")
 
