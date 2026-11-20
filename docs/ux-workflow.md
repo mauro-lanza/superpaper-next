@@ -39,7 +39,7 @@ Every decision in §4 is decided; body text applies the chosen option, reference
 3. Every render of RUN (Apply, Next, tick, tray pick, hotkey, startup) uses LAY for the displays detected at that moment. STG reaches the desktop only through tests (D7), never through RUN.
 4. DESK shows RUN's SEL rendered with LAY, except after an explicit test or CLI `--setimages`. A test pauses RUN while shown (D8); the user leaves it with Next, Apply, unpause or tray pick.
 5. Saving LAY while a profile runs re-renders RUN's current SEL (no advance), so DESK satisfies invariant 3 at once.
-6. **Save never changes DESK** (D13). Changes saved to the running profile appear at its next change (Next, tick) or immediately with Apply.
+6. **Profile Save never changes DESK** (D13). Changes saved to the running profile appear at its next change (Next, tick) or immediately with Apply. The display band's Save is different: it re-renders the running profile's current image (B6).
 7. Saving FORM never changes which profile runs; only Apply, tray pick, hotkey and startup do.
 8. SEL survives Next, editor close, Reload Profiles and restart.
 9. Editor state (FORM, STG, PICK, PREV) is discarded when the editor closes; only what was saved remains.
@@ -282,7 +282,7 @@ H1 Next = T4. H2 Pause = T5. H3 profile hotkey = T2/T3; deleted profile → noth
 | D11 | Running marker | Tray check and "(running)" in the dropdown |
 | D12a | Clicking a folder row | First image in sort order |
 | D12b | Click in multi mode | That display only, others show SEL |
-| D13 | May Save change the desktop? | Never; saved changes and PICK show at next change, or Apply |
+| D13 | May profile Save change the desktop? | Never; saved changes and PICK show at next change, or Apply. Display band Save re-renders the current image (B6) |
 | D14 | Name change on Save | Rename |
 | D15 | Next on non-slideshow | Advances |
 | D16 | Pause across restart | Not kept |
