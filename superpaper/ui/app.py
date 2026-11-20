@@ -90,8 +90,16 @@ def start_superpaper(
         open_help=_open_help,
         make_tray=_make_tray,
         close=close,
+        settle_unsaved_changes=lambda: _settle_editor(open_frames),
     )
     return Superpaper(shell, paths, desktop, settings, startup_profile)
+
+
+def _settle_editor(open_frames: dict[str, wx.Frame]) -> bool:
+    """Ask about the open editor's unsaved changes; True if there is no editor."""
+    editor = open_frames.get("editor")
+    # A destroyed wx object is falsy.
+    return not (isinstance(editor, ConfigFrame) and editor) or editor.settle_unsaved_changes()
 
 
 def _notify(message: str, title: str) -> None:

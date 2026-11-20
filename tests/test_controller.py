@@ -98,6 +98,7 @@ def application(running=None, profiles=(), active=None, settings=None, **shell_a
         "open_help": lambda app: events.append("help"),
         "make_tray": lambda app: None,
         "close": lambda: superpaper.session.requests.append(("closed",)),
+        "settle_unsaved_changes": lambda: True,
     }
     superpaper._shell = Shell(**{**actions, **shell_actions})
     superpaper.paths = PATHS
@@ -240,6 +241,14 @@ def test_quitting_stops_the_session_before_the_icon_goes():
     superpaper.quit()
 
     assert superpaper.session.requests == [("shutdown",), ("tray removed",), ("closed",)]
+
+
+def test_quitting_is_aborted_when_the_user_keeps_unsaved_changes_open():
+    superpaper = application(settle_unsaved_changes=lambda: False)
+
+    superpaper.quit()
+
+    assert superpaper.session.requests == []
 
 
 @pytest.mark.parametrize(

@@ -4,6 +4,8 @@ from typing import Literal
 
 import wx  # ty:ignore[unresolved-import]
 
+from superpaper.unsaved_changes import Answer
+
 
 def show_message_dialog(
     message: str,
@@ -18,6 +20,19 @@ def show_message_dialog(
     dial = wx.MessageDialog(parent, message, msg_type, wx.OK | wx.STAY_ON_TOP | wx.CENTRE)
     dial.ShowModal()
     return True
+
+
+def ask_unsaved_changes(message: str, parent: wx.Window | None = None) -> Answer:
+    """Ask whether to save, discard or keep the unsaved changes ``message`` names."""
+    dial = wx.MessageDialog(parent, message, "Unsaved changes", wx.YES_NO | wx.CANCEL | wx.STAY_ON_TOP | wx.CENTRE)
+    dial.SetYesNoCancelLabels("Save", "Discard", "Cancel")
+    match dial.ShowModal():
+        case wx.ID_YES:
+            return Answer.SAVE
+        case wx.ID_NO:
+            return Answer.DISCARD
+        case _:
+            return Answer.CANCEL
 
 
 def draft_shown(problem: str | None):
