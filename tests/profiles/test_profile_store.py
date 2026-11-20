@@ -150,16 +150,16 @@ def test_unicode_names_load_by_their_own_form(app_paths):
     composed = unicodedata.normalize("NFC", "Työ")
     decomposed = unicodedata.normalize("NFD", "Työ")
     (app_paths.profiles / f"{composed}.profile").write_bytes(profile_bytes(composed))
-    if composed != decomposed:
-        (app_paths.profiles / f"{decomposed}.profile").write_bytes(profile_bytes(decomposed))
+    (app_paths.profiles / f"{decomposed}.profile").write_bytes(profile_bytes(decomposed))
+    # Normalization-insensitive filesystems (APFS) keep one file for both spellings.
+    distinct_files = len(list(app_paths.profiles.glob("*.profile")))
 
-    names = [stored.profile.name for stored in loaded(app_paths)]
+    stored_profiles = loaded(app_paths)
 
-    assert composed in names
-    assert decomposed in names
-    assert load_profile(app_paths, ProfileId.parse(composed, windows_names=False)).profile_id == ProfileId.parse(
-        composed, windows_names=False
-    )
+    assert len(stored_profiles) == distinct_files
+    for stored in stored_profiles:
+        assert stored.profile.name in {composed, decomposed}
+        assert load_profile(app_paths, stored.profile_id).profile_id == stored.profile_id
 
 
 def test_a_name_line_never_becomes_an_identity(app_paths, tmp_path):

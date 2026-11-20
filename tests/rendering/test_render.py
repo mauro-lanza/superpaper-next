@@ -152,7 +152,7 @@ def test_one_image_per_display_keeps_the_gaps_black(tmp_path, display_layout):
 # numpy 2.5.0, so a different version of either can change them, and then they are
 # re-recorded deliberately. The perspective case solves a linear system with numpy's
 # OpenBLAS, whose AVX-512 kernels may round its last bits differently from the other
-# x86-64 kernels; both digests are accepted.
+# x86-64 kernels, and Apple Silicon's rounds differently again; all three digests are accepted.
 SMALL_MONITORS = [
     monitor(0, 0, 64, 36, 120, 68, "A"),
     monitor(64, 6, 48, 27, 105, 59, "B"),
@@ -163,6 +163,7 @@ ADVANCED_GOLDENS = {
     "perspective": {
         "ff5a6b2529f1523302eb0d2eeea79949a5f7563dc0c17b671436d5e4496533a9",
         "5ab69aa9661b802a4e11d15221fdcb440d2709d9fddf6cd8331bf411ad1b9f6a",
+        "2f36f7bf86e038c2347b6e3896fb3e90d01f28bb6815f1a694b0864a1432dad3",
     },
 }
 
