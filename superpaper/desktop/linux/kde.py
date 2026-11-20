@@ -4,13 +4,13 @@ interface over D-Bus, with each activity showing the profile named after it."""
 import json
 import logging
 import shutil
-from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from string import Template
 from typing import Any
 
 from superpaper.desktop.process import Result, run
+from superpaper.desktop.wallpaper import ProfileWallpapers
 from superpaper.files import write_atomically
 
 logger = logging.getLogger(__name__)
@@ -82,23 +82,11 @@ for(var idx = 0; idx < allDesktops.length; idx++) {
 """)
 
 
-@dataclass(frozen=True, slots=True)
-class Activities:
-    """What it takes to give each KDE activity the wallpaper of the profile named after it."""
-
-    current_profile: str | None
-    """The running profile: the activity with its name gets the new wallpaper."""
-    cached_pieces: Callable[[str], list[str]]
-    """The per-display images last rendered for the profile of a given name, if any."""
-    state_dir: Path
-    """Where which desktop belongs to which activity is remembered."""
-
-
 class PlasmaScriptingUnavailable(RuntimeError):
     """dbus-python, which KDE wallpaper scripting needs, is not installed."""
 
 
-def set_wallpaper(pieces: Sequence[str], activities: Activities) -> Result:
+def set_wallpaper(pieces: Sequence[str], profiles: ProfileWallpapers) -> Result:
     """Show ``pieces``, one image per display in Superpaper's display order.
 
     With activities, each activity shows the last wallpaper of the profile named after
@@ -108,9 +96,9 @@ def set_wallpaper(pieces: Sequence[str], activities: Activities) -> Result:
     names = activity_names(*listed) if listed else {}
     if not listed or not names:
         return _evaluate(wallpaper_script({}, pieces))
-    images = {activity: _activity_images(name, pieces, activities) for activity, name in names.items()}
+    images = {activity: _activity_images(name, pieces, profiles) for activity, name in names.items()}
     try:
-        desktops = desktop_activities(activities.state_dir, *listed)
+        desktops = desktop_activities(profiles.state_dir, *listed)
     except PlasmaScriptingUnavailable as error:
         return Result(str(error))
     if not desktops:
@@ -188,15 +176,15 @@ def desktop_activities(state_dir: Path, qdbus: str, activity_ids: Sequence[str])
     return desktop_to_activity
 
 
-def _activity_images(name: str, pieces: Sequence[str], activities: Activities) -> list[str]:
-    if activities.current_profile and name == activities.current_profile:
-        logger.info("Activity '%s' matched profile '%s'", name, activities.current_profile)
+def _activity_images(name: str, pieces: Sequence[str], profiles: ProfileWallpapers) -> list[str]:
+    if profiles.current_profile and name == profiles.current_profile:
+        logger.info("Activity '%s' matched profile '%s'", name, profiles.current_profile)
         return list(pieces)
-    cached = activities.cached_pieces(name)
+    cached = profiles.cached_pieces(name)
     if cached:
         logger.info("Activity '%s' using cached wallpapers from profile '%s'", name, name)
         return cached
-    logger.info("Activity '%s' using fallback wallpapers from profile '%s'", name, activities.current_profile)
+    logger.info("Activity '%s' using fallback wallpapers from profile '%s'", name, profiles.current_profile)
     return list(pieces)
 
 

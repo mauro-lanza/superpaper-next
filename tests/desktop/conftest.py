@@ -6,12 +6,11 @@ import pytest
 
 from superpaper.desktop import linux, process
 from superpaper.desktop.backend import Desktop
-from superpaper.desktop.linux.kde import Activities
-from superpaper.desktop.wallpaper import Spanned
+from superpaper.desktop.wallpaper import ProfileWallpapers, Spanned
 
 IMAGE = "/tmp/wallpaper.png"
-# Only KDE Plasma looks at activities.
-NO_ACTIVITIES = Activities(current_profile=None, cached_pieces=lambda name: [], state_dir=Path("unused"))
+# Only KDE Plasma looks at the other profiles' wallpapers.
+NO_PROFILES = ProfileWallpapers(current_profile=None, cached_pieces=lambda name: [], state_dir=Path("unused"))
 
 
 def assert_satisfies_desktop(module):
@@ -40,4 +39,4 @@ def ran(monkeypatch):
 
 
 def set_wallpaper(set_command="", image=IMAGE):
-    return linux.set_wallpaper(Spanned(image), set_command=set_command, activities=NO_ACTIVITIES)
+    return linux.set_wallpaper(Spanned(image), set_command=set_command, profiles=NO_PROFILES)

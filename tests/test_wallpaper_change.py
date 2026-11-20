@@ -73,7 +73,7 @@ def test_a_change_is_rendered_kept_and_shown(tmp_path, app_paths, display_layout
     with Image.open(second) as image:
         assert image.size == (5, 3)
     # KDE gives it to the activity named after the running profile.
-    assert desktop.activities.current_profile == "simple"
+    assert desktop.profiles.current_profile == "simple"
 
 
 def test_the_previous_render_stays_while_the_desktop_refuses_the_new_one(tmp_path, app_paths, display_layout, desktop):
@@ -213,9 +213,9 @@ def test_a_desktop_that_takes_pieces_gets_one_per_display(app_paths, display_lay
     # KDE finds them again for an activity named after the profile, by its exact name.
     write_image(app_paths.cache / "homework-a.png")
     write_image(app_paths.cache / "homework-a-crop-0.png")
-    assert desktop.activities.cached_pieces("p") == list(pieces)
-    assert desktop.activities.cached_pieces("home") == []
-    assert desktop.activities.cached_pieces("an activity/with a slash") == []
+    assert desktop.profiles.cached_pieces("p") == list(pieces)
+    assert desktop.profiles.cached_pieces("home") == []
+    assert desktop.profiles.cached_pieces("an activity/with a slash") == []
 
 
 @pytest.fixture
@@ -237,7 +237,7 @@ def test_startup_shows_the_last_render_again(app_paths, desktop, startup):
 
     assert startup() is True
     assert desktop.handed == [Spanned(str(app_paths.cache / "main-a.png"))]
-    assert desktop.activities.current_profile == "main"
+    assert desktop.profiles.current_profile == "main"
 
 
 def test_startup_shows_a_draft_that_was_shown_after_it(app_paths, desktop, startup):

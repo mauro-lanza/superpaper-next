@@ -32,16 +32,7 @@ def run(paths: AppPaths, settings: Settings, desktop: Desktop, profile: ProfileI
     sys.argv[0] = "Superpaper"
     if profile:
         logger.info("Startup profile: %s", profile.value)
-    if sys.platform == "linux":
-        # Route incoming D-Bus calls (native SNI tray) through wxGTK's own
-        # GLib main loop. Must be set as the default main loop before the
-        # first bus connection is created (i.e. before the wx.App).
-        try:
-            from dbus.mainloop.glib import DBusGMainLoop  # ty:ignore[unresolved-import]
-
-            DBusGMainLoop(set_as_default=True)
-        except ImportError:
-            pass
+    desktop.init_main_loop()
     app = App(paths, settings, desktop, profile)
     app.MainLoop()
 

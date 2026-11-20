@@ -9,7 +9,7 @@ import pytest
 
 from superpaper.desktop import process
 from superpaper.desktop.linux import kde
-from superpaper.desktop.linux.kde import Activities
+from superpaper.desktop.wallpaper import ProfileWallpapers
 
 PIECES = ["/cache/home-a-crop-0.png", "/cache/home-a-crop-1.png"]
 WORK_PIECES = ["/cache/work-b-crop-0.png", "/cache/work-b-crop-1.png"]
@@ -33,7 +33,9 @@ def urls(paths):
 def running(profile, state_dir, cached=None):
     """KDE's view of Superpaper while ``profile`` runs; ``cached`` has other profiles' pieces."""
     cached = cached or {}
-    return Activities(current_profile=profile, cached_pieces=lambda name: cached.get(name, []), state_dir=state_dir)
+    return ProfileWallpapers(
+        current_profile=profile, cached_pieces=lambda name: cached.get(name, []), state_dir=state_dir
+    )
 
 
 class FakePlasma:

@@ -207,6 +207,7 @@ class GuiEnv:
             start_profile=superpaper.start_profile_by_id,
             call_soon=self.ui.wx.CallAfter,
             report=lambda message: self.dialogs.append(("hotkeys", "Error", message.splitlines()[0])),
+            show_problems=True,
         )
 
     def yes_to_message_dialogs(self):
@@ -249,6 +250,7 @@ def gui_env(wx_app, app_paths, tmp_path, monkeypatch):
     import superpaper.ui.perspective_dialog as perspective_dialog
     import superpaper.ui.settings_dialog as settings_dialog
     import superpaper.ui.tray as tray
+    from superpaper.desktop.linux import sni_tray
 
     ui = SimpleNamespace(
         wx=wx,
@@ -276,7 +278,7 @@ def gui_env(wx_app, app_paths, tmp_path, monkeypatch):
 
     monkeypatch.setattr(display_detection, "get_monitors", lambda: TWO_DISPLAYS)
     monkeypatch.setitem(sys.modules, "system_hotkey", SimpleNamespace(SystemHotkey=RecordingSystemHotkey))
-    monkeypatch.setattr(tray, "sni_supported", lambda: False)
+    monkeypatch.setattr(sni_tray, "sni_supported", lambda: False)
 
     real_run = subprocess.run
 

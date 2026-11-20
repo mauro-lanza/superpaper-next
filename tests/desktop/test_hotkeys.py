@@ -56,16 +56,16 @@ class Recorder:
 
 
 @pytest.fixture
-def setup(monkeypatch):
+def setup(monkeypatch, request):
     recorder = Recorder()
     monkeypatch.setitem(sys.modules, "system_hotkey", SimpleNamespace(SystemHotkey=FakeSystemHotkey))
-    monkeypatch.setattr(hotkeys_module, "running_kde", lambda: False)
     hotkeys = hotkeys_module.Hotkeys(
         next_wallpaper=recorder("next"),
         pause=recorder("pause"),
         start_profile=recorder("start profile"),
         call_soon=lambda action: action(),
         report=lambda message: recorder("dialog")(message),
+        show_problems=getattr(request, "param", True),
     )
     return SimpleNamespace(module=hotkeys_module, hotkeys=hotkeys, events=recorder.events)
 
@@ -167,9 +167,8 @@ def test_keys_the_library_refuses_are_reported(setup):
     assert setup.hotkeys._profiles.bound == {}
 
 
-def test_hotkey_errors_are_only_logged_on_kde(setup, monkeypatch, caplog):
-    monkeypatch.setattr(setup.module, "running_kde", lambda: True)
-
+@pytest.mark.parametrize("setup", [False], indirect=True)
+def test_hotkey_errors_are_only_logged_where_the_desktop_does_not_show_them(setup, caplog):
     setup.hotkeys.register_profiles([saved("Work", ("control", "bogus"))])
 
     assert setup.events == []

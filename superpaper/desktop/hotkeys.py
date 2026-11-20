@@ -8,7 +8,6 @@ import logging
 from collections.abc import Callable, Iterable, Sequence
 from typing import Any, Protocol
 
-from superpaper.desktop.linux import running_kde
 from superpaper.hotkey_keys import format_hotkey
 from superpaper.profiles.profile_id import ProfileId
 from superpaper.settings import Settings
@@ -56,11 +55,13 @@ class Hotkeys:
         start_profile: Callable[[ProfileId], None],
         call_soon: Callable[[Callable[[], None]], None],
         report: Callable[[str], None],
+        show_problems: bool,
     ) -> None:
         from system_hotkey import SystemHotkey  # ty:ignore[unresolved-import]
 
         self._call_soon = call_soon
         self._show = report
+        self._show_problems = show_problems
         self._actions = {NEXT_WALLPAPER: next_wallpaper, PAUSE: pause}
         self._start_profile = start_profile
         self._general = SystemHotkey(check_queue_interval=0.05)
@@ -156,5 +157,5 @@ class Hotkeys:
 
     def _report(self, message: str) -> None:
         logger.warning("%s", message)
-        if not running_kde():
+        if self._show_problems:
             self._show(message)

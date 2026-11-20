@@ -4,13 +4,15 @@ KDE Plasma, window managers through feh, or the user's own command."""
 import logging
 import os
 import shutil
+from collections.abc import Callable
 from pathlib import Path
 from typing import Literal, assert_never
 
 import superpaper.desktop.linux.kde as kde
 from superpaper.desktop.process import QUICK, Result, run
 from superpaper.desktop.process import run_hook as run_hook
-from superpaper.desktop.wallpaper import Pieces, Wallpaper
+from superpaper.desktop.tray_menu import MenuEntry, TrayHandle
+from superpaper.desktop.wallpaper import Pieces, ProfileWallpapers, Wallpaper
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +74,51 @@ def setter(set_command: str) -> Setter:
     return "unknown"
 
 
+def init_main_loop() -> None:
+    """Route incoming D-Bus calls (the native tray) through wxGTK's GLib main loop."""
+    try:
+        from dbus.mainloop.glib import DBusGMainLoop  # ty:ignore[unresolved-import]
+    except ImportError:
+        return
+    DBusGMainLoop(set_as_default=True)
+
+
+def make_tray(
+    *,
+    menu: Callable[[], tuple[MenuEntry, ...]],
+    call_soon: Callable[[Callable[[], None]], None],
+    activate: Callable[[], None],
+    secondary_activate: Callable[[], None],
+    icon_path: str,
+    title: str,
+) -> TrayHandle | None:
+    """The native StatusNotifierItem tray, if a watcher is running and it registers."""
+    from superpaper.desktop.linux import sni_tray
+
+    if not sni_tray.sni_supported():
+        return None
+    return sni_tray.build_tray(
+        menu=menu,
+        call_soon=call_soon,
+        activate=activate,
+        secondary_activate=secondary_activate,
+        bus_name=f"org.kde.StatusNotifierItem-{os.getpid()}-1",
+        icon_path=icon_path,
+        title=title,
+        tooltip=title,
+    )
+
+
+def wx_tray_clickable() -> bool:
+    """wx's tray icon renders but is dead on KDE Plasma 6."""
+    return not running_kde()
+
+
+def hotkey_problems_in_dialog() -> bool:
+    """On KDE they are only logged."""
+    return not running_kde()
+
+
 def takes_pieces(set_command: str) -> bool:
     """Whether the desktop sets one image per display, so a wallpaper is cut into pieces."""
     return setter(set_command) == "kde"
@@ -92,7 +139,7 @@ def open_folder(folder: Path) -> Result:
     return run(["xdg-open", os.fspath(folder)])
 
 
-def set_wallpaper(wallpaper: Wallpaper, *, set_command: str, activities: kde.Activities) -> Result:
+def set_wallpaper(wallpaper: Wallpaper, *, set_command: str, profiles: ProfileWallpapers) -> Result:
     """Show the image of ``wallpaper``; KDE Plasma shows its pieces, one image per display,
     instead."""
     image = wallpaper.image
@@ -119,7 +166,7 @@ def set_wallpaper(wallpaper: Wallpaper, *, set_command: str, activities: kde.Act
         case "kde":
             if not isinstance(wallpaper, Pieces):
                 return Result("KDE Plasma needs the wallpaper cut into one image per display.")
-            return kde.set_wallpaper(wallpaper.pieces, activities)
+            return kde.set_wallpaper(wallpaper.pieces, profiles)
         case "unknown":
             return Result(UNKNOWN_DESKTOP)
         case _:

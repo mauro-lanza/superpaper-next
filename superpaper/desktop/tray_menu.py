@@ -2,6 +2,7 @@
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Protocol
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,6 +37,13 @@ class Submenu:
 
 
 MenuEntry = Item | Check | Notice | Separator | Submenu
+
+
+class TrayHandle(Protocol):
+    """A tray icon the desktop draws itself."""
+
+    def remove(self) -> None: ...
+
 
 MAX_REASON = 80
 
