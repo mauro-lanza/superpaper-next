@@ -6,9 +6,9 @@ from pathlib import Path
 from typing import Any
 
 from AppKit import (  # ty:ignore[unresolved-import]
-    NSApplicationDidChangeScreenParametersNotification,
-    NSScreen,
-    NSWorkspace,
+    NSApplicationDidChangeScreenParametersNotification,  # ty:ignore[unresolved-import]
+    NSScreen,  # ty:ignore[unresolved-import]
+    NSWorkspace,  # ty:ignore[unresolved-import]
 )
 from Foundation import NSURL, NSNotificationCenter  # ty:ignore[unresolved-import]
 
