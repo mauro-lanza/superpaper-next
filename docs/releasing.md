@@ -32,6 +32,24 @@ The AppImage is the primary published Linux artifact. It has its own
 reproducible, host-isolating build under
 [`release-tooling/appimage/`](../release-tooling/appimage/README.md).
 
+## macOS (Apple Silicon dmg)
+
+Run from the repository root on an Apple Silicon Mac:
+
+```sh
+uv run --group build --extra gui python release-tooling/make-pyinstaller-build.py
+```
+
+This builds `dist/Superpaper.app` (a menu-bar-only app, no Dock icon) and packages it as
+`releases/Superpaper-<version>-macos-arm64.dmg`. The `.icns` icon is generated from
+`superpaper/resources/superpaper.png` at build time.
+
+The app is only ad-hoc signed, not signed with an Apple Developer ID or notarized. Users
+open it with right-click → Open, or run `xattr -dr com.apple.quarantine /Applications/Superpaper.app`.
+
+The `macOS build` workflow builds the dmg on pushes to master, `v*` tags and manual runs,
+and uploads it as a workflow artifact. Attach it to the GitHub release by hand.
+
 ## Windows (exe + installer)
 
 > Not currently published by this fork; see the upstream releases page. The

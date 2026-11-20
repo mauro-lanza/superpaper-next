@@ -1,0 +1,37 @@
+name: macOS build
+
+on:
+  push:
+    branches: [master]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dmg:
+    name: Build unsigned Apple Silicon dmg
+    runs-on: macos-15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v8.2.0
+        with:
+          enable-cache: true
+          python-version: "3.14"
+
+      - name: Build Superpaper.app and the dmg
+        run: uv run --frozen --group build --extra gui python release-tooling/make-pyinstaller-build.py
+
+      - name: Verify the dmg
+        run: hdiutil verify releases/Superpaper-*-macos-arm64.dmg
+
+      - name: Upload the dmg
+        uses: actions/upload-artifact@v4
+        with:
+          name: Superpaper-macos-arm64-dmg
+          path: releases/Superpaper-*-macos-arm64.dmg
+          if-no-files-found: error

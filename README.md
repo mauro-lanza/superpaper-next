@@ -93,7 +93,7 @@ A Windows installer and a portable package are available on the upstream [releas
 
 ### MacOS
 
- You must install the dependencies and run the project, see [development-macos](./docs/development-macos.md).
+An unsigned Apple Silicon `.dmg` (partial, unvalidated) is built by CI and attached to releases by hand; open the app with right-click → Open, or run `xattr -dr com.apple.quarantine /Applications/Superpaper.app`. Otherwise install the dependencies and run the project, see [development-macos](./docs/development-macos.md).
 
 
 ## Usage
