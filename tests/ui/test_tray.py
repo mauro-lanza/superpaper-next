@@ -10,6 +10,7 @@ from superpaper.desktop.process import Result
 from superpaper.desktop.tray_menu import Check, Item, Notice, Separator, Submenu
 from superpaper.profiles.profile_file import Profile
 from superpaper.profiles.profile_id import ProfileId
+from tests.desktop.fake import FakeDesktop
 
 CONFIG_DIR = Path("/config")
 
@@ -33,13 +34,14 @@ def recorder():
     return Recorder()
 
 
-def icon(tray, recorder, *, profiles=(), paused=False, failure=None):
+def icon(tray, recorder, *, desktop=None, profiles=(), paused=False, failure=None):
     """A tray icon, built as the application builds it, with the wx icon."""
     store = SimpleNamespace(profiles=list(profiles))
     session = SimpleNamespace(paused=paused, next=recorder("next"), toggle_pause=recorder("pause"))
     return tray.TaskBarIcon(
         store,
         session,
+        desktop or FakeDesktop(),
         last_failure=lambda: failure,
         config_dir=CONFIG_DIR,
         open_editor=recorder("editor"),
@@ -121,26 +123,24 @@ def test_a_left_click_opens_the_editor(tray, recorder):
     assert recorder.calls == [("editor",)]
 
 
-def test_a_config_folder_that_cant_be_opened_is_reported(tray, recorder, monkeypatch):
-    opened, shown = [], []
-    monkeypatch.setattr(tray.desktop, "open_folder", lambda folder: opened.append(folder) or Result("no file manager"))
+def test_a_config_folder_that_cant_be_opened_is_reported(tray, recorder, desktop, monkeypatch):
+    shown = []
+    desktop.folder_answer = Result("no file manager")
     monkeypatch.setattr(tray, "show_message_dialog", lambda message: shown.append(message))
 
-    icon(tray, recorder).open_config()
+    icon(tray, recorder, desktop=desktop).open_config()
 
-    assert opened == [CONFIG_DIR]
+    assert desktop.opened == [CONFIG_DIR]
     assert shown == ["There was an error trying to open the config folder."]
 
 
-def test_the_config_folder_menu_item_opens_the_config_folder(tray, recorder, monkeypatch):
-    opened = []
-    monkeypatch.setattr(tray.desktop, "open_folder", lambda folder: opened.append(folder) or Result())
-    entries = icon(tray, recorder).menu()
+def test_the_config_folder_menu_item_opens_the_config_folder(tray, recorder, desktop):
+    entries = icon(tray, recorder, desktop=desktop).menu()
 
     (item,) = (entry for entry in entries if isinstance(entry, Item) and entry.label == "Open Config Folder")
     item.action()
 
-    assert opened == [CONFIG_DIR]
+    assert desktop.opened == [CONFIG_DIR]
 
 
 @pytest.mark.parametrize(

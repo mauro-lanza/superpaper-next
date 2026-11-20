@@ -8,6 +8,7 @@ import superpaper.desktop as desktop
 from superpaper.desktop import linux, process, unknown
 from superpaper.desktop.wallpaper import Spanned
 from tests.desktop.conftest import IMAGE, NO_ACTIVITIES, assert_satisfies_desktop
+from tests.desktop.fake import FakeDesktop
 
 
 def test_linux_is_chosen_on_linux(monkeypatch):
@@ -22,15 +23,7 @@ def test_an_unknown_platform_gets_the_module_that_sets_nothing(monkeypatch):
     assert desktop.current() is unknown
 
 
-def test_the_functions_of_the_package_ask_the_chosen_module(monkeypatch):
-    monkeypatch.setattr(sys, "platform", "linux")
-    monkeypatch.setenv("DESKTOP_SESSION", "plasma")
-
-    assert desktop.takes_pieces("") is True
-    assert desktop.keeps_wallpaper() is False
-
-
-@pytest.mark.parametrize("module", [linux, unknown])
+@pytest.mark.parametrize("module", [linux, unknown, FakeDesktop()])
 def test_modules_satisfy_the_desktop_interface(module):
     assert_satisfies_desktop(module)
 

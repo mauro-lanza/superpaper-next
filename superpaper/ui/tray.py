@@ -14,8 +14,8 @@ from typing import assert_never
 import wx  # ty:ignore[unresolved-import]
 import wx.adv  # ty:ignore[unresolved-import]
 
-import superpaper.desktop as desktop
 from superpaper.__version__ import __version__
+from superpaper.desktop.backend import Desktop
 from superpaper.desktop.linux import running_kde
 from superpaper.desktop.linux.sni_tray import build_tray, sni_supported
 from superpaper.desktop.tray_menu import Check, Item, MenuEntry, Notice, Separator, Submenu, failure_notice
@@ -68,6 +68,7 @@ class TaskBarIcon(wx.adv.TaskBarIcon):
         self,
         store,
         session,
+        desktop: Desktop,
         *,
         last_failure,
         config_dir,
@@ -80,6 +81,7 @@ class TaskBarIcon(wx.adv.TaskBarIcon):
         super().__init__()
         self._store = store
         self._session = session
+        self._desktop = desktop
         self._last_failure = last_failure
         self._config_dir = config_dir
         self._open_editor = open_editor
@@ -161,7 +163,7 @@ class TaskBarIcon(wx.adv.TaskBarIcon):
 
     def open_config(self):
         """Opens Superpaper's config folder."""
-        result = desktop.open_folder(self._config_dir)
+        result = self._desktop.open_folder(self._config_dir)
         if not result.ok:
             logger.error("open_config failed for %s: %s", self._config_dir, result.problem)
             show_message_dialog("There was an error trying to open the config folder.")

@@ -10,8 +10,8 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import superpaper.desktop as desktop
 import superpaper.rendering.render as render
+from superpaper.desktop.backend import Desktop
 from superpaper.desktop.linux.kde import Activities
 from superpaper.desktop.process import Result
 from superpaper.desktop.wallpaper import Pieces, Spanned, Wallpaper
@@ -35,6 +35,7 @@ def show(
     files: Sequence[str],
     paths: AppPaths,
     *,
+    desktop: Desktop,
     layout: Layout,
     set_command: str,
     profile_id: ProfileId | None = None,
@@ -65,7 +66,7 @@ def show(
         output = render_cache.save(slot, image)
     except OSError as error:
         return _skipped(f"The wallpaper could not be saved: {error}")
-    result = set_wallpaper(output, files, layout=layout, paths=paths, set_command=set_command, running=running)
+    result = set_wallpaper(desktop, output, files, layout=layout, paths=paths, set_command=set_command, running=running)
     if not result.ok:
         return result.problem
     # Until the desktop takes the new render, the previous one may still be on screen.
@@ -107,6 +108,7 @@ def _render(profile: Profile, files: Sequence[str], layout: Layout) -> Image.Ima
 
 
 def set_wallpaper(
+    desktop: Desktop,
     image: Path | str,
     source_files: Sequence[str] = (),
     *,
@@ -135,7 +137,7 @@ def set_wallpaper(
     return result
 
 
-def show_again(stored: StoredProfile, paths: AppPaths, *, layout: Layout, set_command: str) -> bool:
+def show_again(stored: StoredProfile, paths: AppPaths, *, desktop: Desktop, layout: Layout, set_command: str) -> bool:
     """Show the last wallpaper again at startup, without rendering anything.
 
     That is the last render of the profile ``stored``, or a draft shown after it: the
@@ -162,7 +164,7 @@ def show_again(stored: StoredProfile, paths: AppPaths, *, layout: Layout, set_co
     elif desktop.keeps_wallpaper() and not _is_perspective_render(stored.profile, layout):
         pass
     else:
-        set_wallpaper(image, layout=layout, paths=paths, set_command=set_command, running=running)
+        set_wallpaper(desktop, image, layout=layout, paths=paths, set_command=set_command, running=running)
     return True
 
 

@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import assert_never
 
-import superpaper.desktop as desktop
+from superpaper.desktop.backend import Desktop
 from superpaper.geometry.display_detection import DisplayDetectionError, detect_layout
 from superpaper.geometry.displays import Layout
 from superpaper.geometry.perspective import Named
@@ -65,7 +65,7 @@ class SetImages:
 Request = StartTray | SetImages
 
 
-def run(argv: Sequence[str], paths: AppPaths) -> int:
+def run(argv: Sequence[str], paths: AppPaths, desktop: Desktop) -> int:
     """Do what the command line ``argv`` (without the program name) asks; returns the exit status.
 
     Superpaper's directories are created, and the desktop set to span, only on the way to
@@ -77,10 +77,10 @@ def run(argv: Sequence[str], paths: AppPaths) -> int:
             case StartTray():
                 if request.profile_id is not None:
                     _check_profile_exists(paths, request.profile_id)
-                _start_tray(paths, request.profile_id, debug=request.debug)
+                _start_tray(paths, desktop, request.profile_id, debug=request.debug)
                 return 0
             case SetImages():
-                return _set_images(request, paths)
+                return _set_images(request, paths, desktop)
             case _:
                 assert_never(request)
     except CliError as error:
@@ -216,7 +216,7 @@ def _log_uncaught_exception(exception_type, exception, traceback) -> None:
     _PACKAGE_LOGGER.critical("Uncaught exception", exc_info=(exception_type, exception, traceback))
 
 
-def _start_tray(paths: AppPaths, profile_id: ProfileId | None, *, debug: bool) -> None:
+def _start_tray(paths: AppPaths, desktop: Desktop, profile_id: ProfileId | None, *, debug: bool) -> None:
     """Run the tray applet, with ``profile_id`` started if given, and the desktop set to span.
 
     A first start writes the default settings, so that the file is there to edit. Raises
@@ -238,11 +238,11 @@ def _start_tray(paths: AppPaths, profile_id: ProfileId | None, *, debug: bool) -
     if not settings_file.exists():
         write_settings(settings_file, settings)
     configure_logging(debug=debug or settings.logging, log_file=paths.cache / "log" if settings.logging else None)
-    _span_desktop(settings.set_command)
-    run_tray(paths, settings, profile=profile_id)
+    _span_desktop(desktop, settings.set_command)
+    run_tray(paths, settings, desktop, profile=profile_id)
 
 
-def _span_desktop(set_command: str) -> None:
+def _span_desktop(desktop: Desktop, set_command: str) -> None:
     result = desktop.set_spanmode(set_command)
     if not result.ok:
         logger.warning("Could not set the desktop to span the displays: %s", result.problem)
@@ -272,7 +272,7 @@ def _check_profile_exists(paths: AppPaths, profile_id: ProfileId) -> None:
         raise CliError(message)
 
 
-def _set_images(request: SetImages, paths: AppPaths) -> int:
+def _set_images(request: SetImages, paths: AppPaths, desktop: Desktop) -> int:
     configure_logging(debug=request.debug)
     if request.debug:
         logger.info("Command line request: %s", request)
@@ -292,7 +292,7 @@ def _set_images(request: SetImages, paths: AppPaths) -> int:
         layout = _detect_displays(paths)
     if request.advanced and (hint := layout.size_hint()):
         logger.warning("%s", hint)
-    _span_desktop(set_command)
+    _span_desktop(desktop, set_command)
     images = [os.path.realpath(image) for image in request.images]
     if request.advanced:
         spanmode = "advanced"
@@ -308,4 +308,4 @@ def _set_images(request: SetImages, paths: AppPaths) -> int:
         offsets=request.offsets,
     )
     # What went wrong, if anything, is logged where it happened.
-    return 1 if show(profile, images, paths, layout=layout, set_command=set_command) is not None else 0
+    return 1 if show(profile, images, paths, desktop=desktop, layout=layout, set_command=set_command) is not None else 0
