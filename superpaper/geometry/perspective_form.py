@@ -1,16 +1,14 @@
-"""Saving a perspective from the perspective dialog, without any widgets.
+"""Staging a perspective from the perspective dialog, without any widgets.
 
-A PerspectiveForm holds what the dialog's fields show, as typed. save_perspective turns it
+A PerspectiveForm holds what the dialog's fields show, as typed. stage_perspective turns it
 into a perspective, asks first when it would need a very large intermediate image, and
-saves the layout's perspective choice.
+puts it in the layout's perspective choice; the layout is saved by the display band.
 """
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from pathlib import Path
 
 from superpaper.geometry import canvas, display_store
-from superpaper.geometry.display_store import SaveFailed
 from superpaper.geometry.displays import Layout
 from superpaper.geometry.perspective import Perspective, Swivel, SwivelAxis, Tilt
 from superpaper.geometry.units import mm_to_pixels, pixels_to_mm
@@ -45,14 +43,14 @@ class PerspectiveForm:
 
 
 @dataclass(frozen=True, slots=True)
-class Saved:
+class Staged:
     layout: Layout
-    """The layout with the perspective choice that was saved."""
+    """The layout with the perspective choice that was staged."""
 
 
 @dataclass(frozen=True, slots=True)
 class NeedsConfirm:
-    """The settings would need a very large intermediate image; save again with
+    """The settings would need a very large intermediate image; stage again with
     ``confirmed`` once the user accepts."""
 
     message: str
@@ -100,16 +98,15 @@ def form_from(perspective: Perspective, layout: Layout) -> PerspectiveForm:
     )
 
 
-def save_perspective(
+def stage_perspective(
     form: PerspectiveForm,
     *,
     layout: Layout,
     offsets: Sequence[Offset],
     warn_large: bool,
     confirmed: bool,
-    config_dir: Path,
-) -> Saved | Problems | NeedsConfirm | SaveFailed:
-    """Save the perspective ``form`` describes into ``layout``'s choice.
+) -> Staged | Problems | NeedsConfirm:
+    """The ``layout`` with the perspective ``form`` describes in its choice.
 
     ``offsets`` are the applied manual offsets that the image size check uses.
     """
@@ -135,15 +132,8 @@ def save_perspective(
         if canvas.exceeds_perspective_limit(size):
             return NeedsConfirm(_large_image_warning(size))
 
-    chosen = layout.with_perspective(perspective, use_perspective=form.use_perspective, is_default=form.is_default)
-    # The .persp file is written first, then the default it is named in.
-    return save_choice(config_dir, chosen) or Saved(chosen)
-
-
-def save_choice(config_dir: Path, layout: Layout) -> SaveFailed | None:
-    """Save the perspective choice of ``layout`` alone, without its unsaved layout edits."""
-    return display_store.save_or_failure(
-        display_store.save_perspective_choice, config_dir, layout, "perspective settings"
+    return Staged(
+        layout.with_perspective(perspective, use_perspective=form.use_perspective, is_default=form.is_default)
     )
 
 

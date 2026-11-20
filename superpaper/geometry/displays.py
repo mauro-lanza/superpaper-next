@@ -42,12 +42,15 @@ class Display:
 
 @dataclass(frozen=True, slots=True)
 class DisplaySettings:
-    """The display-wide settings of a Layout that the user edits and saves as a unit."""
+    """What the display settings band edits and saves as a unit, to compare or restore."""
 
     bezels_mm: tuple[Point, ...]
     offsets: tuple[Point, ...]
     use_user_diagonals: bool
     diagonal_inches: tuple[float, ...]
+    use_perspective: bool
+    default_perspective: str | None
+    perspectives: tuple[Perspective, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -224,7 +227,7 @@ class Layout:
             message = f"Bezel thicknesses can't be negative: {bezels_mm}"
             raise ValueError(message)
         changed = replace(self, bezels_mm=tuple((pair[0], pair[1]) for pair in bezels_mm))
-        if not self._is_valid():
+        if not self.is_valid():
             return changed.with_initial_offsets()
         old_cells = self._cells()
         old_bezels = self.ppi_norm_bezels()
@@ -242,10 +245,43 @@ class Layout:
                     dy += growth[1]
             shifted.append((self.ppi_norm_offsets[i][0] + dx, self.ppi_norm_offsets[i][1] + dy))
         moved = changed.with_offsets(shifted)
-        return moved if moved._is_valid() else moved.with_initial_offsets()
+        return moved if moved.is_valid() else moved.with_initial_offsets()
+
+    def with_overlaps_shifted(self) -> Layout | None:
+        """The layout with only the displays that overlap moved apart, each right or down by
+        the least that clears the displays placed before it; None if some still overlap.
+
+        Displays are placed left to right, top to bottom, so a display never moves for one
+        that comes after it, and every move passes a placed display for good.
+        """
+        cells = self._cells()
+        offsets: list[Point] = list(self.ppi_norm_offsets)
+        placed: list[int] = []
+        for i in sorted(range(len(cells)), key=lambda index: (cells[index][0], cells[index][1])):
+            while True:
+                left, top, right, bottom = cells[i]
+                blocker = next(
+                    (
+                        cells[j]
+                        for j in placed
+                        if _spans_overlap(left, right, cells[j][0], cells[j][2])
+                        and _spans_overlap(top, bottom, cells[j][1], cells[j][3])
+                    ),
+                    None,
+                )
+                if blocker is None:
+                    break
+                dx, dy = blocker[2] - left, blocker[3] - top
+                step = (dx, 0.0) if dx <= dy else (0.0, dy)
+                offsets[i] = (offsets[i][0] + step[0], offsets[i][1] + step[1])
+                cells[i] = (left + step[0], top + step[1], right + step[0], bottom + step[1])
+            placed.append(i)
+        shifted = self.with_offsets(offsets)
+        return shifted if shifted.is_valid() else None
 
     def with_diagonals(self, diagonal_inches: Sequence[float]) -> Layout:
-        """The layout with the diagonal sizes the user entered; positions are kept."""
+        """The layout with the diagonal sizes the user entered; positions are kept, so
+        displays may overlap afterwards."""
         return replace(self, user_diagonal_inches=tuple(diagonal_inches))
 
     def with_detected_sizes(self) -> Layout:
@@ -259,6 +295,9 @@ class Layout:
             offsets=self.ppi_norm_offsets,
             use_user_diagonals=self.uses_user_diagonals,
             diagonal_inches=tuple(round(diagonal, 2) for diagonal in self.diagonal_inches()),
+            use_perspective=self.use_perspective,
+            default_perspective=self.default_perspective,
+            perspectives=self.perspectives,
         )
 
     def with_settings(self, settings: DisplaySettings) -> Layout:
@@ -268,6 +307,12 @@ class Layout:
             layout.with_diagonals(settings.diagonal_inches)
             if settings.use_user_diagonals
             else layout.with_detected_sizes()
+        )
+        layout = replace(
+            layout,
+            use_perspective=settings.use_perspective,
+            default_perspective=settings.default_perspective,
+            perspectives=settings.perspectives,
         )
         # Positions are restored last: the bezel update above may rearrange the displays.
         return layout.with_offsets(settings.offsets)
@@ -353,8 +398,8 @@ class Layout:
             )
         ]
 
-    def _is_valid(self) -> bool:
-        """Whether no two displays overlap."""
+    def is_valid(self) -> bool:
+        """Whether no two displays overlap, bezels included."""
         cells = self._cells()
         return not any(
             _spans_overlap(a[0], a[2], b[0], b[2]) and _spans_overlap(a[1], a[3], b[1], b[3])

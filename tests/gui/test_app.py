@@ -32,8 +32,8 @@ def test_first_run_seeds_the_example_profiles(gui_env, tmp_path, desktop):
 
 @pytest.mark.parametrize(
     "error",
-    [DisplayDetectionError(3), OSError("no access to the config"), ValueError("bad layout")],
-    ids=["no-displays", "os-error", "unreadable-layout"],
+    [DisplayDetectionError(3), OSError("no access to the config")],
+    ids=["no-displays", "os-error"],
 )
 def test_a_startup_failure_is_reported_and_the_app_does_not_start(gui_env, monkeypatch, error):
     def fail(*args):

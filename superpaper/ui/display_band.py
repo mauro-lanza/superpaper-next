@@ -1,11 +1,24 @@
 """The editor's display settings band: the displays' diagonal sizes and bezels, which apply
 to every profile, with their own Save and Revert."""
 
+from dataclasses import dataclass
+
 import wx  # ty:ignore[unresolved-import]
 
 from superpaper.geometry import layout_edit
+from superpaper.geometry.displays import Layout
 from superpaper.ui.help import show_help_popup
 from superpaper.ui.message import show_message_dialog
+
+INVALID_COLOUR = wx.Colour(255, 200, 200)
+
+
+@dataclass(frozen=True, slots=True)
+class _Typing:
+    """The layout before diagonals were typed, and the one the typing staged from it."""
+
+    base: Layout
+    result: Layout
 
 
 class DisplayBand(wx.CollapsiblePane):
@@ -55,6 +68,7 @@ class DisplayBand(wx.CollapsiblePane):
         # The field texts typed before manual sizes were unchecked, for checking them again;
         # forgotten whenever the settings are saved or reverted.
         self._typed_diagonals = None
+        self._typing = None
         self._reverting = False
         self.Bind(wx.EVT_COLLAPSIBLEPANE_CHANGED, self.onToggle)
         pane = self.GetPane()
@@ -154,41 +168,72 @@ class DisplayBand(wx.CollapsiblePane):
         for tc, diag in zip(self.tc_list_diaginch, diags, strict=True):
             tc.ChangeValue(diag)
             tc.Enable(layout.uses_user_diagonals)
+        self._mark_invalid_diagonals()
 
     def set_baseline(self):
         """Record the current display-wide settings as the saved, clean baseline."""
         self._clean = self.staged.layout.settings()
         self._typed_diagonals = None
+        self._typing = None
         self.button_system_save.Enable(False)
         self.button_system_revert.Enable(False)
 
     def update_dirty(self):
-        """Enable Save and Revert while there are unsaved changes, and only then."""
+        """Enable Save while there are unsaved changes and every diagonal is valid, and
+        Revert while there are unsaved changes or an invalid diagonal."""
         if self._reverting or self._clean is None:
             return
         dirty = self.staged.layout.settings() != self._clean
-        if dirty != self.button_system_save.IsEnabled():
-            self.button_system_save.Enable(dirty)
-            self.button_system_revert.Enable(dirty)
+        invalid = self._has_invalid_diagonals()
+        self.button_system_save.Enable(dirty and not invalid)
+        self.button_system_revert.Enable(dirty or invalid)
+
+    def _has_invalid_diagonals(self):
+        return self.cb_diaginch.GetValue() and any(
+            layout_edit.parse_diagonal(tc.GetValue()) is None for tc in self.tc_list_diaginch
+        )
+
+    def _mark_invalid_diagonals(self):
+        """Colour the diagonal fields whose text isn't a valid size."""
+        for tc in self.tc_list_diaginch:
+            valid = not tc.IsEnabled() or layout_edit.parse_diagonal(tc.GetValue()) is not None
+            tc.SetBackgroundColour(wx.NullColour if valid else INVALID_COLOUR)
+            tc.Refresh()
 
     def _on_diagonal_changed(self, event):
         """Live-apply valid diagonal-size edits and refresh the dirty state.
 
         Consumes the event so it does not also reach the profile-level field
-        handler (display sizes are system-wide, not part of a profile).
+        handler (display sizes are system-wide, not part of a profile). An invalid
+        entry marks its field and leaves the staged layout as it is.
         """
         if not self._reverting and self.cb_diaginch.GetValue():
-            layout = layout_edit.with_entered_diagonals(
-                self.staged.layout, [tc.GetValue() for tc in self.tc_list_diaginch]
-            )
-            # Mid-edit / invalid entry: don't apply, wait for valid input.
-            if layout is not None:
-                self.staged.layout = layout
-                self._refresh_preview()
+            self._mark_invalid_diagonals()
+            inches = layout_edit.parse_diagonals([tc.GetValue() for tc in self.tc_list_diaginch])
+            if inches is not None:
+                self._stage_diagonals(inches)
         self.update_dirty()
+
+    def _stage_diagonals(self, inches):
+        """Stage ``inches``, shifting only the overlapping displays. Positions are fitted
+        from those before the typing began, so passing through a value such as the "1" of
+        "15.6" leaves no gap behind."""
+        current = self.staged.layout
+        if self._typing is None or current.settings() != self._typing.result.settings():
+            base = current
+        else:
+            base = self._typing.base
+        resized = layout_edit.fit_resized(base.with_diagonals(inches))
+        self._typing = _Typing(base, resized.layout)
+        self.staged.layout = resized.layout
+        self._refresh_preview()
+        if resized.rearranged_all:
+            show_message_dialog(layout_edit.REARRANGED_MESSAGE, "Info")
 
     def onSave(self, event):
         """Write the staged display-wide settings to disk."""
+        if self._has_invalid_diagonals():
+            return
         failed = self._save_layout(self.staged.layout)
         if failed is not None:
             show_message_dialog(failed.message, "Error")
@@ -203,6 +248,7 @@ class DisplayBand(wx.CollapsiblePane):
         self._reverting = True
         self._restore(self._clean)
         self._typed_diagonals = None
+        self._typing = None
         self._show_diagonals()
         self._reverting = False
         self.update_dirty()
@@ -214,8 +260,8 @@ class DisplayBand(wx.CollapsiblePane):
         """Toggle manual display sizes. Changes are staged, not saved to disk.
 
         Unchecking shows the auto-detected sizes and remembers the typed ones; checking
-        brings them back. Displays are only arranged afresh when the sizes change. Either
-        way the change is only persisted when the band's Save is pressed.
+        brings them back. Only displays that overlap afterwards are moved. Either way the
+        change is only persisted when the band's Save is pressed.
         """
         cb_state = self.cb_diaginch.GetValue()
         for tc in self.tc_list_diaginch:
@@ -225,16 +271,20 @@ class DisplayBand(wx.CollapsiblePane):
             if self._typed_diagonals is not None:
                 for tc, text in zip(self.tc_list_diaginch, self._typed_diagonals, strict=True):
                     tc.ChangeValue(text)
-            after = layout_edit.with_entered_diagonals(before, [tc.GetValue() for tc in self.tc_list_diaginch])
-            if after is None:
+            resized = layout_edit.with_entered_diagonals(before, [tc.GetValue() for tc in self.tc_list_diaginch])
+            if resized is None:
+                self._mark_invalid_diagonals()
                 self.update_dirty()
                 return
         else:
             self._typed_diagonals = [tc.GetValue() for tc in self.tc_list_diaginch]
-            after = before.with_detected_sizes()
-        self.staged.layout = layout_edit.arranged_if_resized(before, after)
+            resized = layout_edit.fit_resized(before.with_detected_sizes())
+        self.staged.layout = resized.layout
+        self._typing = None
         self._show_diagonals()
         self._refresh_preview()
+        if resized.rearranged_all:
+            show_message_dialog(layout_edit.REARRANGED_MESSAGE, "Info")
         self.update_dirty()
 
     def enable_diagonals(self, enable):

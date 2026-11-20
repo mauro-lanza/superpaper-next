@@ -746,6 +746,9 @@ class WallpaperSettingsPanel(wx.Panel):
         self.radiobox_spanmode.Enable(enable)
         self.sizer_toggle_children(self.sizer_profiles, enable)
         self.display_band.enable_diagonals(enable)
+        if enable:
+            # Enabling the profile row also enabled Save and Revert, which only unsaved changes may.
+            self._update_dirty_state()
 
     def show_adv_setting_sizer(self, show_bool):
         """Show/Hide the sizer for advanced spanning settings."""
@@ -952,9 +955,10 @@ class WallpaperSettingsPanel(wx.Panel):
         """The general settings as they are now, whichever window saved them."""
         return self._get_settings()
 
-    def adopt_perspectives(self, saved):
-        """Use the perspective choice of the layout ``saved``: the preview holds this layout."""
-        self.staged.layout = self.staged.layout.with_perspectives_of(saved)
+    def stage_perspectives(self, staged):
+        """Stage the perspective choice of the layout ``staged``; the band's Save writes it."""
+        self.staged.layout = self.staged.layout.with_perspectives_of(staged)
+        self.display_band.update_dirty()
 
     def onBrowsePaths(self, event):
         """Opens the pick paths dialog."""
@@ -1138,15 +1142,12 @@ class WallpaperSettingsPanel(wx.Panel):
             self,
             applied_offsets,
             typed_offsets,
-            layout=self.session.layout,
             staged_layout=lambda: self.staged.layout,
-            paths=self.paths,
             warn_large_img=self.settings.warn_large_img,
             browse_default_dir=self.settings.browse_default_dir,
-            adopt_perspectives=self.adopt_perspectives,
-            refresh_displays=self.refresh_displays,
+            stage_perspectives=self.stage_perspectives,
             show_test_profile=lambda profile, images: self.session.apply_draft(
-                profile, images, on_done=lambda problem: wx.CallAfter(draft_shown, problem)
+                profile, images, layout=self.staged.layout, on_done=lambda problem: wx.CallAfter(draft_shown, problem)
             ),
         )
         dlg.ShowModal()

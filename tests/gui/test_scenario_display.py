@@ -104,6 +104,14 @@ def test_display_settings_and_perspectives(gui_env, saved_layout, snapshots):
     dialog = gui_env.open_perspectives(panel)
     assert dialog.warn_large_img
 
+    def save_band():
+        """The band's Save writes what the band and the dialog staged."""
+        offered = band.button_system_save.IsEnabled()
+        band.onSave(None)
+        gui_env.settle(superpaper)
+        assert offered
+        assert not band.button_system_save.IsEnabled()
+
     # Perspectives: create 'desk', the default, viewer 700 mm away, display 1 swivelled 20° on its left edge.
     dialog.onCreateNewProfile(None)
     dialog.tc_name.SetValue("desk")
@@ -113,15 +121,20 @@ def test_display_settings_and_perspectives(gui_env, saved_layout, snapshots):
     dialog.grid_rows[1][1].SetSelection(1)
     dialog.grid_rows[1][2].SetValue("20")
     gui_env.shown()
+    files_before = (layout_file(), perspective_file())
     saved = dialog.onSave(None)
-    gui_env.settle(superpaper)
-    snapshot("desk-created")
+    # Staged with the band: nothing is written until the band's Save.
     assert saved is True
     assert layout().default_perspective == "desk"
+    assert (layout_file(), perspective_file()) == files_before
+    assert superpaper.session.layout.default_perspective is None
+    save_band()
+    snapshot("desk-created")
     assert "def_perspective = desk" in layout_file()
     assert "use_perspective = 1" in layout_file()
     assert "[desk]\n" in perspective_file()
     assert "swivels = 0,0.0,0.0,0.0;1,20.0,0.0,0.0" in perspective_file()
+    assert superpaper.session.layout.default_perspective == "desk"
     assert gui_env.shown() == []
     assert_restart_loads(layout(), config)
 
@@ -136,7 +149,7 @@ def test_display_settings_and_perspectives(gui_env, saved_layout, snapshots):
     dialog.populate_fields("desk")
     dialog.tclist_vieweroffs[2].SetValue("900")
     dialog.onSave(None)
-    gui_env.settle(superpaper)
+    save_band()
     snapshot("desk-edited")
     distance = layout().perspective("desk").viewer_pos[2]
     assert f"viewer_pos = 0.0,0.0,{distance}" in perspective_file()
@@ -148,7 +161,7 @@ def test_display_settings_and_perspectives(gui_env, saved_layout, snapshots):
     dialog.cb_dispsys_def.SetValue(False)
     dialog.tclist_vieweroffs[2].SetValue("2500")
     dialog.onSave(None)
-    gui_env.settle(superpaper)
+    save_band()
     snapshot("couch-created")
     assert sorted(layout().perspective_names()) == ["couch", "desk", "wall"]
     assert layout().default_perspective == "desk"
@@ -176,17 +189,26 @@ def test_display_settings_and_perspectives(gui_env, saved_layout, snapshots):
     assert (layout_file(), perspective_file()) == files_before
     gui_env.answer_yes = True
     accepted = dialog.onSave(None)
-    gui_env.settle(superpaper)
-    snapshot("couch-accepted")
     assert accepted is True
+    assert (layout_file(), perspective_file()) == files_before
+    save_band()
+    snapshot("couch-accepted")
     assert "1,89.5,0.0,0.0" not in perspective_file()
     assert "2,89.5,0.0,0.0" in perspective_file()
     assert_restart_loads(layout(), config)
 
-    # Delete 'desk', the default.
+    # Delete 'desk', the default; reverting the band instead of saving brings it back.
     dialog.choice_profiles.SetSelection(dialog.choice_profiles.FindString("desk"))
     dialog.onDeleteProfile(None)
-    gui_env.settle(superpaper)
+    assert layout().default_perspective is None
+    band.onRevert(None)
+    assert "desk" in layout().perspective_names()
+    assert layout().default_perspective == "desk"
+    dialog.layout = layout()
+    dialog.update_choiceprofile()
+    dialog.choice_profiles.SetSelection(dialog.choice_profiles.FindString("desk"))
+    dialog.onDeleteProfile(None)
+    save_band()
     snapshot("desk-deleted")
     assert sorted(layout().perspective_names()) == ["couch", "wall"]
     assert layout().default_perspective is None
