@@ -33,7 +33,7 @@ Display detection is bounded and transactional: transient enumeration failures a
 |-------|----------------|
 | [#25](https://github.com/hhannine/superpaper/issues/25) | Displays are re-detected when a profile starts and after the display settings are saved. Missing: detecting hotplug automatically, and re-rendering for the new layout without advancing the slideshow. |
 | [#105](https://github.com/hhannine/superpaper/issues/105) | Identify and implement a current, tested Deepin/DDE wallpaper API. |
-| [#113](https://github.com/hhannine/superpaper/issues/113) | Add macOS dependencies, packaging, and current multi-display validation. The known gap (PyObjC) is in [development-macos.md](docs/development-macos.md). |
+| [#113](https://github.com/hhannine/superpaper/issues/113) | Add macOS packaging and current multi-display validation (mixed Retina scales, the menu-bar tray). |
 | [#153](https://github.com/hhannine/superpaper/issues/153) | Use unique macOS crop generations and delayed cleanup to avoid cached/deleted `-b` image URLs. |
 
 ## Open Features And Documentation
