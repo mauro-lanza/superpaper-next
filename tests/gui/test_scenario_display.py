@@ -6,6 +6,7 @@ verifies is the sequence (edit, save, revert, restart) against the layout files.
 
 from dataclasses import replace
 
+from superpaper.desktop import linux
 from superpaper.geometry.display_detection import detect_layout
 
 
@@ -23,7 +24,7 @@ def state(layout):
 
 def assert_restart_loads(layout, config):
     """Load the layout afresh, as the next start does, and expect the editor's."""
-    again = state(detect_layout(config))
+    again = state(detect_layout(config, linux))
     differences = {name: (value, again[name]) for name, value in state(layout).items() if again[name] != value}
     assert not differences
 
@@ -193,7 +194,7 @@ def test_display_settings_and_perspectives(gui_env, saved_layout, snapshots):
     assert "[desk]" not in perspective_file()
 
     # Restart: the saved layout is what loads, and the session's layout is the saved one.
-    restarted = detect_layout(config)
+    restarted = detect_layout(config, linux)
     assert_restart_loads(layout(), config)
     assert state(superpaper.session.layout) == state(restarted)
     assert not list(config.glob(".superpaper-*.tmp"))

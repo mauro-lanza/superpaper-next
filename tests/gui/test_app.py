@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 import superpaper.desktop.process as process
+from superpaper.desktop import linux
 from superpaper.desktop.linux import UNKNOWN_DESKTOP
 from superpaper.geometry.display_detection import DisplayDetectionError
 from superpaper.geometry.displays import SIZE_HINT
@@ -123,7 +124,7 @@ def test_an_unknown_desktop_is_reported_once_at_startup_and_nothing_is_run(gui_e
 def test_undetected_display_sizes_are_mentioned_once_at_startup(gui_env, monkeypatch):
     gui_env.profile_file("Broken").unlink()
     without_sizes = [monitor(0, 0, 1920, 1080, None, None), monitor(1920, 0, 1280, 1024, None, None)]
-    monkeypatch.setattr("superpaper.geometry.display_detection.get_monitors", lambda: without_sizes)
+    monkeypatch.setattr(linux, "detect_monitors", lambda: without_sizes)
     superpaper = gui_env.start()
     gui_env.settle(superpaper)
     assert gui_env.shown() == [("app", "Info", SIZE_HINT)]

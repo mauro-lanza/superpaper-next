@@ -55,7 +55,7 @@ def load_profile(paths, name):
 
 
 def monitor(x, y, width, height, width_mm=500, height_mm=300, name="display"):
-    """A monitor as screeninfo reports it."""
+    """A monitor as the desktop reports it."""
     return SimpleNamespace(x=x, y=y, width=width, height=height, width_mm=width_mm, height_mm=height_mm, name=name)
 
 
@@ -72,7 +72,7 @@ def pixels(image):
 
 
 @pytest.fixture
-def display_layout(monkeypatch, tmp_path):
+def display_layout(desktop, tmp_path):
     """Build the display layout Superpaper detects for the given monitors.
 
     The layouts are loaded from ``config_dir``, by default a directory with none saved.
@@ -80,8 +80,8 @@ def display_layout(monkeypatch, tmp_path):
     from superpaper.geometry import display_detection
 
     def build(monitors=TWO_DISPLAYS, config_dir=None):
-        monkeypatch.setattr(display_detection, "get_monitors", lambda: monitors)
-        return display_detection.detect_layout(config_dir or tmp_path / "no-saved-layouts")
+        desktop.monitors = monitors
+        return display_detection.detect_layout(config_dir or tmp_path / "no-saved-layouts", desktop)
 
     return build
 

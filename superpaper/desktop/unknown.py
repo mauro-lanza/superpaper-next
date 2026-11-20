@@ -5,6 +5,7 @@ import sys
 from collections.abc import Callable, Mapping
 from pathlib import Path
 
+from superpaper.desktop.monitors import detect_monitors as detect_monitors
 from superpaper.desktop.process import Result, run
 from superpaper.desktop.process import run_hook as run_hook
 from superpaper.desktop.tray_menu import MenuEntry, TrayHandle

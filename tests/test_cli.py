@@ -272,7 +272,7 @@ def test_setimages_dispatches_one_shot_render(monkeypatch, tmp_path, app_paths, 
     captured = {}
     layout = SimpleNamespace(name="detected")
 
-    def detect(config_dir):
+    def detect(config_dir, desktop):
         assert config_dir == app_paths.config
         captured["detections"] = captured.get("detections", 0) + 1
         return layout
@@ -302,7 +302,7 @@ def test_setimages_uses_the_saved_set_command_unless_one_is_given(
     image.touch()
     (app_paths.config / "general_settings").write_text("set_command=saved {image}\n", encoding="utf-8")
     shown = []
-    monkeypatch.setattr(cli, "detect_layout", lambda config_dir: SimpleNamespace(size_hint=lambda: ""))
+    monkeypatch.setattr(cli, "detect_layout", lambda config_dir, desktop: SimpleNamespace(size_hint=lambda: ""))
     monkeypatch.setattr(cli, "show", lambda *args, set_command, **kwargs: shown.append(set_command))
 
     assert cli.run(["--setimages", str(image), *extra_arguments], app_paths, desktop) == 0
@@ -313,7 +313,7 @@ def test_setimages_uses_the_saved_set_command_unless_one_is_given(
 def test_a_wallpaper_that_cant_be_shown_exits_with_an_error(monkeypatch, tmp_path, app_paths, desktop):
     image = tmp_path / "wallpaper.png"
     image.touch()
-    monkeypatch.setattr(cli, "detect_layout", lambda config_dir: SimpleNamespace())
+    monkeypatch.setattr(cli, "detect_layout", lambda config_dir, desktop: SimpleNamespace())
     # The problem is logged where it happens.
     monkeypatch.setattr(cli, "show", lambda *args, **kwargs: f"The image {image} can't be opened.")
 
@@ -328,7 +328,7 @@ def test_advanced_cli_arguments_are_preserved(monkeypatch, tmp_path, app_paths, 
     image.touch()
     captured = {}
     layout = SimpleNamespace(perspective_names=lambda: ["desk"], size_hint=lambda: None)
-    monkeypatch.setattr(cli, "detect_layout", lambda config_dir: layout)
+    monkeypatch.setattr(cli, "detect_layout", lambda config_dir, desktop: layout)
     monkeypatch.setattr(
         cli,
         "show",
@@ -417,7 +417,9 @@ def test_an_undetected_display_size_is_mentioned_when_spanning_by_size(
     image = tmp_path / "wallpaper.png"
     image.touch()
     arguments = ["--setimages", str(image), "--command", "setter {image}"]
-    monkeypatch.setattr(cli, "detect_layout", lambda config_dir: SimpleNamespace(size_hint=lambda: "Enter its size."))
+    monkeypatch.setattr(
+        cli, "detect_layout", lambda config_dir, desktop: SimpleNamespace(size_hint=lambda: "Enter its size.")
+    )
     monkeypatch.setattr(cli, "show", lambda *args, **kwargs: None)
 
     assert cli.run([*arguments, "--advanced"] if advanced else arguments, app_paths, desktop) == 0
@@ -446,7 +448,7 @@ def test_profile_launch_returns_after_the_tray_quits(monkeypatch, app_paths, des
     tray_calls = []
     app.run = lambda paths, settings, desktop, profile=None: tray_calls.append(profile)
     monkeypatch.setitem(sys.modules, "superpaper.ui.app", app)
-    monkeypatch.setattr(cli, "detect_layout", lambda config_dir: None)
+    monkeypatch.setattr(cli, "detect_layout", lambda config_dir, desktop: None)
 
     assert cli.run(["--profile", "saved"], app_paths, desktop) == 0
     assert [profile_id.value for profile_id in tray_calls] == ["saved"]
@@ -456,7 +458,7 @@ def test_profile_launch_returns_after_the_tray_quits(monkeypatch, app_paths, des
 def test_invalid_profile_id_fails_before_inventory_or_display_data(monkeypatch, app_paths, desktop):
     profiles = app_paths.profiles
     (profiles / "existing.profile").write_text("name=existing\n", encoding="utf-8")
-    monkeypatch.setattr(cli, "detect_layout", lambda config_dir: pytest.fail("display data was requested"))
+    monkeypatch.setattr(cli, "detect_layout", lambda config_dir, desktop: pytest.fail("display data was requested"))
     monkeypatch.setattr(cli.profile_store, "discover", lambda paths: pytest.fail("inventory was constructed"))
 
     assert cli.run(["--profile", "../invalid"], app_paths, desktop) == 1
@@ -474,7 +476,7 @@ def test_invalid_profile_id_fails_before_inventory_or_display_data(monkeypatch, 
 def test_profile_launch_reports_layout_failure(monkeypatch, app_paths, desktop, caplog, error, message):
     (app_paths.profiles / "existing.profile").write_text("name=existing\n", encoding="utf-8")
 
-    def fail(config_dir):
+    def fail(config_dir, desktop):
         raise error
 
     monkeypatch.setattr(cli, "detect_layout", fail)
@@ -496,7 +498,7 @@ def test_profile_lookup_accepts_valid_unicode(monkeypatch, app_paths, desktop):
 
     app.run = run
     monkeypatch.setitem(sys.modules, "superpaper.ui.app", app)
-    monkeypatch.setattr(cli, "detect_layout", lambda config_dir: None)
+    monkeypatch.setattr(cli, "detect_layout", lambda config_dir, desktop: None)
 
     with pytest.raises(SystemExit):
         cli.run(["--profile", "Työ"], app_paths, desktop)
@@ -520,7 +522,7 @@ def test_profile_launch_accepts_profiles_saved_by_older_versions(monkeypatch, tm
     calls = []
     app.run = lambda paths, settings, desktop, profile=None: calls.append(profile)
     monkeypatch.setitem(sys.modules, "superpaper.ui.app", app)
-    monkeypatch.setattr(cli, "detect_layout", lambda config_dir: None)
+    monkeypatch.setattr(cli, "detect_layout", lambda config_dir, desktop: None)
 
     assert cli.run(["--profile", "saved"], app_paths, desktop) == 0
     assert [profile_id.value for profile_id in calls] == ["saved"]
@@ -533,7 +535,7 @@ def test_profile_lookup_rejects_malformed_content_before_tray(monkeypatch, app_p
     calls = []
     app.run = lambda paths, settings, desktop, profile=None: calls.append(profile)
     monkeypatch.setitem(sys.modules, "superpaper.ui.app", app)
-    monkeypatch.setattr(cli, "detect_layout", lambda config_dir: None)
+    monkeypatch.setattr(cli, "detect_layout", lambda config_dir, desktop: None)
 
     assert cli.run(["--profile", "saved"], app_paths, desktop) == 1
 

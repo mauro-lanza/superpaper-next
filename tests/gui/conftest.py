@@ -276,7 +276,7 @@ def gui_env(wx_app, app_paths, tmp_path, monkeypatch):
     # A profile with a value that can't be used: the app offers to delete it, once.
     env.write_profile("Broken", "name=Broken\ndelay=soon\n")
 
-    monkeypatch.setattr(display_detection, "get_monitors", lambda: TWO_DISPLAYS)
+    monkeypatch.setattr(linux, "detect_monitors", lambda: TWO_DISPLAYS)
     monkeypatch.setitem(sys.modules, "system_hotkey", SimpleNamespace(SystemHotkey=RecordingSystemHotkey))
     monkeypatch.setattr(sni_tray, "sni_supported", lambda: False)
 
@@ -334,7 +334,7 @@ def snapshots(request, gui_env):
 def saved_layout(gui_env):
     """The layout of the two fixed monitors as a user has saved it: the default positions and
     one perspective, "wall", that isn't the default."""
-    layout = display_detection.detect_layout(gui_env.paths.config)
+    layout = display_detection.detect_layout(gui_env.paths.config, linux)
     count = len(layout.displays)
     viewer_position = (0.0, 0.0, layout.max_ppi() * 1200 / 25.4)
     wall = Perspective(
