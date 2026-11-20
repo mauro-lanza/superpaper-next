@@ -3,10 +3,8 @@ profile, New and the tray's Exit ask whether to save, discard or keep editing; D
 profile leaves the display band unsaved."""
 
 import pytest
-import wx
 
 from superpaper.profiles.profile_id import NEW_PROFILE_LABEL
-from superpaper.ui.display_band import LABEL, UNSAVED_MARKER
 from superpaper.unsaved_changes import Answer
 
 PROFILE_ONLY = "The profile has unsaved changes."
@@ -37,6 +35,8 @@ def layout_saved(gui_env):
 
 
 def is_open(editor):
+    import wx
+
     # A closed window is destroyed once the event loop is idle.
     wx.YieldIfNeeded()
     return bool(editor.frame)
@@ -228,17 +228,17 @@ def test_new_profile_asks_the_same_question(gui_env, editor, answer, blank):
 
 def test_the_marker_shows_while_the_displays_are_unsaved_and_goes_with_save_or_revert(gui_env, editor):
     band = editor.display_band
-    assert band.GetLabel() == LABEL
+    assert not band.shows_unsaved_marker()
 
     edit_displays(editor)
-    assert UNSAVED_MARKER in band.GetLabel()
+    assert band.shows_unsaved_marker()
 
     band.onRevert(None)
-    assert band.GetLabel() == LABEL
+    assert not band.shows_unsaved_marker()
 
     edit_displays(editor)
     band.onSave(None)
-    assert band.GetLabel() == LABEL
+    assert not band.shows_unsaved_marker()
 
 
 def test_saving_the_profile_leaves_the_displays_unsaved(gui_env, editor):
@@ -249,7 +249,7 @@ def test_saving_the_profile_leaves_the_displays_unsaved(gui_env, editor):
 
     assert stored_delay(gui_env, "Work") == EDITED_DELAY
     assert not layout_saved(gui_env)
-    assert UNSAVED_MARKER in editor.display_band.GetLabel()
+    assert editor.display_band.shows_unsaved_marker()
     assert editor.display_band.button_system_save.IsEnabled()
 
 

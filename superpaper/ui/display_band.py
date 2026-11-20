@@ -73,6 +73,7 @@ class DisplayBand(wx.CollapsiblePane):
         self._typed_diagonals = None
         self._typing = None
         self._reverting = False
+        self._unsaved_marker_shown = False
         self.Bind(wx.EVT_COLLAPSIBLEPANE_CHANGED, self.onToggle)
         pane = self.GetPane()
 
@@ -201,7 +202,13 @@ class DisplayBand(wx.CollapsiblePane):
         return self.staged.layout.settings() != self._clean or self._has_invalid_diagonals()
 
     def _show_unsaved_marker(self, unsaved):
+        self._unsaved_marker_shown = unsaved
         self.SetLabel(f"{LABEL}  -  {UNSAVED_MARKER}" if unsaved else LABEL)
+
+    def shows_unsaved_marker(self):
+        """Whether the header carries the unsaved marker. Kept here because wxGTK's
+        CollapsiblePane::SetLabel only updates the GtkExpander, so GetLabel reads back empty."""
+        return self._unsaved_marker_shown
 
     def _has_invalid_diagonals(self):
         return self.cb_diaginch.GetValue() and any(
