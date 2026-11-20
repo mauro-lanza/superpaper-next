@@ -16,22 +16,14 @@ cd superpaper-next
 uv sync --group dev --extra gui
 ```
 
-Runtime dependencies (Pillow, screeninfo, numpy, system_hotkey310) come from
-`pyproject.toml`; there is no separate requirements file. The `gui` extra pulls
-in wxPython, which installs from PyPI on macOS.
+Runtime dependencies (Pillow, screeninfo, numpy, and PyObjC's Cocoa and Quartz
+frameworks on macOS) come from `pyproject.toml`; there is no separate requirements
+file. The `gui` extra pulls in wxPython, which installs from PyPI on macOS.
 
 ## Known gaps
 
-- **PyObjC is not declared as a dependency.** `superpaper/desktop/macos.py` imports
-  `AppKit` and `Foundation` unconditionally on darwin, so a plain
-  `pip install superpaper` produces a package that fails at import. Install it
-  manually:
-
-  ```sh
-  uv pip install pyobjc
-  ```
-
-The PyObjC gap is tracked under #113 in [`ISSUES.md`](../ISSUES.md).
+- **Hotkeys are unsupported.** system_hotkey has no macOS backend, so it is not
+  installed on macOS and hotkeys stay off.
 
 ## Where files live
 
