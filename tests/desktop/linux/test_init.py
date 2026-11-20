@@ -1,6 +1,8 @@
-"""The Linux wallpaper setters and the user's own command."""
+"""The Linux wallpaper setters, the user's own command and the desktop facts around them."""
 
 import subprocess
+
+import pytest
 
 from superpaper.desktop import linux, process
 from superpaper.desktop.process import Result
@@ -128,3 +130,78 @@ def test_kde_needs_the_wallpaper_cut_into_pieces(monkeypatch):
     assert uncut.problem == "KDE Plasma needs the wallpaper cut into one image per display."
     assert cut.ok
     assert shown == [("/a.png", "/b.png")]
+
+
+def test_the_setter_problem_is_the_unknown_desktop_unless_the_user_has_a_command(monkeypatch):
+    monkeypatch.setenv("DESKTOP_SESSION", "unknown")
+
+    assert linux.setter_problem("") == linux.UNKNOWN_DESKTOP
+    assert linux.setter_problem("setter {image}") is None
+
+
+def test_the_config_folder_opens_in_the_file_manager(ran, tmp_path):
+    assert linux.open_folder(tmp_path).ok
+
+    assert [command for command, _ in ran] == [["xdg-open", str(tmp_path)]]
+
+
+def test_linux_keeps_no_wallpaper_across_restarts():
+    assert linux.keeps_wallpaper() is False
+
+
+@pytest.mark.parametrize(
+    ("session", "set_command", "takes_pieces"),
+    [("plasma", "", True), ("plasma", "setter {image}", False), ("gnome", "", False)],
+)
+def test_only_kde_takes_one_image_per_display(monkeypatch, session, set_command, takes_pieces):
+    monkeypatch.setenv("DESKTOP_SESSION", session)
+
+    assert linux.takes_pieces(set_command) is takes_pieces
+
+
+@pytest.mark.parametrize(
+    ("session", "schema"),
+    [
+        ("zorin", "org.gnome.desktop.background"),
+        ("cinnamon-wayland", "org.cinnamon.desktop.background"),
+        ("mate", "org.mate.background"),
+    ],
+)
+def test_span_mode_spans_one_image_across_the_displays(monkeypatch, ran, session, schema):
+    monkeypatch.setenv("DESKTOP_SESSION", session)
+
+    assert linux.set_spanmode("").ok
+
+    assert [command for command, _ in ran] == [["/usr/bin/gsettings", "set", schema, "picture-options", "spanned"]]
+
+
+@pytest.mark.parametrize("session", ["plasma", "xfce", "i3", None])
+def test_span_mode_leaves_desktops_without_the_setting_alone(monkeypatch, ran, session):
+    if session:
+        monkeypatch.setenv("DESKTOP_SESSION", session)
+
+    assert linux.set_spanmode("").ok
+
+    assert ran == []
+
+
+@pytest.mark.parametrize("set_command", ["setter {image}", "feh"])
+def test_span_mode_leaves_the_desktop_alone_when_the_user_sets_the_wallpaper(monkeypatch, ran, set_command):
+    monkeypatch.setenv("DESKTOP_SESSION", "gnome")
+
+    assert linux.set_spanmode(set_command).ok
+
+    assert ran == []
+
+
+def test_span_mode_reports_what_the_desktop_refused(monkeypatch):
+    monkeypatch.setenv("DESKTOP_SESSION", "gnome")
+    monkeypatch.setattr(
+        process.subprocess,
+        "run",
+        lambda command, **options: subprocess.CompletedProcess(command, 1, stdout="", stderr="no schema\n"),
+    )
+
+    result = linux.set_spanmode("")
+
+    assert result.problem == "gsettings failed with exit status 1: no schema"

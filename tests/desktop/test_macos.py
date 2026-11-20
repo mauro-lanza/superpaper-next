@@ -5,7 +5,7 @@ import pytest
 
 import superpaper.desktop as desktop
 from superpaper.desktop.wallpaper import Pieces
-from tests.desktop.conftest import IMAGE
+from tests.desktop.conftest import IMAGE, NO_ACTIVITIES, assert_satisfies_desktop
 
 
 @pytest.fixture
@@ -45,7 +45,7 @@ def test_macos_shows_one_piece_per_screen_in_display_order(appkit):
     set_images = appkit(screens=[1920, 0])
     from superpaper.desktop import macos
 
-    result = macos.set_wallpaper(Pieces(IMAGE, ("/left.png", "/right.png")))
+    result = macos.set_wallpaper(Pieces(IMAGE, ("/left.png", "/right.png")), set_command="", activities=NO_ACTIVITIES)
 
     assert result.ok
     assert set_images == [(0, "/left.png"), (1920, "/right.png")]
@@ -55,7 +55,33 @@ def test_macos_reports_pieces_that_dont_match_the_screens(appkit):
     set_images = appkit(screens=[0, 1920])
     from superpaper.desktop import macos
 
-    result = macos.set_wallpaper(Pieces(IMAGE, ("/only.png",)))
+    result = macos.set_wallpaper(Pieces(IMAGE, ("/only.png",)), set_command="", activities=NO_ACTIVITIES)
 
     assert result.problem == "There are 2 screens but 1 wallpaper pieces."
     assert set_images == []
+
+
+def test_macos_cuts_the_wallpaper_into_pieces_and_spans_nothing(appkit):
+    appkit(screens=[0])
+    from superpaper.desktop import macos
+
+    assert macos.takes_pieces("") is True
+    assert macos.keeps_wallpaper() is False
+    assert macos.setter_problem("") is None
+    assert macos.set_spanmode("").ok
+
+
+def test_macos_opens_the_folder_with_open(appkit, ran, tmp_path):
+    appkit(screens=[0])
+    from superpaper.desktop import macos
+
+    assert macos.open_folder(tmp_path).ok
+
+    assert [command for command, _ in ran] == [["open", str(tmp_path)]]
+
+
+def test_macos_satisfies_the_desktop_interface(appkit):
+    appkit(screens=[0])
+    from superpaper.desktop import macos
+
+    assert_satisfies_desktop(macos)

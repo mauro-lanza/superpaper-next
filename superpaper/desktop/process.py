@@ -4,7 +4,9 @@ failures returned as values."""
 import os
 import subprocess
 import sys
+from collections.abc import Sequence
 from dataclasses import dataclass
+from pathlib import Path
 
 # How AppRun saves the host's original environment values; see release-tooling/appimage/AppRun.
 _HOSTENV_PREFIX = "SUPERPAPER_HOSTENV_"
@@ -57,6 +59,12 @@ def run(command: list[str], *, timeout: float | None = None, capture_output: boo
         message = (completed.stderr or "").strip() or "no message"
         return Result(f"{name} failed with exit status {completed.returncode}: {message}")
     return Result(output=completed.stdout or "")
+
+
+def run_hook(script: Path, image: str, sources: Sequence[str]) -> Result:
+    """Run the user's script after a wallpaper change, with the image and then each source
+    image as its own argument."""
+    return run(["python3", str(script), image, *sources])
 
 
 def host_spawn_env() -> dict[str, str]:

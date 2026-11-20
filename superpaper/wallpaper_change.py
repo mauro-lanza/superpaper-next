@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 
 import superpaper.desktop as desktop
 import superpaper.rendering.render as render
-from superpaper.desktop.kde import Activities
+from superpaper.desktop.linux.kde import Activities
 from superpaper.desktop.process import Result
 from superpaper.desktop.wallpaper import Pieces, Spanned, Wallpaper
 from superpaper.paths import AppPaths

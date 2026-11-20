@@ -17,7 +17,7 @@ import wx.adv  # ty:ignore[unresolved-import]
 import superpaper.desktop as desktop
 from superpaper.__version__ import __version__
 from superpaper.desktop.linux import running_kde
-from superpaper.desktop.sni_tray import build_tray, sni_supported
+from superpaper.desktop.linux.sni_tray import build_tray, sni_supported
 from superpaper.desktop.tray_menu import Check, Item, MenuEntry, Notice, Separator, Submenu, failure_notice
 from superpaper.paths import resource
 from superpaper.ui.message import show_message_dialog
