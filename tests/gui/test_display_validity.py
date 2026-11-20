@@ -48,9 +48,7 @@ def drag_second_display(layout_editor, dx):
     layout_editor.positions_dragged = True
 
 
-def test_typing_the_portables_diagonal_leaves_the_displays_apart_without_a_gap_from_passing_values(
-    gui_env, superpaper
-):
+def test_typing_the_portables_diagonal_leaves_the_displays_apart_without_a_gap_from_passing_values(gui_env, superpaper):
     panel = gui_env.open_editor(superpaper)
     band = panel.display_band
     before = panel.staged.layout
