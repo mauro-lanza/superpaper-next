@@ -47,8 +47,8 @@ This builds `dist/Superpaper.app` (a menu-bar-only app, no Dock icon) and packag
 The app is only ad-hoc signed, not signed with an Apple Developer ID or notarized. Users
 open it with right-click → Open, or run `xattr -dr com.apple.quarantine /Applications/Superpaper.app`.
 
-The `macOS build` workflow builds the dmg on pushes to master, `v*` tags and manual runs,
-and uploads it as a workflow artifact. Attach it to the GitHub release by hand.
+The `macOS` workflow builds the dmg on pushes to master, `v*` tags, pull requests touching
+the desktop/build paths and manual runs, and uploads it as a workflow artifact. Attach it to the GitHub release by hand.
 
 ## Windows (exe + installer)
 
