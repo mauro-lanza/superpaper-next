@@ -21,7 +21,7 @@ def profile_bytes(name, extra=b""):
 
 def loaded(app_paths):
     """The profiles that load, as the tray finds them."""
-    store = ProfileStore(app_paths)
+    store = ProfileStore(app_paths, windows_names=False)
     store.reload()
     return store.profiles
 
@@ -39,11 +39,11 @@ def stored_profile(app_paths, name, extra=""):
 
 def save_over(app_paths, current, profile, **kwargs):
     """Save ``profile`` the way the editor does after opening ``current``."""
-    return ProfileStore(app_paths).save(profile, current=current, **kwargs).path
+    return ProfileStore(app_paths, windows_names=False).save(profile, current=current, **kwargs).path
 
 
 def save_new(app_paths, profile):
-    return ProfileStore(app_paths).save(profile).path
+    return ProfileStore(app_paths, windows_names=False).save(profile).path
 
 
 def prepare_profile(app_paths, tmp_path):
@@ -55,7 +55,7 @@ def prepare_profile(app_paths, tmp_path):
 
 def running(app_paths):
     """The profile the tray starts with, as it finds it."""
-    store = ProfileStore(app_paths)
+    store = ProfileStore(app_paths, windows_names=False)
     store.reload()
     return store.active()
 
@@ -67,10 +67,13 @@ def test_discovery_returns_valid_profiles_in_filename_order(app_paths):
     (profiles / "nested").mkdir()
     (profiles / "nested" / "Hidden.profile").write_bytes(profile_bytes("Hidden"))
 
-    inventory = profile_store.discover(app_paths)
+    inventory = profile_store.discover(app_paths, windows_names=False)
 
     assert [entry.profile_id.value for entry in inventory.entries] == ["Alpha", "Zulu"]
-    assert [stored.profile_id for stored in loaded(app_paths)] == [ProfileId("Alpha"), ProfileId("Zulu")]
+    assert [stored.profile_id for stored in loaded(app_paths)] == [
+        ProfileId.parse("Alpha", windows_names=False),
+        ProfileId.parse("Zulu", windows_names=False),
+    ]
 
 
 def test_a_filename_that_is_not_a_profile_name_is_diagnosed_and_left_alone(app_paths):
@@ -78,7 +81,7 @@ def test_a_filename_that_is_not_a_profile_name_is_diagnosed_and_left_alone(app_p
     original = profile_bytes("cli")
     path.write_bytes(original)
 
-    store = ProfileStore(app_paths)
+    store = ProfileStore(app_paths, windows_names=False)
     diagnostics = store.reload()
 
     assert store.profiles == []
@@ -103,7 +106,7 @@ def test_profiles_saved_by_older_versions_keep_loading(app_paths, stem, name_lin
 
     (stored,) = loaded(app_paths)
 
-    assert stored.profile_id == ProfileId(stem)
+    assert stored.profile_id == ProfileId.parse(stem, windows_names=False)
     assert stored.profile.name == stem
     assert path.read_bytes() == original
 
@@ -115,7 +118,7 @@ def test_case_variant_profiles_both_load(app_paths):
     if len(list(profiles.iterdir())) == 1:
         pytest.skip("the filesystem is case-insensitive")
 
-    inventory = profile_store.discover(app_paths)
+    inventory = profile_store.discover(app_paths, windows_names=False)
 
     assert [entry.profile_id.value for entry in inventory.entries] == ["Work", "work"]
     assert load_profile(app_paths, "Work").profile.name == "Work"
@@ -128,16 +131,16 @@ def test_symlinked_profiles_load(app_paths, tmp_path, outside):
     target.write_bytes(profile_bytes("linked"))
     (app_paths.profiles / "linked.profile").symlink_to(target)
 
-    inventory = profile_store.discover(app_paths)
+    inventory = profile_store.discover(app_paths, windows_names=False)
 
     assert [entry.profile_id.value for entry in inventory.entries] == ["linked"]
-    assert load_profile(app_paths, "linked").profile_id == ProfileId("linked")
+    assert load_profile(app_paths, "linked").profile_id == ProfileId.parse("linked", windows_names=False)
 
 
 def test_broken_symlink_is_a_diagnostic(app_paths, tmp_path):
     (app_paths.profiles / "gone.profile").symlink_to(tmp_path / "missing")
 
-    inventory = profile_store.discover(app_paths)
+    inventory = profile_store.discover(app_paths, windows_names=False)
 
     assert inventory.entries == ()
     assert [diagnostic.kind for diagnostic in inventory.diagnostics] == [ProfileDiagnosticKind.NOT_REGULAR_FILE]
@@ -154,7 +157,9 @@ def test_unicode_names_load_by_their_own_form(app_paths):
 
     assert composed in names
     assert decomposed in names
-    assert load_profile(app_paths, ProfileId(composed)).profile_id == ProfileId(composed)
+    assert load_profile(app_paths, ProfileId.parse(composed, windows_names=False)).profile_id == ProfileId.parse(
+        composed, windows_names=False
+    )
 
 
 def test_a_name_line_never_becomes_an_identity(app_paths, tmp_path):
@@ -164,11 +169,11 @@ def test_a_name_line_never_becomes_an_identity(app_paths, tmp_path):
 
     (stored,) = loaded(app_paths)
 
-    assert stored.profile_id == ProfileId("Original")
+    assert stored.profile_id == ProfileId.parse("Original", windows_names=False)
     assert stored.profile.hotkey == ("control", "x")
     with pytest.raises(ProfileIdError):
-        ProfileId.parse("../outside")
-    ProfileStore(app_paths).delete(stored)
+        ProfileId.parse("../outside", windows_names=False)
+    ProfileStore(app_paths, windows_names=False).delete(stored)
     assert outside.read_bytes() == b"sentinel"
 
 
@@ -183,7 +188,7 @@ def test_delete_uses_loaded_content_and_rejects_replacement(app_paths):
     os.utime(path, ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns))
 
     with pytest.raises(profile_store.ManagedPathError):
-        ProfileStore(app_paths).delete(stored)
+        ProfileStore(app_paths, windows_names=False).delete(stored)
 
     assert path.read_bytes() == replacement
 
@@ -195,7 +200,7 @@ def test_deleting_a_symlinked_profile_removes_only_the_link(app_paths, tmp_path)
     link = app_paths.profiles / "Work.profile"
     link.symlink_to(dotfile)
 
-    ProfileStore(app_paths).delete(load_profile(app_paths, "Work"))
+    ProfileStore(app_paths, windows_names=False).delete(load_profile(app_paths, "Work"))
 
     assert not link.is_symlink()
     assert dotfile.read_bytes() == profile_bytes("Work")
@@ -205,13 +210,13 @@ def test_deleting_one_profile_leaves_the_others(app_paths):
     profiles = app_paths.profiles
     (profiles / "Work.profile").write_bytes(profile_bytes("Work"))
     (profiles / "Other.profile").write_bytes(profile_bytes("Other"))
-    store = ProfileStore(app_paths)
+    store = ProfileStore(app_paths, windows_names=False)
     store.reload()
 
-    store.delete(store.get(ProfileId("Work")))
+    store.delete(store.get(ProfileId.parse("Work", windows_names=False)))
 
     assert [path.name for path in profiles.iterdir()] == ["Other.profile"]
-    assert [stored.profile_id for stored in store.profiles] == [ProfileId("Other")]
+    assert [stored.profile_id for stored in store.profiles] == [ProfileId.parse("Other", windows_names=False)]
 
 
 def test_a_value_that_cant_be_used_makes_a_profile_malformed(app_paths):
@@ -219,7 +224,7 @@ def test_a_value_that_cant_be_used_makes_a_profile_malformed(app_paths):
     original = profile_bytes("broken", b"delay=soon\n")
     path.write_bytes(original)
 
-    store = ProfileStore(app_paths)
+    store = ProfileStore(app_paths, windows_names=False)
     (diagnostic,) = store.reload()
 
     assert store.profiles == []
@@ -237,7 +242,7 @@ def test_a_profile_earlier_versions_loaded_still_loads(app_paths):
 def test_a_malformed_profile_is_deleted_only_as_it_was_diagnosed(app_paths, replaced_meanwhile, deleted):
     path = app_paths.profiles / "broken.profile"
     path.write_bytes(profile_bytes("broken", b"delay=not-a-number\n"))
-    (diagnostic,) = ProfileStore(app_paths).reload()
+    (diagnostic,) = ProfileStore(app_paths, windows_names=False).reload()
     replacement = profile_bytes("broken", b"hotkey=control+x\n")
     if replaced_meanwhile:
         path.write_bytes(replacement)
@@ -264,7 +269,7 @@ def test_an_unreadable_profile_is_an_io_error_not_malformed(app_paths):
     path.write_bytes(profile_bytes("saved"))
     path.chmod(0)
 
-    store = ProfileStore(app_paths)
+    store = ProfileStore(app_paths, windows_names=False)
     diagnostics = store.reload()
     path.chmod(0o644)
 
@@ -277,7 +282,7 @@ def test_an_unreadable_profile_is_an_io_error_not_malformed(app_paths):
 def test_fifo_profile_is_diagnostic_without_blocking(app_paths):
     os.mkfifo(app_paths.profiles / "pipe.profile")
 
-    inventory = profile_store.discover(app_paths)
+    inventory = profile_store.discover(app_paths, windows_names=False)
 
     assert inventory.entries == ()
     assert inventory.diagnostics[0].kind is ProfileDiagnosticKind.NOT_REGULAR_FILE
@@ -290,7 +295,7 @@ def test_sweep_forgets_selections_of_profiles_that_are_gone(app_paths):
     for name in ("Work.json", "Gone.json", "notes.txt"):
         (selections / name).write_text("[]", encoding="utf-8")
 
-    ProfileStore(app_paths).sweep()
+    ProfileStore(app_paths, windows_names=False).sweep()
 
     assert sorted(path.name for path in selections.iterdir()) == ["Work.json", "notes.txt"]
 
@@ -332,7 +337,7 @@ def test_loading_profiles_lists_no_sources(app_paths, tmp_path, monkeypatch):
     real_listdir = selection.os.listdir
     monkeypatch.setattr(selection.os, "listdir", lambda path: listed.append(path) or real_listdir(path))
 
-    store = ProfileStore(app_paths)
+    store = ProfileStore(app_paths, windows_names=False)
     store.reload()
     profiles = store.profiles
 
@@ -345,7 +350,7 @@ def test_loading_profiles_lists_no_sources(app_paths, tmp_path, monkeypatch):
 def test_active_profile_round_trip(app_paths, tmp_path):
     cache = prepare_profile(app_paths, tmp_path)
 
-    profile_store.write_active_profile(app_paths.cache, ProfileId("test"))
+    profile_store.write_active_profile(app_paths.cache, ProfileId.parse("test", windows_names=False))
 
     assert (cache / "running_profile").read_text(encoding="utf-8") == "test"
     assert running(app_paths).profile.name == "test"
@@ -356,7 +361,9 @@ def test_the_pointer_names_the_first_line(app_paths, tmp_path, content):
     cache = prepare_profile(app_paths, tmp_path)
     (cache / "running_profile").write_bytes(content)
 
-    assert profile_store.read_active_profile_id(cache) == ProfileId("test")
+    assert profile_store.read_active_profile_id(cache, windows_names=False) == ProfileId.parse(
+        "test", windows_names=False
+    )
     assert running(app_paths).profile.name == "test"
 
 
@@ -364,7 +371,7 @@ def test_empty_active_profile_returns_none(app_paths, tmp_path):
     cache = prepare_profile(app_paths, tmp_path)
     (cache / "running_profile").touch()
 
-    assert profile_store.read_active_profile_id(cache) is None
+    assert profile_store.read_active_profile_id(cache, windows_names=False) is None
     assert running(app_paths) is None
 
 
@@ -389,7 +396,9 @@ def test_a_pointer_to_a_deleted_profile_is_none(app_paths, tmp_path):
     cache = prepare_profile(app_paths, tmp_path)
     (cache / "running_profile").write_text("deleted", encoding="utf-8")
 
-    assert profile_store.read_active_profile_id(cache) == ProfileId("deleted")
+    assert profile_store.read_active_profile_id(cache, windows_names=False) == ProfileId.parse(
+        "deleted", windows_names=False
+    )
     assert running(app_paths) is None
 
 
@@ -421,7 +430,7 @@ def test_invalid_active_profile_write_does_not_touch_pointer(app_paths, tmp_path
     pointer.write_text("test", encoding="utf-8")
 
     with pytest.raises(ProfileIdError):
-        profile_store.write_active_profile(app_paths.cache, ProfileId("../other"))
+        profile_store.write_active_profile(app_paths.cache, ProfileId.parse("../other", windows_names=False))
 
     assert pointer.read_text(encoding="utf-8") == "test"
 
@@ -431,7 +440,7 @@ def test_active_profile_write_never_replaces_a_directory(app_paths, tmp_path):
     (cache / "running_profile").mkdir()
 
     with pytest.raises(OSError):
-        profile_store.write_active_profile(app_paths.cache, ProfileId("test"))
+        profile_store.write_active_profile(app_paths.cache, ProfileId.parse("test", windows_names=False))
 
     assert (cache / "running_profile").is_dir()
 
@@ -441,7 +450,7 @@ def test_active_profile_read_does_not_block_on_fifo(app_paths, tmp_path):
     cache = prepare_profile(app_paths, tmp_path)
     os.mkfifo(cache / "running_profile")
 
-    assert profile_store.read_active_profile_id(cache) is None
+    assert profile_store.read_active_profile_id(cache, windows_names=False) is None
 
 
 def test_a_new_profile_with_an_unusable_name_is_rejected_without_write(app_paths):
@@ -649,7 +658,7 @@ def test_rename_moves_the_selection_and_delete_forgets_it(app_paths, tmp_path):
 
     save_over(app_paths, current, edited("Renamed"))
     renamed = load_profile(app_paths, "Renamed")
-    ProfileStore(app_paths).delete(renamed)
+    ProfileStore(app_paths, windows_names=False).delete(renamed)
     recreated = stored_profile(app_paths, "Renamed")
 
     assert renamed.selection.images == [str(image)]
@@ -657,16 +666,16 @@ def test_rename_moves_the_selection_and_delete_forgets_it(app_paths, tmp_path):
 
 
 def test_the_store_saves_and_hands_out_one_record_per_profile(app_paths):
-    store = ProfileStore(app_paths)
+    store = ProfileStore(app_paths, windows_names=False)
     store.reload()
 
     saved = store.save(edited("Work"))
-    assert store.get(ProfileId("Work")) is saved
+    assert store.get(ProfileId.parse("Work", windows_names=False)) is saved
     assert store.profiles == [saved]
 
     renamed = store.save(edited("Home", hotkey=("alt", "h")), current=saved)
     assert [stored.profile_id.value for stored in store.profiles] == ["Home"]
-    assert store.get(ProfileId("Home")) is renamed
+    assert store.get(ProfileId.parse("Home", windows_names=False)) is renamed
     assert renamed.profile.hotkey == ("alt", "h")
 
     store.delete(renamed)
@@ -681,15 +690,15 @@ def test_reloading_keeps_the_record_of_an_unchanged_profile(app_paths, tmp_path)
         (images / name).touch()
     stored_profile(app_paths, "Work", f"sortmode=alphabetical\ndisplay0paths={images}\n")
     stored_profile(app_paths, "Home")
-    store = ProfileStore(app_paths)
+    store = ProfileStore(app_paths, windows_names=False)
     store.reload()
-    work = store.get(ProfileId("Work"))
+    work = store.get(ProfileId.parse("Work", windows_names=False))
     work.selection.advance()
 
     (app_paths.profiles / "Home.profile").write_text("name=Home\nhotkey=alt+h\n", encoding="utf-8")
     store.reload()
 
     # Work's slideshow goes on where it was; Home is loaded again, with its change.
-    assert store.get(ProfileId("Work")) is work
+    assert store.get(ProfileId.parse("Work", windows_names=False)) is work
     assert work.selection.advance() == [str(images / "b.png")]
-    assert store.get(ProfileId("Home")).profile.hotkey == ("alt", "h")
+    assert store.get(ProfileId.parse("Home", windows_names=False)).profile.hotkey == ("alt", "h")

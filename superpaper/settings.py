@@ -28,21 +28,21 @@ class Settings:
     warn_large_img: bool = True
 
 
-def first_run_settings(platform: str) -> Settings:
-    """The settings a new installation starts with. Hotkeys are off by default on macOS."""
+def first_run_settings(*, hotkeys_by_default: bool) -> Settings:
+    """The settings a new installation starts with."""
     return Settings(
-        use_hotkeys=platform != "darwin",
+        use_hotkeys=hotkeys_by_default,
         hk_binding_next=("control", "super", "w"),
         hk_binding_pause=("control", "super", "shift", "p"),
     )
 
 
-def read_settings(path: Path, platform: str) -> Settings:
+def read_settings(path: Path, *, hotkeys_by_default: bool) -> Settings:
     """The settings saved at ``path``, or the first-run settings if there is no file yet."""
     try:
         content = path.read_bytes()
     except FileNotFoundError:
-        return first_run_settings(platform)
+        return first_run_settings(hotkeys_by_default=hotkeys_by_default)
     settings = Settings()
     for line in content.decode(_encoding()).splitlines():
         key, _, value = line.strip().partition("=")

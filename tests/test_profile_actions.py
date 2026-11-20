@@ -50,7 +50,7 @@ def images(tmp_path):
 
 @pytest.fixture
 def store(app_paths):
-    store = ProfileStore(app_paths)
+    store = ProfileStore(app_paths, windows_names=False)
     store.reload()
     return store
 
@@ -75,7 +75,7 @@ def test_a_valid_form_is_saved_as_a_new_profile_and_its_hotkey_bound(store, sess
     rebinds = []
     result = save(store, session, blank(sources=(("", str(images)),)), rebinds=rebinds)
     assert isinstance(result, Saved)
-    assert store.get(ProfileId("Work")) is result.stored
+    assert store.get(ProfileId.parse("Work", windows_names=False)) is result.stored
     assert result.stored.profile.sources == ((str(images),),)
     assert rebinds == [(None, result.stored)]
     assert session.updates == []
@@ -103,9 +103,12 @@ def test_saving_over_a_loaded_profile_updates_the_session_and_follows_a_rename(s
         store, session, blank(name="Home", sources=(("", str(images)),)), loaded=first.stored, rebinds=rebinds
     )
     assert isinstance(renamed, Saved)
-    assert (session.updates[0][0], session.updates[0][1]) == (ProfileId("Work"), renamed.stored)
+    assert (session.updates[0][0], session.updates[0][1]) == (
+        ProfileId.parse("Work", windows_names=False),
+        renamed.stored,
+    )
     assert rebinds == [(first.stored, renamed.stored)]
-    assert store.get(ProfileId("Work")) is None
+    assert store.get(ProfileId.parse("Work", windows_names=False)) is None
 
 
 def test_saving_chooses_the_focused_file_else_the_loaded_selection(store, session, images):
@@ -123,9 +126,9 @@ def test_reverting_loads_the_file_again_and_carries_the_running_profile_on(store
     path = app_paths.profiles / "Work.profile"
     path.write_text(path.read_text(encoding="utf-8") + "zoom=1.75\n", encoding="utf-8")
     reverted = revert_profile("Work", store=store, session=session)
-    assert reverted is store.get(ProfileId("Work"))
+    assert reverted is store.get(ProfileId.parse("Work", windows_names=False))
     assert reverted.profile.zoom == 1.75
-    assert session.updates == [(ProfileId("Work"), reverted)]
+    assert session.updates == [(ProfileId.parse("Work", windows_names=False), reverted)]
 
 
 def test_reverting_without_a_saved_profile_gives_nothing(store, session):
@@ -142,7 +145,7 @@ def test_deleting_forgets_the_profile_stops_it_and_frees_its_hotkey(store, sessi
     )
     assert problem is None
     assert not (app_paths.profiles / "Work.profile").exists()
-    assert session.updates == [(ProfileId("Work"), None)]
+    assert session.updates == [(ProfileId.parse("Work", windows_names=False), None)]
     assert rebinds == [(saved, None)]
 
 

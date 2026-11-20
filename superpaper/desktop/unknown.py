@@ -2,7 +2,7 @@
 
 import os
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 
 from superpaper.desktop.process import Result, run
@@ -51,6 +51,26 @@ def keeps_wallpaper() -> bool:
 def setter_problem(set_command: str) -> str | None:
     """Why Superpaper can't set the wallpaper on this desktop, if it can't."""
     return None
+
+
+def default_dirs(environ: Mapping[str, str], install: Path) -> tuple[Path, Path]:
+    """Beside the installation."""
+    return install, install / "temp"
+
+
+def hotkeys_by_default() -> bool:
+    """Hotkeys are on."""
+    return True
+
+
+def render_extension() -> str:
+    """Rendered wallpapers are PNG."""
+    return "png"
+
+
+def strict_profile_names() -> bool:
+    """Only new profile names must follow the portable rules."""
+    return False
 
 
 def set_spanmode(set_command: str) -> Result:

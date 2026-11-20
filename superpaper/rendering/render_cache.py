@@ -12,7 +12,6 @@ import io
 import logging
 import os
 import re
-import sys
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
@@ -70,14 +69,14 @@ def draft_slot(cache_dir: Path) -> Slot:
     return Slot(cache_dir / _DRAFTS, "draft")
 
 
-def save(slot: Slot, image: Image.Image, *, platform: str = sys.platform) -> Path:
-    """Write ``image`` as the slot's next render, in one step, and return its path.
+def save(slot: Slot, image: Image.Image, *, extension: str) -> Path:
+    """Write ``image`` as the slot's next render, as a ``jpg`` or ``png`` file, in one step,
+    and return its path.
 
     The render that isn't the newest is replaced, so the one on screen stays as it is.
     """
     newest = latest(slot)
     turn = "b" if newest is not None and newest.image.stem.endswith("-a") else "a"
-    extension = "jpg" if platform == "win32" else "png"
     path = slot.directory / f"{slot.stem}-{turn}.{extension}"
     slot.directory.mkdir(parents=True, exist_ok=True)
     write_atomically(path, _encode(image, "JPEG" if extension == "jpg" else "PNG"))

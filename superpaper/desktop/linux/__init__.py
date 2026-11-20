@@ -4,7 +4,7 @@ KDE Plasma, window managers through feh, or the user's own command."""
 import logging
 import os
 import shutil
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Literal, assert_never
 
@@ -72,6 +72,38 @@ def setter(set_command: str) -> Setter:
     if "i3" in desk_env or desk_env == "/usr/share/xsessions/bspwm":
         return "feh"
     return "unknown"
+
+
+def default_dirs(environ: Mapping[str, str], install: Path) -> tuple[Path, Path]:
+    """The XDG base directories, or Snap's."""
+    snap_config = environ.get("SNAP_USER_DATA")
+    config = Path(snap_config) if snap_config else _xdg_home(environ, "XDG_CONFIG_HOME", ".config") / "superpaper"
+    snap_cache = environ.get("SNAP_USER_COMMON")
+    cache = Path(snap_cache) if snap_cache else _xdg_home(environ, "XDG_CACHE_HOME", ".cache") / "superpaper"
+    return config, cache / "temp"
+
+
+def _xdg_home(environ: Mapping[str, str], variable: str, fallback: str) -> Path:
+    """An XDG base directory; one that is unset or isn't a directory falls back to ~/<fallback>."""
+    value = environ.get(variable)
+    if value and os.path.isdir(value):
+        return Path(value)
+    return Path(environ.get("HOME") or os.path.expanduser("~")) / fallback
+
+
+def hotkeys_by_default() -> bool:
+    """Hotkeys are on."""
+    return True
+
+
+def render_extension() -> str:
+    """Rendered wallpapers are PNG."""
+    return "png"
+
+
+def strict_profile_names() -> bool:
+    """Only new profile names must follow the portable rules."""
+    return False
 
 
 def init_main_loop() -> None:

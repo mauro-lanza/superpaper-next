@@ -2,8 +2,9 @@
 
 import ctypes
 import os
+import tempfile
 import winreg
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 
 import pythoncom  # ty:ignore[unresolved-import]
@@ -68,6 +69,39 @@ def open_folder(folder: Path) -> Result:
     except OSError as error:
         return Result(f"Could not open {folder}: {error}")
     return Result()
+
+
+def default_dirs(environ: Mapping[str, str], install: Path) -> tuple[Path, Path]:
+    """Beside a writable (portable) installation, else in %LOCALAPPDATA%\\Superpaper."""
+    base = install
+    if not _writable(install):
+        base = Path(environ.get("LOCALAPPDATA") or install) / "Superpaper"
+    return base, base / "temp"
+
+
+def _writable(directory: Path) -> bool:
+    """Whether a directory can be created in ``directory``: os.access can't tell on Windows."""
+    try:
+        probe = tempfile.mkdtemp(dir=directory)
+    except OSError:
+        return False
+    os.rmdir(probe)
+    return True
+
+
+def hotkeys_by_default() -> bool:
+    """Hotkeys are on."""
+    return True
+
+
+def render_extension() -> str:
+    """Windows takes JPEG wallpapers."""
+    return "jpg"
+
+
+def strict_profile_names() -> bool:
+    """Windows rejects or aliases the names it reserves, so existing profiles must avoid them too."""
+    return True
 
 
 def set_spanmode(set_command: str) -> Result:

@@ -71,7 +71,9 @@ def setup(monkeypatch, request):
 
 
 def saved(name, hotkey):
-    return SimpleNamespace(profile_id=ProfileId(name), profile=Profile(name=name, hotkey=hotkey))
+    return SimpleNamespace(
+        profile_id=ProfileId.parse(name, windows_names=False), profile=Profile(name=name, hotkey=hotkey)
+    )
 
 
 NEXT = ("control", "super", "w")
@@ -138,7 +140,7 @@ def test_a_profile_hotkey_starts_its_profile_by_identity(setup):
 
     press(setup, ("control", "x"))
 
-    assert setup.events == [("start profile", ProfileId("Work"))]
+    assert setup.events == [("start profile", ProfileId.parse("Work", windows_names=False))]
 
 
 def test_keys_bound_already_are_refused_with_a_message(setup):
@@ -152,7 +154,7 @@ def test_keys_bound_already_are_refused_with_a_message(setup):
     assert "for profile: 'Work'" in setup.events[0][1]
     assert "for profile: 'Copy'" in setup.events[1][1]
     press(setup, ("control", "h"))
-    assert setup.events[-1] == ("start profile", ProfileId("Home"))
+    assert setup.events[-1] == ("start profile", ProfileId.parse("Home", windows_names=False))
 
 
 def test_keys_the_library_refuses_are_reported(setup):
@@ -182,7 +184,7 @@ def test_a_renamed_profile_keeps_its_hotkey(setup):
     setup.hotkeys.profile_changed(work, saved("Office", ("control", "x")))
     press(setup, ("control", "x"))
 
-    assert setup.events == [("start profile", ProfileId("Office"))]
+    assert setup.events == [("start profile", ProfileId.parse("Office", windows_names=False))]
 
 
 def test_a_changed_profile_hotkey_replaces_its_keys(setup):
@@ -208,7 +210,7 @@ def test_a_deleted_profile_frees_its_hotkey(setup):
     setup.hotkeys.profile_changed(None, saved("Home", ("control", "x")))
     press(setup, ("control", "x"))
 
-    assert setup.events == [("start profile", ProfileId("Home"))]
+    assert setup.events == [("start profile", ProfileId.parse("Home", windows_names=False))]
 
 
 def test_saving_a_profile_without_changing_its_hotkey_changes_nothing(setup):
@@ -231,4 +233,4 @@ def test_another_profiles_hotkey_is_left_alone(setup):
     setup.hotkeys.profile_changed(saved("Work", ("control", "h")), saved("Work", None))
     press(setup, ("control", "h"))
 
-    assert setup.events[-1] == ("start profile", ProfileId("Home"))
+    assert setup.events[-1] == ("start profile", ProfileId.parse("Home", windows_names=False))

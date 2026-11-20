@@ -62,7 +62,7 @@ def show(
             if profile_id is None
             else render_cache.slot(paths.cache, profile_id.value)
         )
-        output = render_cache.save(slot, image)
+        output = render_cache.save(slot, image, extension=desktop.render_extension())
     except OSError as error:
         return _skipped(f"The wallpaper could not be saved: {error}")
     result = set_wallpaper(desktop, output, files, layout=layout, paths=paths, set_command=set_command, running=running)
@@ -128,7 +128,9 @@ def set_wallpaper(
         wallpaper = Pieces(str(image), pieces)
     else:
         wallpaper = Spanned(str(image))
-    result = desktop.set_wallpaper(wallpaper, set_command=set_command, profiles=_profile_wallpapers(paths, running))
+    result = desktop.set_wallpaper(
+        wallpaper, set_command=set_command, profiles=_profile_wallpapers(paths, running, desktop)
+    )
     _log_problem(result)
     script = paths.config / "run-after-wp-change.py"
     if script.is_file():
@@ -157,7 +159,7 @@ def show_again(stored: StoredProfile, paths: AppPaths, *, desktop: Desktop, layo
         logger.info("Use wallpaper crop pieces: %s", pieces)
         _log_problem(
             desktop.set_wallpaper(
-                Pieces(image, pieces), set_command=set_command, profiles=_profile_wallpapers(paths, running)
+                Pieces(image, pieces), set_command=set_command, profiles=_profile_wallpapers(paths, running, desktop)
             )
         )
     elif desktop.keeps_wallpaper() and not _is_perspective_render(stored.profile, layout):
@@ -175,19 +177,20 @@ def _is_perspective_render(profile: Profile, layout: Layout) -> bool:
     return layout.perspective_for(profile.perspective) is not None
 
 
-def _profile_wallpapers(paths: AppPaths, running: str | None) -> ProfileWallpapers:
+def _profile_wallpapers(paths: AppPaths, running: str | None, desktop: Desktop) -> ProfileWallpapers:
     """How the desktop finds the wallpapers of the profiles other than the running one."""
+    windows_names = desktop.strict_profile_names()
     return ProfileWallpapers(
         current_profile=running,
-        cached_pieces=lambda name: _cached_pieces(paths.cache, name),
+        cached_pieces=lambda name: _cached_pieces(paths.cache, name, windows_names=windows_names),
         state_dir=paths.config,
     )
 
 
-def _cached_pieces(cache_dir: Path, profile_name: str) -> list[str]:
+def _cached_pieces(cache_dir: Path, profile_name: str, *, windows_names: bool) -> list[str]:
     """The per-display images last rendered for the profile named ``profile_name``."""
     try:
-        profile_id = ProfileId.parse(profile_name)
+        profile_id = ProfileId.parse(profile_name, windows_names=windows_names)
     except ProfileIdError:  # an activity name no profile can have
         return []
     rendered = render_cache.latest(render_cache.slot(cache_dir, profile_id.value))

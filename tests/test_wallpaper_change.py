@@ -42,7 +42,7 @@ def change(name, files, paths, layout, desktop):
         desktop=desktop,
         layout=layout,
         set_command="",
-        profile_id=ProfileId(name),
+        profile_id=ProfileId.parse(name, windows_names=False),
         running=name,
     )
 
@@ -221,7 +221,7 @@ def test_a_desktop_that_takes_pieces_gets_one_per_display(app_paths, display_lay
 @pytest.fixture
 def startup(app_paths, display_layout, desktop):
     """Show the last wallpaper of profile "main" again, as the tray does when it starts."""
-    main = SimpleNamespace(profile=settings("main"), profile_id=ProfileId("main"))
+    main = SimpleNamespace(profile=settings("main"), profile_id=ProfileId.parse("main", windows_names=False))
 
     def restore():
         return wallpaper_change.show_again(
@@ -289,7 +289,8 @@ def test_a_perspective_that_no_longer_exists_isnt_rendered_again_at_startup(
         display_layout(TINY_DISPLAYS), use_perspective=True, default_perspective=default, perspectives=(desk,)
     )
     main = SimpleNamespace(
-        profile=replace(settings("main", spanmode="advanced"), perspective=perspective), profile_id=ProfileId("main")
+        profile=replace(settings("main", spanmode="advanced"), perspective=perspective),
+        profile_id=ProfileId.parse("main", windows_names=False),
     )
 
     assert wallpaper_change.show_again(main, app_paths, desktop=desktop, layout=layout, set_command="") is True

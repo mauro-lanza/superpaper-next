@@ -31,12 +31,14 @@ in wxPython, which installs from PyPI on macOS.
   uv pip install pyobjc
   ```
 
-- **Config is written into the installed package directory.** `paths.py`
-  uses the portable (executable-relative) location on macOS rather than
-  `~/Library/Application Support`. To keep the files elsewhere, set
-  `SUPERPAPER_CONFIG_HOME` and `SUPERPAPER_CACHE_HOME` to the directories to use.
+The PyObjC gap is tracked under #113 in [`ISSUES.md`](../ISSUES.md).
 
-Both are tracked under #113 in [`ISSUES.md`](../ISSUES.md).
+## Where files live
+
+On macOS settings and profiles live in `~/Library/Application Support/Superpaper`
+and the cache in `~/Library/Caches/Superpaper`. Files an earlier version wrote
+beside the program are not moved; copy them over by hand. `SUPERPAPER_CONFIG_HOME`
+and `SUPERPAPER_CACHE_HOME` name other directories.
 
 ## Running
 

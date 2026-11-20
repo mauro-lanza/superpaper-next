@@ -29,11 +29,11 @@ def test_renders_take_turns_so_the_one_on_screen_is_never_rewritten(tmp_path):
     work = profile_slot(tmp_path, "work")
     image = Image.new("RGB", (5, 3), (10, 20, 30))
 
-    first = render_cache.save(work, image)
-    second = render_cache.save(work, image)
+    first = render_cache.save(work, image, extension="png")
+    second = render_cache.save(work, image, extension="png")
     assert names(tmp_path) == ["work-a.png", "work-b.png"]
     render_cache.forget_previous(second)
-    third = render_cache.save(work, image)
+    third = render_cache.save(work, image, extension="png")
     render_cache.forget_previous(third)
 
     assert (first.name, second.name, third.name) == ("work-a.png", "work-b.png", "work-a.png")
@@ -42,8 +42,8 @@ def test_renders_take_turns_so_the_one_on_screen_is_never_rewritten(tmp_path):
         assert (saved.format, saved.size, saved.getpixel((4, 2))) == ("PNG", (5, 3), (10, 20, 30))
 
 
-def test_windows_renders_are_jpeg(tmp_path):
-    saved = render_cache.save(profile_slot(tmp_path, "work"), Image.new("RGB", (5, 3)), platform="win32")
+def test_renders_are_saved_with_the_given_extension(tmp_path):
+    saved = render_cache.save(profile_slot(tmp_path, "work"), Image.new("RGB", (5, 3)), extension="jpg")
 
     assert saved.name == "work-a.jpg"
     with Image.open(saved) as image:
@@ -51,7 +51,7 @@ def test_windows_renders_are_jpeg(tmp_path):
 
 
 def test_drafts_are_kept_apart_from_the_profiles(tmp_path):
-    saved = render_cache.save(render_cache.draft_slot(tmp_path), Image.new("RGB", (5, 3)))
+    saved = render_cache.save(render_cache.draft_slot(tmp_path), Image.new("RGB", (5, 3)), extension="png")
 
     assert saved == tmp_path / "preview" / "draft-a.png"
     assert names(tmp_path) == ["preview"]
@@ -100,7 +100,7 @@ def test_the_next_render_replaces_the_older_one(tmp_path):
     touch(tmp_path, "work-a.png", modified=2_000_000_000)
     touch(tmp_path, "work-b.png", modified=1_000_000_000)
 
-    saved = render_cache.save(profile_slot(tmp_path, "work"), Image.new("RGB", (1, 1)))
+    saved = render_cache.save(profile_slot(tmp_path, "work"), Image.new("RGB", (1, 1)), extension="png")
 
     assert saved.name == "work-b.png"
 

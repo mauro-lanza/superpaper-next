@@ -38,6 +38,20 @@ def test_an_unknown_platform_sets_nothing_and_says_so():
     assert unknown.setter_problem("") is None
 
 
+@pytest.mark.parametrize("module", [linux, unknown])
+def test_linux_and_unknown_defaults_are_png_renders_hotkeys_and_portable_profile_names(module):
+    assert module.render_extension() == "png"
+    assert module.hotkeys_by_default() is True
+    assert module.strict_profile_names() is False
+
+
+def test_an_unknown_platform_keeps_its_files_beside_the_program(tmp_path):
+    assert unknown.default_dirs({"HOME": str(tmp_path)}, tmp_path / "app") == (
+        tmp_path / "app",
+        tmp_path / "app" / "temp",
+    )
+
+
 def test_an_unknown_platform_opens_folders_with_xdg_open(ran, tmp_path):
     assert unknown.open_folder(tmp_path).ok
 

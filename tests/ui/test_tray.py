@@ -26,7 +26,7 @@ class Recorder:
 
 
 def profile(name):
-    return SimpleNamespace(profile=Profile(name=name), profile_id=ProfileId(name))
+    return SimpleNamespace(profile=Profile(name=name), profile_id=ProfileId.parse(name, windows_names=False))
 
 
 @pytest.fixture

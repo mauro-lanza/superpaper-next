@@ -1,5 +1,4 @@
 import subprocess
-import sys
 import time
 from dataclasses import replace
 from types import SimpleNamespace
@@ -20,12 +19,12 @@ def slideshow_armed(superpaper):
     return superpaper.session._deadline is not None
 
 
-def test_first_run_seeds_the_example_profiles(gui_env, tmp_path):
+def test_first_run_seeds_the_example_profiles(gui_env, tmp_path, desktop):
     environ = {
         "SUPERPAPER_CONFIG_HOME": str(tmp_path / "fresh" / "config"),
         "SUPERPAPER_CACHE_HOME": str(tmp_path / "fresh" / "cache"),
     }
-    paths = resolve_paths(environ, sys.platform)
+    paths = resolve_paths(environ, desktop)
     ensure_dirs(paths)
     assert sorted(path.name for path in paths.profiles.iterdir()) == ["example.profile", "example_multi.profile"]
 
@@ -114,7 +113,7 @@ def test_an_unknown_desktop_is_reported_once_at_startup_and_nothing_is_run(gui_e
     gui_env.shown()
     gui_env.commands.clear()
     monkeypatch.setenv("DESKTOP_SESSION", "unknown")
-    no_command = replace(read_settings(gui_env.settings_path, sys.platform), set_command="")
+    no_command = replace(read_settings(gui_env.settings_path, hotkeys_by_default=True), set_command="")
     second = gui_env.start(settings=no_command)
     gui_env.settle(second)
     assert gui_env.shown() == [("app", "Error", UNKNOWN_DESKTOP)]
@@ -131,7 +130,7 @@ def test_undetected_display_sizes_are_mentioned_once_at_startup(gui_env, monkeyp
 
 
 def test_a_start_with_a_profile_runs_it_and_remembers_it(gui_env):
-    superpaper = gui_env.start(startup_profile=ProfileId("Home"))
+    superpaper = gui_env.start(startup_profile=ProfileId.parse("Home", windows_names=False))
     gui_env.settle(superpaper)
     assert superpaper.session.running.profile.name == "Home"
     assert (gui_env.paths.cache / "running_profile").read_text(encoding="utf-8") == "Home"
