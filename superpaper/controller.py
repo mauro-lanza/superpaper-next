@@ -120,6 +120,7 @@ class Superpaper:
                 start_profile=self.start_profile_by_id,
                 call_soon=self._shell.call_soon,
                 report=lambda message: self._shell.notify(message, "Error"),
+                show_problems=self.desktop.hotkey_problems_in_dialog(),
             )
         except ImportError as error:
             logger.warning("Could not import keyboard hotkey hook library, hotkeys will not work. Exception: %s", error)

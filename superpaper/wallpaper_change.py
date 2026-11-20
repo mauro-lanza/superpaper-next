@@ -12,9 +12,8 @@ from typing import TYPE_CHECKING
 
 import superpaper.rendering.render as render
 from superpaper.desktop.backend import Desktop
-from superpaper.desktop.linux.kde import Activities
 from superpaper.desktop.process import Result
-from superpaper.desktop.wallpaper import Pieces, Spanned, Wallpaper
+from superpaper.desktop.wallpaper import Pieces, ProfileWallpapers, Spanned, Wallpaper
 from superpaper.paths import AppPaths
 from superpaper.profiles.profile_file import Profile
 from superpaper.profiles.profile_id import ProfileId, ProfileIdError
@@ -129,7 +128,7 @@ def set_wallpaper(
         wallpaper = Pieces(str(image), pieces)
     else:
         wallpaper = Spanned(str(image))
-    result = desktop.set_wallpaper(wallpaper, set_command=set_command, activities=_activities(paths, running))
+    result = desktop.set_wallpaper(wallpaper, set_command=set_command, profiles=_profile_wallpapers(paths, running))
     _log_problem(result)
     script = paths.config / "run-after-wp-change.py"
     if script.is_file():
@@ -158,7 +157,7 @@ def show_again(stored: StoredProfile, paths: AppPaths, *, desktop: Desktop, layo
         logger.info("Use wallpaper crop pieces: %s", pieces)
         _log_problem(
             desktop.set_wallpaper(
-                Pieces(image, pieces), set_command=set_command, activities=_activities(paths, running)
+                Pieces(image, pieces), set_command=set_command, profiles=_profile_wallpapers(paths, running)
             )
         )
     elif desktop.keeps_wallpaper() and not _is_perspective_render(stored.profile, layout):
@@ -176,9 +175,9 @@ def _is_perspective_render(profile: Profile, layout: Layout) -> bool:
     return layout.perspective_for(profile.perspective) is not None
 
 
-def _activities(paths: AppPaths, running: str | None) -> Activities:
-    """How KDE finds the wallpapers of the profiles its activities are named after."""
-    return Activities(
+def _profile_wallpapers(paths: AppPaths, running: str | None) -> ProfileWallpapers:
+    """How the desktop finds the wallpapers of the profiles other than the running one."""
+    return ProfileWallpapers(
         current_profile=running,
         cached_pieces=lambda name: _cached_pieces(paths.cache, name),
         state_dir=paths.config,

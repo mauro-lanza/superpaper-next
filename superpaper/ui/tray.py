@@ -1,12 +1,10 @@
 """The tray icon and its menu: the saved profiles to start, the slideshow, and the windows.
 
-On Linux the native StatusNotifierItem tray (sni_tray) offers the same menu, through the
-same methods of TaskBarIcon.
+Where the desktop draws a native tray itself (Linux's StatusNotifierItem) it offers the same
+menu, through the same methods of TaskBarIcon.
 """
 
 import logging
-import os
-import sys
 from collections.abc import Callable
 from functools import partial
 from typing import assert_never
@@ -16,8 +14,6 @@ import wx.adv  # ty:ignore[unresolved-import]
 
 from superpaper.__version__ import __version__
 from superpaper.desktop.backend import Desktop
-from superpaper.desktop.linux import running_kde
-from superpaper.desktop.linux.sni_tray import build_tray, sni_supported
 from superpaper.desktop.tray_menu import Check, Item, MenuEntry, Notice, Separator, Submenu, failure_notice
 from superpaper.paths import resource
 from superpaper.ui.message import show_message_dialog
@@ -90,35 +86,31 @@ class TaskBarIcon(wx.adv.TaskBarIcon):
         self._start_profile = start_profile
         self._quit = quit
         self.Bind(wx.adv.EVT_TASKBAR_LEFT_DOWN, self.on_left_down)
-        # On Linux, prefer a native StatusNotifierItem tray (works on Wayland);
-        # the wx TaskBarIcon renders but is non-interactive on KDE Plasma 6.
-        self._sni_tray = None
-        if sys.platform == "linux" and sni_supported():
-            self._sni_tray = build_tray(
-                menu=self.menu,
-                call_soon=wx.CallAfter,
-                activate=self._open_editor,
-                secondary_activate=session.next,
-                bus_name=f"org.kde.StatusNotifierItem-{os.getpid()}-1",
-                icon_path=str(resource("superpaper.png")),
-                title=TRAY_TOOLTIP,
-                tooltip=TRAY_TOOLTIP,
-            )
-        if self._sni_tray is None:
+        # Prefer the desktop's own tray (native StatusNotifierItem on Linux, which works on
+        # Wayland); the wx TaskBarIcon can be non-interactive, e.g. on KDE Plasma 6.
+        self._native_tray = desktop.make_tray(
+            menu=self.menu,
+            call_soon=wx.CallAfter,
+            activate=self._open_editor,
+            secondary_activate=session.next,
+            icon_path=str(resource("superpaper.png")),
+            title=TRAY_TOOLTIP,
+        )
+        if self._native_tray is None:
             self.set_icon(str(resource("superpaper.png")))
 
     @property
     def clickable(self) -> bool:
-        """Whether the icon can be clicked: the wx one can't be on KDE Plasma 6."""
-        return self._sni_tray is not None or not running_kde()
+        """Whether the icon can be clicked: wx's own can't be on some desktops."""
+        return self._native_tray is not None or self._desktop.wx_tray_clickable()
 
     def remove(self) -> None:
         """Take the icon away, as Superpaper quits."""
-        if self._sni_tray is not None:
+        if self._native_tray is not None:
             try:
-                self._sni_tray.remove()
+                self._native_tray.remove()
             except Exception as exc:
-                logger.info("SNI tray cleanup failed: %s", exc)
+                logger.info("Native tray cleanup failed: %s", exc)
         wx.CallAfter(self.Destroy)
 
     def menu(self) -> tuple[MenuEntry, ...]:

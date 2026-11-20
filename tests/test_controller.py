@@ -468,7 +468,7 @@ def test_hotkeys_are_bound_at_start_when_they_are_on(monkeypatch):
 
     hotkeys = superpaper._start_hotkeys()
 
-    assert made == [["call_soon", "next_wallpaper", "pause", "report", "start_profile"]]
+    assert made == [["call_soon", "next_wallpaper", "pause", "report", "show_problems", "start_profile"]]
     assert hotkeys.registered == [("general", settings), ("profiles", [work])]
 
 

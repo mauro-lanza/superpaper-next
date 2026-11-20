@@ -5,7 +5,7 @@ import pytest
 
 import superpaper.desktop as desktop
 from superpaper.desktop.wallpaper import Pieces
-from tests.desktop.conftest import IMAGE, NO_ACTIVITIES, assert_satisfies_desktop
+from tests.desktop.conftest import IMAGE, NO_PROFILES, assert_satisfies_desktop
 
 
 @pytest.fixture
@@ -45,7 +45,7 @@ def test_macos_shows_one_piece_per_screen_in_display_order(appkit):
     set_images = appkit(screens=[1920, 0])
     from superpaper.desktop import macos
 
-    result = macos.set_wallpaper(Pieces(IMAGE, ("/left.png", "/right.png")), set_command="", activities=NO_ACTIVITIES)
+    result = macos.set_wallpaper(Pieces(IMAGE, ("/left.png", "/right.png")), set_command="", profiles=NO_PROFILES)
 
     assert result.ok
     assert set_images == [(0, "/left.png"), (1920, "/right.png")]
@@ -55,7 +55,7 @@ def test_macos_reports_pieces_that_dont_match_the_screens(appkit):
     set_images = appkit(screens=[0, 1920])
     from superpaper.desktop import macos
 
-    result = macos.set_wallpaper(Pieces(IMAGE, ("/only.png",)), set_command="", activities=NO_ACTIVITIES)
+    result = macos.set_wallpaper(Pieces(IMAGE, ("/only.png",)), set_command="", profiles=NO_PROFILES)
 
     assert result.problem == "There are 2 screens but 1 wallpaper pieces."
     assert set_images == []

@@ -1,9 +1,9 @@
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
-from superpaper.desktop.linux.kde import Activities
 from superpaper.desktop.process import Result
-from superpaper.desktop.wallpaper import Wallpaper
+from superpaper.desktop.tray_menu import MenuEntry, TrayHandle
+from superpaper.desktop.wallpaper import ProfileWallpapers, Wallpaper
 
 
 class FakeDesktop:
@@ -11,6 +11,11 @@ class FakeDesktop:
 
     def __init__(self):
         self.pieces_taken = False
+        self.native_tray = None
+        self.wx_tray_is_clickable = True
+        self.problems_in_dialog = True
+        self.tray_requests: list[dict] = []
+        self.main_loops_initialised = 0
         self.wallpaper_kept = False
         self.problem: str | None = None
         self.span_answer = Result()
@@ -19,9 +24,33 @@ class FakeDesktop:
         self.folder_answer = Result()
         self.spanned: list[str] = []
         self.handed: list[Wallpaper] = []
-        self.activities: Activities | None = None
+        self.profiles: ProfileWallpapers | None = None
         self.hooks: list[tuple[Path, str, list[str]]] = []
         self.opened: list[Path] = []
+
+    def init_main_loop(self) -> None:
+        self.main_loops_initialised += 1
+
+    def make_tray(
+        self,
+        *,
+        menu: Callable[[], tuple[MenuEntry, ...]],
+        call_soon: Callable[[Callable[[], None]], None],
+        activate: Callable[[], None],
+        secondary_activate: Callable[[], None],
+        icon_path: str,
+        title: str,
+    ) -> TrayHandle | None:
+        self.tray_requests.append(
+            {"menu": menu, "call_soon": call_soon, "activate": activate, "secondary_activate": secondary_activate}
+        )
+        return self.native_tray
+
+    def wx_tray_clickable(self) -> bool:
+        return self.wx_tray_is_clickable
+
+    def hotkey_problems_in_dialog(self) -> bool:
+        return self.problems_in_dialog
 
     def takes_pieces(self, set_command: str) -> bool:
         return self.pieces_taken
@@ -36,9 +65,9 @@ class FakeDesktop:
         self.spanned.append(set_command)
         return self.span_answer
 
-    def set_wallpaper(self, wallpaper: Wallpaper, *, set_command: str, activities: Activities) -> Result:
+    def set_wallpaper(self, wallpaper: Wallpaper, *, set_command: str, profiles: ProfileWallpapers) -> Result:
         self.handed.append(wallpaper)
-        self.activities = activities
+        self.profiles = profiles
         return self.answer
 
     def run_hook(self, script: Path, image: str, sources: Sequence[str]) -> Result:

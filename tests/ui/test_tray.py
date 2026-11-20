@@ -54,8 +54,7 @@ def icon(tray, recorder, *, desktop=None, profiles=(), paused=False, failure=Non
 
 @pytest.fixture
 def tray(headless_tray_module, monkeypatch):
-    """The tray module, without a native tray and with a recording wx icon."""
-    monkeypatch.setattr(headless_tray_module, "sni_supported", lambda: False)
+    """The tray module, with a recording wx icon."""
     monkeypatch.setattr(headless_tray_module.TaskBarIcon, "set_icon", lambda self, path: setattr(self, "wx_icon", path))
     return headless_tray_module
 
@@ -144,37 +143,31 @@ def test_the_config_folder_menu_item_opens_the_config_folder(tray, recorder, des
 
 
 @pytest.mark.parametrize(
-    ("supported", "registers", "kde", "native", "clickable"),
+    ("registers", "wx_clickable", "native", "clickable"),
     [
-        (True, True, True, True, True),
-        # Registration fails: the wx icon, which can't be clicked on KDE Plasma 6.
-        (True, False, True, False, False),
-        (False, False, True, False, False),
-        (False, False, False, False, True),
+        (True, False, True, True),
+        # No native tray: the wx icon, which the desktop may not deliver clicks for.
+        (False, False, False, False),
+        (False, True, False, True),
     ],
 )
-def test_the_native_tray_is_preferred_where_it_registers(
-    tray, recorder, monkeypatch, supported, registers, kde, native, clickable
-):
+def test_the_native_tray_is_preferred_where_it_registers(tray, recorder, registers, wx_clickable, native, clickable):
     native_tray = SimpleNamespace(remove=recorder("native tray removed"))
-    monkeypatch.setattr(tray.sys, "platform", "linux")
-    monkeypatch.setattr(tray, "sni_supported", lambda: supported)
-    monkeypatch.setattr(tray, "build_tray", lambda **kwargs: native_tray if registers else None)
-    monkeypatch.setattr(tray, "running_kde", lambda: kde)
+    desktop = FakeDesktop()
+    desktop.native_tray = native_tray if registers else None
+    desktop.wx_tray_is_clickable = wx_clickable
 
-    tray_icon = icon(tray, recorder)
+    tray_icon = icon(tray, recorder, desktop=desktop)
 
-    assert (tray_icon._sni_tray is native_tray) is native
+    assert (tray_icon._native_tray is native_tray) is native
     assert hasattr(tray_icon, "wx_icon") is not native
     assert tray_icon.clickable is clickable
 
 
-def test_the_native_tray_gets_the_menu_and_the_clicks(tray, recorder, monkeypatch):
-    built = {}
-    monkeypatch.setattr(tray.sys, "platform", "linux")
-    monkeypatch.setattr(tray, "sni_supported", lambda: True)
-    monkeypatch.setattr(tray, "build_tray", lambda **kwargs: built.update(kwargs) or SimpleNamespace())
-    tray_icon = icon(tray, recorder)
+def test_the_native_tray_gets_the_menu_and_the_clicks(tray, recorder):
+    desktop = FakeDesktop()
+    tray_icon = icon(tray, recorder, desktop=desktop)
+    (built,) = desktop.tray_requests
 
     built["activate"]()
     built["secondary_activate"]()
@@ -183,12 +176,10 @@ def test_the_native_tray_gets_the_menu_and_the_clicks(tray, recorder, monkeypatc
     assert recorder.calls == [("editor",), ("next",)]
 
 
-def test_taking_the_icon_away_removes_the_native_tray_too(tray, recorder, monkeypatch):
-    native_tray = SimpleNamespace(remove=recorder("native tray removed"))
-    monkeypatch.setattr(tray.sys, "platform", "linux")
-    monkeypatch.setattr(tray, "sni_supported", lambda: True)
-    monkeypatch.setattr(tray, "build_tray", lambda **kwargs: native_tray)
-    tray_icon = icon(tray, recorder)
+def test_taking_the_icon_away_removes_the_native_tray_too(tray, recorder):
+    desktop = FakeDesktop()
+    desktop.native_tray = SimpleNamespace(remove=recorder("native tray removed"))
+    tray_icon = icon(tray, recorder, desktop=desktop)
     tray_icon.Destroy = recorder("icon destroyed")
 
     tray_icon.remove()

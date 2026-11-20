@@ -7,7 +7,7 @@ import pytest
 import superpaper.desktop as desktop
 from superpaper.desktop import linux, process, unknown
 from superpaper.desktop.wallpaper import Spanned
-from tests.desktop.conftest import IMAGE, NO_ACTIVITIES, assert_satisfies_desktop
+from tests.desktop.conftest import IMAGE, NO_PROFILES, assert_satisfies_desktop
 from tests.desktop.fake import FakeDesktop
 
 
@@ -29,7 +29,7 @@ def test_modules_satisfy_the_desktop_interface(module):
 
 
 def test_an_unknown_platform_sets_nothing_and_says_so():
-    result = unknown.set_wallpaper(Spanned(IMAGE), set_command="", activities=NO_ACTIVITIES)
+    result = unknown.set_wallpaper(Spanned(IMAGE), set_command="", profiles=NO_PROFILES)
 
     assert result.problem == f"Unknown platform: {sys.platform}"
     assert unknown.set_spanmode("").ok

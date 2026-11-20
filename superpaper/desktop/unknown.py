@@ -2,12 +2,40 @@
 
 import os
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
-from superpaper.desktop.linux.kde import Activities
 from superpaper.desktop.process import Result, run
 from superpaper.desktop.process import run_hook as run_hook
-from superpaper.desktop.wallpaper import Wallpaper
+from superpaper.desktop.tray_menu import MenuEntry, TrayHandle
+from superpaper.desktop.wallpaper import ProfileWallpapers, Wallpaper
+
+
+def init_main_loop() -> None:
+    """Nothing to prepare."""
+
+
+def make_tray(
+    *,
+    menu: Callable[[], tuple[MenuEntry, ...]],
+    call_soon: Callable[[Callable[[], None]], None],
+    activate: Callable[[], None],
+    secondary_activate: Callable[[], None],
+    icon_path: str,
+    title: str,
+) -> TrayHandle | None:
+    """wx's own tray icon is used."""
+    return None
+
+
+def wx_tray_clickable() -> bool:
+    """wx's tray icon can be clicked."""
+    return True
+
+
+def hotkey_problems_in_dialog() -> bool:
+    """A hotkey that can't be registered is shown to the user."""
+    return True
 
 
 def takes_pieces(set_command: str) -> bool:
@@ -30,7 +58,7 @@ def set_spanmode(set_command: str) -> Result:
     return Result()
 
 
-def set_wallpaper(wallpaper: Wallpaper, *, set_command: str, activities: Activities) -> Result:
+def set_wallpaper(wallpaper: Wallpaper, *, set_command: str, profiles: ProfileWallpapers) -> Result:
     """Report that the platform is not supported."""
     return Result(f"Unknown platform: {sys.platform}")
 

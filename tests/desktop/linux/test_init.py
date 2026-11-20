@@ -1,13 +1,24 @@
 """The Linux wallpaper setters, the user's own command and the desktop facts around them."""
 
+import os
 import subprocess
 
 import pytest
 
 from superpaper.desktop import linux, process
+from superpaper.desktop.linux import sni_tray
 from superpaper.desktop.process import Result
 from superpaper.desktop.wallpaper import Pieces, Spanned
-from tests.desktop.conftest import IMAGE, NO_ACTIVITIES, set_wallpaper
+from tests.desktop.conftest import IMAGE, NO_PROFILES, set_wallpaper
+
+TRAY_ARGUMENTS = {
+    "menu": lambda: (),
+    "call_soon": lambda action: action(),
+    "activate": lambda: None,
+    "secondary_activate": lambda: None,
+    "icon_path": "icon.png",
+    "title": "Superpaper",
+}
 
 
 def test_custom_command_runs_once_in_known_session(monkeypatch, ran):
@@ -122,10 +133,10 @@ def test_xfce_sets_every_first_workspace_backdrop(monkeypatch, ran):
 def test_kde_needs_the_wallpaper_cut_into_pieces(monkeypatch):
     monkeypatch.setenv("DESKTOP_SESSION", "plasma")
     shown = []
-    monkeypatch.setattr(linux.kde, "set_wallpaper", lambda pieces, activities: shown.append(pieces) or Result())
+    monkeypatch.setattr(linux.kde, "set_wallpaper", lambda pieces, profiles: shown.append(pieces) or Result())
 
-    uncut = linux.set_wallpaper(Spanned(IMAGE), set_command="", activities=NO_ACTIVITIES)
-    cut = linux.set_wallpaper(Pieces(IMAGE, ("/a.png", "/b.png")), set_command="", activities=NO_ACTIVITIES)
+    uncut = linux.set_wallpaper(Spanned(IMAGE), set_command="", profiles=NO_PROFILES)
+    cut = linux.set_wallpaper(Pieces(IMAGE, ("/a.png", "/b.png")), set_command="", profiles=NO_PROFILES)
 
     assert uncut.problem == "KDE Plasma needs the wallpaper cut into one image per display."
     assert cut.ok
@@ -205,3 +216,29 @@ def test_span_mode_reports_what_the_desktop_refused(monkeypatch):
     result = linux.set_spanmode("")
 
     assert result.problem == "gsettings failed with exit status 1: no schema"
+
+
+@pytest.mark.parametrize(("session", "on_kde"), [("plasma", True), ("kde", True), ("gnome", False)])
+def test_kde_sessions_log_hotkey_problems_and_cannot_click_the_wx_tray(monkeypatch, session, on_kde):
+    monkeypatch.setenv("DESKTOP_SESSION", session)
+
+    assert linux.hotkey_problems_in_dialog() is not on_kde
+    assert linux.wx_tray_clickable() is not on_kde
+
+
+def test_no_native_tray_without_a_status_notifier_watcher(monkeypatch):
+    monkeypatch.setattr(sni_tray, "sni_supported", lambda: False)
+    monkeypatch.setattr(sni_tray, "build_tray", lambda **kwargs: pytest.fail("built a tray"))
+
+    assert linux.make_tray(**TRAY_ARGUMENTS) is None
+
+
+def test_the_native_tray_is_built_for_this_process_when_a_watcher_runs(monkeypatch):
+    built = []
+    native_tray = object()
+    monkeypatch.setattr(sni_tray, "sni_supported", lambda: True)
+    monkeypatch.setattr(sni_tray, "build_tray", lambda **kwargs: built.append(kwargs) or native_tray)
+
+    assert linux.make_tray(**TRAY_ARGUMENTS) is native_tray
+    assert built[0]["bus_name"] == f"org.kde.StatusNotifierItem-{os.getpid()}-1"
+    assert built[0]["title"] == built[0]["tooltip"] == "Superpaper"
