@@ -16,6 +16,9 @@ logger = logging.getLogger(__name__)
 FALLBACK_PHYS_SIZE_MM = (509, 286)
 """A 23 inch display: a display of unknown size is assumed to be one, to have it stand out."""
 
+MAX_ASPECT_MISMATCH = 0.1
+"""Some EDIDs report junk sizes; one whose aspect ratio is this far off the pixels' is rejected."""
+
 MAX_ATTEMPTS = 3
 RETRY_DELAY_SECONDS = 0.25
 
@@ -93,7 +96,21 @@ def detect_displays(desktop: Desktop) -> tuple[Display, ...]:
 def _display_of(monitor: Monitor) -> Display:
     resolution = (monitor.width, monitor.height)
     landscape = resolution[0] > resolution[1]
-    failed = not (monitor.width_mm and monitor.height_mm)
+    width_mm, height_mm = monitor.width_mm, monitor.height_mm
+    failed = not (width_mm and height_mm)
+    if width_mm and height_mm:
+        mm_aspect = max(width_mm, height_mm) / min(width_mm, height_mm)
+        pixel_aspect = max(resolution) / min(resolution)
+        if abs(mm_aspect - pixel_aspect) / pixel_aspect > MAX_ASPECT_MISMATCH:
+            logger.warning(
+                "Ignoring implausible size of %s: reported %sx%s mm for %sx%s pixels.",
+                monitor.name,
+                monitor.width_mm,
+                monitor.height_mm,
+                monitor.width,
+                monitor.height,
+            )
+            failed = True
     sizes = FALLBACK_PHYS_SIZE_MM if failed else (monitor.width_mm, monitor.height_mm)
     # Physical rotation has to match the resolution.
     small, large = sorted(sizes)
