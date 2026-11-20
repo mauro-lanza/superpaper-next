@@ -24,6 +24,22 @@ DUAL_MONITORS = [
     monitor(2560, 180, 1920, 1080, 527, 296, "HDMI-A-1"),
 ]
 LAPTOP_MONITORS = [monitor(0, 0, 1920, 1080, None, None, "eDP-1")]
+# An LG and a portrait portable whose EDID size is rejected (so it counts as 23 inch), as
+# a user saved them after typing 15.6 inch for the portable: the displays overlap.
+OVERLAPPING_MONITORS = [
+    monitor(0, 215, 2560, 1440, 602, 339, "LG"),
+    monitor(2560, 0, 1080, 1920, None, None, "portable"),
+]
+OVERLAPPING_KEY = "8889802016709574376"
+OVERLAPPING_DAT = (
+    f"[{OVERLAPPING_KEY}]\n"
+    "ppi_norm_offsets = 0,361;2560,0\n"
+    "bezel_mms = 0.0,0.0;0.0,0.0\n"
+    "user_diagonal_inches = 27.2,15.6\n"
+    "use_perspective = 1\n"
+    "def_perspective = None\n"
+    "\n"
+)
 DUAL_KEY = "-2922184207299240822"
 LAPTOP_KEY = "-1452157571017387289"
 
@@ -95,5 +111,5 @@ def edit_the_layout(layout):
         layout.with_diagonals([30.0] * count)
         .with_initial_offsets()
         .with_bezels([(3.0, 2.0)] * count)
-        .with_offsets([(5, 6)] * count)
+        .with_offsets([(5 + 4000 * index, 6) for index in range(count)])
     )

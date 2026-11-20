@@ -6,7 +6,9 @@ per layout: where its displays are placed, their bezels and any diagonals the us
 entered, and whether perspectives are used and which is the default. <key>.persp has a
 section per perspective of that layout. Files are replaced in one step.
 
-load() builds the Layout of the detected displays; the save functions write one back.
+The files are read by load() into the Layout of the detected displays, which can't be
+used if it overlaps; load_or_default() then gives the default arrangement. save_layout()
+writes one back, never one that overlaps.
 """
 
 import configparser
@@ -50,10 +52,19 @@ class SaveFailed:
     message: str
 
 
+@dataclass(frozen=True, slots=True)
+class LoadedLayout:
+    """A layout for the detected displays, and why the saved one wasn't used, if it wasn't."""
+
+    layout: Layout
+    problem: str | None
+
+
 def load(config_dir: Path, displays: tuple[Display, ...]) -> Layout:
     """The layout saved for ``displays``, or the one of displays with nothing saved.
 
-    Raises configparser.Error or ValueError for files that can't be read.
+    Raises configparser.Error or ValueError for files that can't be read, and for a saved
+    layout whose displays overlap.
     """
     layout = Layout.initial(displays)
     saved = _read_layout(config_dir, layout.key)
@@ -63,31 +74,38 @@ def load(config_dir: Path, displays: tuple[Display, ...]) -> Layout:
         except ValueError as error:
             message = f"{config_dir / LAYOUTS_FILE}, layout {layout.key}: {error}"
             raise ValueError(message) from error
+        if not layout.is_valid():
+            message = f"{config_dir / LAYOUTS_FILE}, layout {layout.key}: the displays overlap"
+            raise ValueError(message)
     return replace(layout, perspectives=_read_perspectives(config_dir, layout.key))
 
 
+def load_or_default(config_dir: Path, displays: tuple[Display, ...]) -> LoadedLayout:
+    """Like load(), but files that can't be used give the default arrangement and why.
+
+    The files stay as they are until the user saves, which replaces what can't be used.
+    """
+    try:
+        return LoadedLayout(load(config_dir, displays), None)
+    except (configparser.Error, ValueError) as error:
+        problem = (
+            "The saved display layout can't be used, so the default arrangement is shown "
+            f"until you save the display settings.\n\n{error}"
+        )
+        return LoadedLayout(Layout.initial(displays), problem)
+
+
 def save_layout(config_dir: Path, layout: Layout) -> None:
-    """Save the user's settings for these displays in display_systems.dat: where they
-    are placed (bezels included), the bezels, any diagonal sizes entered, and the
-    perspective choice. The layouts of other displays are kept."""
-    _write_layout(config_dir, layout.key, _as_saved(layout))
-
-
-def save_perspective_choice(config_dir: Path, layout: Layout) -> None:
-    """Save the perspectives in their <key>.persp file, and which one is the default
-    and whether they are used in display_systems.dat. The rest of the saved layout is
-    left as it is, whatever else ``layout`` holds. A display_systems.dat that can't be
-    read changes nothing."""
-    saved = _read_layout(config_dir, layout.key)
-    if saved is None:
-        # Nothing is saved yet, so the layout in use is the one of a fresh system.
-        saved = _as_saved(Layout.initial(layout.displays))
+    """Save the user's settings for these displays: in display_systems.dat where they are
+    placed (bezels included), the bezels, any diagonal sizes entered and the perspective
+    choice, and in the <key>.persp file the perspectives. The layouts of other displays are
+    kept. Raises ValueError for a layout whose displays overlap."""
+    if not layout.is_valid():
+        message = "The displays overlap."
+        raise ValueError(message)
+    # The .persp file is written first, then the default it is named in.
     _write_perspectives(config_dir, layout.key, layout.perspectives)
-    _write_layout(
-        config_dir,
-        layout.key,
-        replace(saved, use_perspective=layout.use_perspective, default_perspective=layout.default_perspective),
-    )
+    _write_layout(config_dir, layout.key, _as_saved(layout))
 
 
 def save_or_failure(
@@ -127,7 +145,12 @@ def _read_layout(config_dir: Path, key: str) -> _SavedLayout | None:
 def _write_layout(config_dir: Path, key: str, layout: _SavedLayout) -> None:
     """Save ``layout`` under ``key``, keeping the layouts of other displays."""
     path = config_dir / LAYOUTS_FILE
-    config = _read(path)
+    try:
+        config = _read(path)
+    except (configparser.Error, ValueError) as error:
+        # Saving is the user's way out of a file that can't be read: it is replaced.
+        logger.warning("Replacing the unreadable %s: %s; the old file is kept as %s", path, error, _keep(path))
+        config = configparser.ConfigParser()
     config[key] = {
         "ppi_norm_offsets": _rows_to_str(layout.ppi_norm_offsets),
         "bezel_mms": _rows_to_str(layout.bezel_mms),
@@ -137,6 +160,13 @@ def _write_layout(config_dir: Path, key: str, layout: _SavedLayout) -> None:
     }
     logger.info("Saving the layout %s: %s", key, layout)
     _write(path, config)
+
+
+def _keep(path: Path) -> Path:
+    """Move an unreadable ``path`` aside to ``<name>.corrupt``, replacing an earlier one; returns where it went."""
+    kept = path.with_name(path.name + ".corrupt")
+    path.replace(kept)
+    return kept
 
 
 def _read_perspectives(config_dir: Path, key: str) -> tuple[Perspective, ...]:
@@ -157,7 +187,15 @@ def _read_perspectives(config_dir: Path, key: str) -> tuple[Perspective, ...]:
 
 
 def _write_perspectives(config_dir: Path, key: str, perspectives: Sequence[Perspective]) -> None:
-    """Save ``perspectives`` as all the perspectives of the layout ``key``."""
+    """Save ``perspectives`` as all the perspectives of the layout ``key``; no file is made for none."""
+    path = config_dir / f"{key}.persp"
+    if path.exists():
+        try:
+            _read_perspectives(config_dir, key)
+        except (configparser.Error, ValueError) as error:
+            logger.warning("Replacing the unreadable %s: %s; the old file is kept as %s", path, error, _keep(path))
+    if not perspectives and not path.exists():
+        return
     config = configparser.ConfigParser()
     for perspective in perspectives:
         config[perspective.name] = {
@@ -169,7 +207,7 @@ def _write_perspectives(config_dir: Path, key: str, perspectives: Sequence[Persp
             "tilts": _rows_to_str([(t.angle, t.vertical_offset, t.depth_offset) for t in perspective.tilts]),
         }
     logger.info("Saving perspectives: %s", config.sections())
-    _write(config_dir / f"{key}.persp", config)
+    _write(path, config)
 
 
 def _as_saved(layout: Layout) -> _SavedLayout:

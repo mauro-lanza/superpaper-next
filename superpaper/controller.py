@@ -2,7 +2,6 @@
 settings, the hotkeys and the tray icon, and what connects them. The windows and dialogs
 are the UI's; they come in as a ``Shell``."""
 
-import configparser
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -61,10 +60,13 @@ class Superpaper:
         # The running profile, its slideshow and every wallpaper change, starting with the
         # displays as they are now. Wallpaper changes use the custom command as last saved.
         self.last_failure: str | None = None
+        loaded = display_detection.detect_layout_or_default(paths.config, desktop)
+        self._reported_layout_problem: str | None = None
+        self._report_layout_problem(loaded.problem)
         self.session = Session(
             paths,
             desktop,
-            display_detection.detect_layout(paths.config, desktop),
+            loaded.layout,
             on_change=self._report_change,
             set_command=lambda: self.settings.set_command,
         )
@@ -196,17 +198,26 @@ class Superpaper:
 
     def refresh_displays(self) -> None:
         """Detect the displays again and load their saved layout; later wallpaper changes
-        use it. If detection fails, the previous layout stays in use.
+        use it. If detection fails, the previous layout stays in use. A saved layout that
+        can't be used is replaced by the default arrangement, and the user told once.
 
         Displays are detected here, on the main thread, never by the session's worker:
         see display_detection.detect_displays.
         """
         try:
-            layout = display_detection.detect_layout(self.paths.config, self.desktop)
-        except (display_detection.DisplayDetectionError, OSError, ValueError, configparser.Error) as error:
+            loaded = display_detection.detect_layout_or_default(self.paths.config, self.desktop)
+        except (display_detection.DisplayDetectionError, OSError) as error:
             logger.warning("Keeping the previous display layout: %s", error)
             return
-        self.session.use_displays(layout)
+        self._report_layout_problem(loaded.problem)
+        self.session.use_displays(loaded.layout)
+
+    def _report_layout_problem(self, problem: str | None) -> None:
+        """Tell the user why the saved layout isn't used, unless they were told already."""
+        if problem is not None and problem != self._reported_layout_problem:
+            logger.warning("%s", problem)
+            self._shell.call_soon(lambda: self._shell.notify(problem, "Error"))
+        self._reported_layout_problem = problem
 
     def rebind_hotkey(self, before: StoredProfile | None, after: StoredProfile | None) -> None:
         """Rebind a profile's hotkey once it was saved, renamed or deleted: see

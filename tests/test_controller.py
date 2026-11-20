@@ -5,7 +5,6 @@ The UI (windows, dialogs, tray icon) and the hotkeys are stand-ins; the store is
 unless a test is about the profiles directory itself.
 """
 
-import configparser
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -16,6 +15,7 @@ import pytest
 from superpaper import controller
 from superpaper.controller import Shell
 from superpaper.geometry import display_detection
+from superpaper.geometry.display_store import LoadedLayout
 from superpaper.paths import AppPaths
 from superpaper.profiles.profile_file import Profile
 from superpaper.profiles.profile_id import ProfileId
@@ -35,18 +35,19 @@ class Detection:
     def __init__(self):
         self.config_dirs = []
         self.error = None
+        self.problem = None
 
     def __call__(self, config_dir, desktop):
         self.config_dirs.append(config_dir)
         if self.error is not None:
             raise self.error
-        return FRESH
+        return LoadedLayout(FRESH, self.problem)
 
 
 @pytest.fixture(autouse=True)
 def detection(monkeypatch):
     detect = Detection()
-    monkeypatch.setattr(display_detection, "detect_layout", detect)
+    monkeypatch.setattr(display_detection, "detect_layout_or_default", detect)
     return detect
 
 
@@ -106,6 +107,7 @@ def application(running=None, profiles=(), active=None, settings=None, **shell_a
     superpaper.store = FakeStore(profiles, active)
     superpaper.session = FakeSession(running)
     superpaper.last_failure = None
+    superpaper._reported_layout_problem = None
     superpaper.hotkeys = None
     superpaper.tray = SimpleNamespace(
         clickable=True, remove=lambda: superpaper.session.requests.append(("tray removed",))
@@ -154,10 +156,7 @@ def test_a_profile_starts_on_freshly_detected_displays(detection):
     assert detection.config_dirs == [PATHS.config, PATHS.config]
 
 
-@pytest.mark.parametrize(
-    "error",
-    [display_detection.DisplayDetectionError(3), configparser.Error("an unreadable display_systems.dat")],
-)
+@pytest.mark.parametrize("error", [display_detection.DisplayDetectionError(3), OSError("no access to the config")])
 def test_a_failed_display_detection_keeps_the_previous_layout(detection, caplog, error):
     superpaper = application()
     detection.error = error
@@ -166,6 +165,32 @@ def test_a_failed_display_detection_keeps_the_previous_layout(detection, caplog,
 
     assert superpaper.session.requests == []
     assert "Keeping the previous display layout" in caplog.text
+
+
+def test_a_saved_layout_that_cant_be_used_is_reported_once_and_the_default_is_used(detection):
+    superpaper = application()
+    detection.problem = "The saved display layout can't be used."
+
+    superpaper.refresh_displays()
+    superpaper.refresh_displays()
+
+    assert superpaper.session.requests == [("use_displays", FRESH), ("use_displays", FRESH)]
+    reported = [event for event in superpaper.ui_events if event[0] == "call_soon"]
+    assert len(reported) == 1
+    reported[0][1]()
+    assert superpaper.ui_events[-1] == ("notify", "The saved display layout can't be used.", "Error")
+
+
+def test_a_layout_problem_is_reported_again_after_the_layout_was_fine_in_between(detection):
+    superpaper = application()
+    detection.problem = "can't be used"
+    superpaper.refresh_displays()
+    detection.problem = None
+    superpaper.refresh_displays()
+    detection.problem = "can't be used"
+    superpaper.refresh_displays()
+
+    assert len([event for event in superpaper.ui_events if event[0] == "call_soon"]) == 2
 
 
 def test_a_profile_hotkey_starts_the_currently_loaded_profile():

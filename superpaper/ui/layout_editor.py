@@ -42,7 +42,7 @@ class LayoutEditor:
         """Create buttons for display preview positioning config."""
         # Buttons - show only if use_ppi_px == True
         self.button_config = wx.Button(self.preview, label="Positions")
-        self.button_save = wx.Button(self.preview, label="Save")
+        self.button_save = wx.Button(self.preview, label="Done")
         self.button_reset = wx.Button(self.preview, label="Reset")
         self.button_cancel = wx.Button(self.preview, label="Cancel")
         self.button_entry = wx.Button(self.preview, label="Exact entry")
@@ -115,17 +115,21 @@ class LayoutEditor:
         self.preview.Refresh()
 
     def onSave(self, evt):
-        """Stage current Display offsets into the staged layout.
+        """Stage current Display offsets into the staged layout, unless the displays overlap.
 
         The new positions are kept in memory (and shown in the preview) but are
         only written to disk when the system band's Save is pressed.
         """
-        self.bind_movement_binds(False)
-        self.toggle_buttons(True, False)
         staged = self.preview.staged
         # only export drag positions if actually dragged
         dragged = self.dragged_offsets(staged.layout) if self.positions_dragged else None
-        self.state, staged.layout = layout_edit.save_positions(self.state, staged.layout, dragged)
+        result = layout_edit.save_positions(self.state, staged.layout, dragged)
+        if isinstance(result, Problems):
+            show_message_dialog(result.messages[0], "Error", parent=self.preview)
+            return
+        self.bind_movement_binds(False)
+        self.toggle_buttons(True, False)
+        self.state, staged.layout = result
         display_data = staged.layout.ppi_norm_areas()
         # Full redraw of preview with new offset data
         if self.preview.current_preview_images:

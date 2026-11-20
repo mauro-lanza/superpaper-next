@@ -6,10 +6,9 @@ from collections.abc import Callable, Sequence
 import wx  # ty:ignore[unresolved-import]
 
 from superpaper.geometry import perspective_form
-from superpaper.geometry.display_store import SaveFailed
 from superpaper.geometry.displays import Layout
 from superpaper.geometry.perspective import Named
-from superpaper.paths import AppPaths, resource
+from superpaper.paths import resource
 from superpaper.profile_actions import align_test_profile
 from superpaper.profiles.profile_file import Profile
 from superpaper.profiles.profile_id import NEW_PROFILE_LABEL
@@ -22,10 +21,10 @@ from superpaper.user_input import Offset, Problems
 class PerspectiveConfig(wx.Dialog):
     """Perspective data configuration dialog.
 
-    It works on its own ``layout``: the session's saved geometry with the editor's perspective
-    choice, never the editor's unsaved band edits. ``offsets`` are the editor's applied manual
-    offsets, which the image size check uses; ``typed_offsets`` are those typed in its fields,
-    applied or not, which the align test uses.
+    It works on the editor's staged layout, and stages every perspective change into it
+    (``stage_perspectives``); the display band's Save writes them. ``offsets`` are the
+    editor's applied manual offsets, which the image size check uses; ``typed_offsets`` are
+    those typed in its fields, applied or not, which the align test uses.
     """
 
     def __init__(
@@ -34,13 +33,10 @@ class PerspectiveConfig(wx.Dialog):
         offsets: Sequence[Offset],
         typed_offsets: Sequence[Offset],
         *,
-        layout: Layout,
         staged_layout: Callable[[], Layout],
-        paths: AppPaths,
         warn_large_img: bool,
         browse_default_dir: str,
-        adopt_perspectives: Callable[[Layout], None],
-        refresh_displays: Callable[[], None],
+        stage_perspectives: Callable[[Layout], None],
         show_test_profile: Callable[[Profile, list[str]], None],
     ):
         wx.Dialog.__init__(
@@ -52,14 +48,10 @@ class PerspectiveConfig(wx.Dialog):
         self.tc_width = 150
         self.offsets = offsets
         self.typed_offsets = typed_offsets
-        self.layout = layout
-        self._staged_layout = staged_layout
-        self._config_dir = paths.config
+        self.layout = staged_layout()
         self._browse_default_dir = browse_default_dir
-        self._adopt_perspectives = adopt_perspectives
-        self._refresh_displays = refresh_displays
+        self._stage_perspectives = stage_perspectives
         self._show_test_profile = show_test_profile
-        self._load_choice()
         self.test_image = None
         self.help_bmp = wx.ArtProvider.GetBitmap(wx.ART_QUESTION, wx.ART_BUTTON, wx.Size(20, 20))
         self.warn_large_img = warn_large_img
@@ -294,38 +286,15 @@ class PerspectiveConfig(wx.Dialog):
     # Button methods
     #
     def checkCbmaster(self):
-        """Save master checkbox state into the layout."""
+        """Stage the master checkbox state."""
         master = self.cb_master.GetValue()
         if master != self.layout.use_perspective:
-            self._save_choice(self.layout.with_use_perspective(master))
+            self._stage(self.layout.with_use_perspective(master))
 
-    def _load_choice(self):
-        """Start from the editor's perspective choice. The geometry the perspectives are
-        converted with is the saved layout's, as the session held it when the dialog opened,
-        never the editor's unsaved band edits."""
-        self.layout = self.layout.with_perspectives_of(self._staged_layout())
-
-    def _save_choice(self, layout):
-        """Save the perspective choice of ``layout`` alone, without the editor's unsaved
-        layout; the editor and the session then use it. Returns False, with the dialog back
-        at the editor's choice, if it could not be saved."""
-        failure = perspective_form.save_choice(self._config_dir, layout)
-        if failure is not None:
-            self._show_save_failure(failure)
-            return False
-        self._adopt_saved(layout)
-        return True
-
-    def _adopt_saved(self, layout):
+    def _stage(self, layout):
+        """Stage the perspective choice of ``layout`` into the editor's layout."""
         self.layout = layout
-        self._adopt_perspectives(self.layout)
-        self._refresh_displays()
-
-    def _show_save_failure(self, failure):
-        show_message_dialog(failure.message, "Error")
-        self._load_choice()
-        self.cb_master.SetValue(self.layout.use_perspective)
-        self.update_choiceprofile()
+        self._stage_perspectives(layout)
 
     def onSelect(self, event):
         """Acts once a profile is picked in the dropdown menu."""
@@ -336,7 +305,7 @@ class PerspectiveConfig(wx.Dialog):
             self.populate_fields(item_str)
 
     def onSave(self, evt=None) -> bool:
-        """Save perspective config to file and update display system state."""
+        """Stage the perspective config into the editor's layout; whether it was valid."""
         persp_name = self.tc_name.GetLineText(0)
         form = perspective_form.PerspectiveForm(
             name=persp_name,
@@ -348,30 +317,26 @@ class PerspectiveConfig(wx.Dialog):
             rotation_cells=tuple(tuple(tc.GetLineText(0) for tc in row[2:]) for row in self.grid_rows),
         )
 
-        def save(*, confirmed):
-            return perspective_form.save_perspective(
+        def stage(*, confirmed):
+            return perspective_form.stage_perspective(
                 form,
                 layout=self.layout,
                 offsets=self.offsets,
                 warn_large=self.warn_large_img,
                 confirmed=confirmed,
-                config_dir=self._config_dir,
             )
 
-        result = save(confirmed=False)
+        result = stage(confirmed=False)
         if isinstance(result, perspective_form.NeedsConfirm):
             if not show_message_dialog(result.message, "Info", style="YES_NO"):
                 return False
-            result = save(confirmed=True)
+            result = stage(confirmed=True)
         match result:
             case Problems():
                 show_message_dialog(result.messages[0])
                 return False
-            case SaveFailed():
-                self._show_save_failure(result)
-                return False
-            case perspective_form.Saved():
-                self._adopt_saved(result.layout)
+            case perspective_form.Staged():
+                self._stage(result.layout)
 
         # update dialog profile list
         self.update_choiceprofile()
@@ -384,8 +349,7 @@ class PerspectiveConfig(wx.Dialog):
         if selection == wx.NOT_FOUND:
             return
         persp_name = self.choice_profiles.GetString(selection)
-        if not self._save_choice(self.layout.without_perspective(persp_name)):
-            return
+        self._stage(self.layout.without_perspective(persp_name))
         # update dialog profile list
         self.update_choiceprofile()
         self.onCreateNewProfile(None)
@@ -419,7 +383,7 @@ class PerspectiveConfig(wx.Dialog):
             msg = "Perspective corrections are disabled. Enable them to test?"
             if show_message_dialog(msg, style="YES_NO"):
                 self.cb_master.SetValue(True)
-                self.checkCbmaster()  # update & save the layout
+                self.checkCbmaster()  # stage it
             else:
                 # Don't enable, stop testing.
                 show_message_dialog("Perspective corrections are disabled, abort test.")
@@ -438,7 +402,7 @@ class PerspectiveConfig(wx.Dialog):
             return
         perspective = Named(self.choice_profiles.GetString(self.choice_profiles.GetSelection()))
 
-        # The session takes the layout onSave reloaded, then shows the draft.
+        # The draft is rendered with the layout onSave just staged.
         profile = align_test_profile(found, perspective, self.typed_offsets)
         wx.BeginBusyCursor()
         self._show_test_profile(profile, testimage)

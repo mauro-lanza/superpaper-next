@@ -1,7 +1,6 @@
 """Superpaper's wx shell: the wx.App, the main loop, and the windows, dialogs and tray icon
 that the application in superpaper.controller opens through its Shell."""
 
-import configparser
 import logging
 import sys
 from collections.abc import Callable
@@ -57,8 +56,6 @@ class App(wx.App):
             self.superpaper = start_superpaper(frame, self._paths, self._settings, self._desktop, self._startup_profile)
         except DisplayDetectionError as error:
             return _fail_startup(f"No displays could be detected: {error}")
-        except (ValueError, configparser.Error) as error:
-            return _fail_startup(f"The saved display layout could not be read: {error}")
         except OSError as error:
             return _fail_startup(f"Superpaper's files could not be read or written: {error}")
         return True

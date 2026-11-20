@@ -1,7 +1,6 @@
 """CLI for Superpaper. --help switch prints usage."""
 
 import argparse
-import configparser
 import logging
 import os
 import sys
@@ -11,7 +10,7 @@ from pathlib import Path
 from typing import assert_never
 
 from superpaper.desktop.backend import Desktop
-from superpaper.geometry.display_detection import DisplayDetectionError, detect_layout
+from superpaper.geometry.display_detection import DisplayDetectionError, detect_layout_or_default
 from superpaper.geometry.displays import Layout
 from superpaper.geometry.perspective import Named
 from superpaper.paths import AppPaths, ensure_dirs
@@ -250,16 +249,16 @@ def _span_desktop(desktop: Desktop, set_command: str) -> None:
 
 def _detect_displays(paths: AppPaths, desktop: Desktop) -> Layout:
     try:
-        return detect_layout(paths.config, desktop)
+        loaded = detect_layout_or_default(paths.config, desktop)
     except DisplayDetectionError as error:
         message = f"No displays could be detected: {error}"
-        raise CliError(message) from error
-    except (ValueError, configparser.Error) as error:
-        message = f"The saved display layout could not be read: {error}"
         raise CliError(message) from error
     except OSError as error:
         message = f"Superpaper's files could not be read or written: {error}"
         raise CliError(message) from error
+    if loaded.problem is not None:
+        print(f"Warning: {' '.join(loaded.problem.split())}", file=sys.stderr)
+    return loaded.layout
 
 
 def _check_profile_exists(paths: AppPaths, desktop: Desktop, profile_id: ProfileId) -> None:

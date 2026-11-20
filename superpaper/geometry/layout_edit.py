@@ -5,6 +5,7 @@ Each transition takes the state and the layout and returns the new state and lay
 caller keeps both and does the drawing.
 """
 
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -39,6 +40,20 @@ class ConfiguringBezels:
 
 EditState = Idle | ConfiguringPositions | ConfiguringBezels
 
+MIN_DIAGONAL_INCHES = 1
+MAX_DIAGONAL_INCHES = 1000
+_DIAGONAL = re.compile(r"[0-9]+(?:[.,][0-9]+)?")
+OVERLAP_MESSAGE = "The displays overlap. Move them apart before pressing Done."
+REARRANGED_MESSAGE = "The displays could not be kept where they were without overlapping, so they were arranged afresh."
+
+
+@dataclass(frozen=True, slots=True)
+class Resized:
+    """A layout made valid after its displays changed size, and whether all were arranged afresh."""
+
+    layout: Layout
+    rearranged_all: bool
+
 
 def start_positions(state: EditState, layout: Layout) -> ConfiguringPositions:
     """Begin positioning the displays. Raises ValueError unless idle."""
@@ -46,14 +61,18 @@ def start_positions(state: EditState, layout: Layout) -> ConfiguringPositions:
     return ConfiguringPositions(layout.ppi_norm_offsets)
 
 
-def save_positions(state: EditState, layout: Layout, dragged_offsets: Sequence[Point] | None) -> tuple[Idle, Layout]:
-    """Keep the positions: ``dragged_offsets`` if the displays were dragged, else the layout as it is.
+def save_positions(
+    state: EditState, layout: Layout, dragged_offsets: Sequence[Point] | None
+) -> tuple[Idle, Layout] | Problems:
+    """Keep the positions: ``dragged_offsets`` if the displays were dragged, else the layout
+    as it is; a message instead if the displays overlap there.
 
     Raises ValueError unless positioning.
     """
     match state:
         case ConfiguringPositions():
-            return Idle(), layout if dragged_offsets is None else layout.with_offsets(dragged_offsets)
+            placed = layout if dragged_offsets is None else layout.with_offsets(dragged_offsets)
+            return (Idle(), placed) if placed.is_valid() else Problems((OVERLAP_MESSAGE,))
         case Idle() | ConfiguringBezels():
             raise WrongState(state, ConfiguringPositions)
         case _:
@@ -104,31 +123,43 @@ def save_display_settings(config_dir: Path, layout: Layout) -> SaveFailed | None
     return display_store.save_or_failure(display_store.save_layout, config_dir, layout, "display settings")
 
 
-def with_entered_diagonals(layout: Layout, texts: Sequence[str]) -> Layout | None:
-    """The layout with the diagonals the field ``texts`` spell, or None while they aren't all valid."""
+def with_entered_diagonals(layout: Layout, texts: Sequence[str]) -> Resized | None:
+    """The layout with the diagonals the field ``texts`` spell, made valid, or None while they aren't all valid."""
     inches = parse_diagonals(texts)
-    return None if inches is None else layout.with_diagonals(inches)
+    return None if inches is None else fit_resized(layout.with_diagonals(inches))
+
+
+def fit_resized(layout: Layout) -> Resized:
+    """``layout``, whose displays changed size, without overlaps: only the displays that overlap
+    are shifted, and if that doesn't resolve it all are arranged afresh."""
+    if layout.is_valid():
+        return Resized(layout, rearranged_all=False)
+    shifted = layout.with_overlaps_shifted()
+    if shifted is not None:
+        return Resized(shifted, rearranged_all=False)
+    return Resized(layout.with_initial_offsets(), rearranged_all=True)
+
+
+def parse_diagonal(text: str) -> float | None:
+    """The diagonal size in inches ``text`` spells as digits with an optional decimal point
+    or comma, or None unless it is a number from 1 to 1000."""
+    match = _DIAGONAL.fullmatch(text.strip())
+    if match is None:
+        return None
+    inches = float(text.strip().replace(",", "."))
+    return inches if MIN_DIAGONAL_INCHES <= inches <= MAX_DIAGONAL_INCHES else None
 
 
 def parse_diagonals(texts: Sequence[str]) -> list[float] | None:
-    """The diagonal sizes in inches ``texts`` spell, or None unless every one is a positive number."""
-    entered = [parse_float(text) for text in texts]
-    inches = [inch for inch in entered if inch is not None and inch > 0]
-    return inches if inches and len(inches) == len(entered) else None
+    """The diagonal sizes in inches ``texts`` spell, or None unless every one is valid."""
+    inches = [parse_diagonal(text) for text in texts]
+    return [inch for inch in inches if inch is not None] if inches and None not in inches else None
 
 
 def parse_bezel(text: str) -> float | None:
     """The bezel thickness in millimetres ``text`` spells, or None unless it is a non-negative number."""
     value = parse_float(text)
     return value if value is not None and value >= 0 else None
-
-
-def arranged_if_resized(before: Layout, after: Layout) -> Layout:
-    """``after``, with its displays arranged afresh only if switching from ``before`` changed the sizes
-    the user sees (diagonals shown to 0.1")."""
-    if after.diagonal_inches() == before.diagonal_inches():
-        return after
-    return after.with_initial_offsets()
 
 
 def with_entered_bezels(layout: Layout, entered: Sequence[tuple[str, str]]) -> Layout | Problems:

@@ -5,11 +5,15 @@ import pytest
 
 from superpaper.geometry import display_detection, display_store
 from tests.conftest import monitor
+from tests.desktop.fake import FakeDesktop
 from tests.geometry.conftest import (
     DUAL_KEY,
     DUAL_MONITORS,
     LAPTOP_KEY,
     LAPTOP_MONITORS,
+    OVERLAPPING_DAT,
+    OVERLAPPING_KEY,
+    OVERLAPPING_MONITORS,
     SAVED_COUCH,
     SAVED_DESK,
     detect,
@@ -78,6 +82,34 @@ def test_an_unreadable_saved_layout_is_an_error(monkeypatch, tmp_path, desktop):
     (tmp_path / "display_systems.dat").write_text("not a layout\n", encoding="utf-8")
 
     with pytest.raises(configparser.Error):
+        display_detection.detect_layout(tmp_path, desktop)
+
+
+def test_an_unreadable_saved_layout_gives_the_default_arrangement_to_the_app(monkeypatch, tmp_path, desktop):
+    desktop.monitors = [monitor(0, 0, 2560, 1440)]
+    monkeypatch.setattr(display_detection.time, "sleep", lambda _delay: None)
+    (tmp_path / "display_systems.dat").write_text("not a layout\n", encoding="utf-8")
+
+    loaded = display_detection.detect_layout_or_default(tmp_path, desktop)
+
+    assert loaded.layout.ppi_norm_offsets == ((0, 0),)
+    assert loaded.problem is not None
+    assert (tmp_path / "display_systems.dat").read_text(encoding="utf-8") == "not a layout\n"
+
+
+def test_the_saved_layout_of_a_portable_typed_as_15_inch_overlaps_and_is_not_kept(monkeypatch, tmp_path):
+    (tmp_path / "display_systems.dat").write_text(OVERLAPPING_DAT, encoding="utf-8")
+    desktop = FakeDesktop()
+    desktop.monitors = OVERLAPPING_MONITORS
+
+    loaded = display_detection.detect_layout_or_default(tmp_path, desktop)
+
+    assert loaded.layout.key == OVERLAPPING_KEY
+    assert loaded.problem is not None
+    assert loaded.layout.is_valid()
+    assert loaded.layout.uses_user_diagonals is False
+    assert (tmp_path / "display_systems.dat").read_text(encoding="utf-8") == OVERLAPPING_DAT
+    with pytest.raises(ValueError, match="overlap"):
         display_detection.detect_layout(tmp_path, desktop)
 
 

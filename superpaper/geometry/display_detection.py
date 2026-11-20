@@ -9,6 +9,7 @@ from pathlib import Path
 from superpaper.desktop.backend import Desktop
 from superpaper.desktop.monitors import Monitor
 from superpaper.geometry import display_store
+from superpaper.geometry.display_store import LoadedLayout
 from superpaper.geometry.displays import Display, Layout
 
 logger = logging.getLogger(__name__)
@@ -31,8 +32,15 @@ class DisplayDetectionError(RuntimeError):
 
 
 def detect_layout(config_dir: Path, desktop: Desktop) -> Layout:
-    """Detect the displays and load the layout saved for them from ``config_dir``."""
+    """Detect the displays and load the layout saved for them from ``config_dir``; raises
+    for a saved layout that can't be used (see display_store.load)."""
     return display_store.load(config_dir, detect_displays(desktop))
+
+
+def detect_layout_or_default(config_dir: Path, desktop: Desktop) -> LoadedLayout:
+    """Detect the displays and load the layout saved for them; the default arrangement,
+    with the reason, if the saved one can't be used."""
+    return display_store.load_or_default(config_dir, detect_displays(desktop))
 
 
 def detect_displays(desktop: Desktop) -> tuple[Display, ...]:
