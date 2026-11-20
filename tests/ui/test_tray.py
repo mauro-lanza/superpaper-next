@@ -39,7 +39,7 @@ def recorder():
 def icon(tray, recorder, *, desktop=None, profiles=(), paused=False, failure=None, running=None):
     """A tray icon, built as the application builds it, with the wx icon."""
     store = SimpleNamespace(profiles=list(profiles))
-    session = SimpleNamespace(paused=paused, running=running, next=recorder("next"), toggle_pause=recorder("pause"))
+    session = SimpleNamespace(paused=paused, running=running, toggle_pause=recorder("pause"))
     return tray.TaskBarIcon(
         store,
         session,
@@ -50,6 +50,7 @@ def icon(tray, recorder, *, desktop=None, profiles=(), paused=False, failure=Non
         open_settings=recorder("settings"),
         reload_profiles=recorder("reload"),
         start_profile=recorder("start"),
+        next_wallpaper=recorder("next"),
         quit=recorder("quit"),
     )
 

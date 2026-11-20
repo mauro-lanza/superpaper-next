@@ -58,7 +58,7 @@ class TaskBarIcon(wx.adv.TaskBarIcon):
     ``last_failure()`` gives a reason.
 
     The application provides what the menu does beyond the session: ``open_editor()``,
-    ``open_settings()``, ``reload_profiles()``, ``start_profile(stored)`` and ``quit()``;
+    ``open_settings()``, ``reload_profiles()``, ``start_profile(stored)``, ``next_wallpaper()`` and ``quit()``;
     ``config_dir`` is the folder "Open Config Folder" opens.
     """
 
@@ -74,6 +74,7 @@ class TaskBarIcon(wx.adv.TaskBarIcon):
         open_settings,
         reload_profiles,
         start_profile,
+        next_wallpaper,
         quit,
     ):
         super().__init__()
@@ -86,6 +87,7 @@ class TaskBarIcon(wx.adv.TaskBarIcon):
         self._open_settings = open_settings
         self._reload_profiles = reload_profiles
         self._start_profile = start_profile
+        self._next_wallpaper = next_wallpaper
         self._quit = quit
         self.Bind(wx.adv.EVT_TASKBAR_LEFT_DOWN, self.on_left_down)
         # Prefer the desktop's own tray (native StatusNotifierItem on Linux, which works on
@@ -94,7 +96,7 @@ class TaskBarIcon(wx.adv.TaskBarIcon):
             menu=self.menu,
             call_soon=wx.CallAfter,
             activate=self._open_editor,
-            secondary_activate=session.next,
+            secondary_activate=next_wallpaper,
             icon_path=str(resource("superpaper.png")),
             title=TRAY_TOOLTIP,
         )
@@ -137,7 +139,7 @@ class TaskBarIcon(wx.adv.TaskBarIcon):
             Separator(),
             Submenu("Profiles", profiles),
             Separator(),
-            Item("Next Wallpaper", self._session.next, enabled=running is not None),
+            Item("Next Wallpaper", self._next_wallpaper, enabled=running is not None),
             Check(
                 "Pause Timer",
                 self._session.toggle_pause,

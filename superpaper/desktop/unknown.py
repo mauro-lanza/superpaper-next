@@ -79,6 +79,11 @@ def set_spanmode(set_command: str) -> Result:
     return Result()
 
 
+def watch_displays(on_change: Callable[[], None]) -> bool:
+    """Nothing reports display changes."""
+    return False
+
+
 def set_wallpaper(wallpaper: Wallpaper, *, set_command: str, profiles: ProfileWallpapers) -> Result:
     """Report that the platform is not supported."""
     return Result(f"Unknown platform: {sys.platform}")

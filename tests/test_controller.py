@@ -99,6 +99,7 @@ def application(running=None, profiles=(), active=None, settings=None, **shell_a
         "make_tray": lambda app: None,
         "close": lambda: superpaper.session.requests.append(("closed",)),
         "settle_unsaved_changes": lambda: True,
+        "watch_displays": lambda refresh: True,
     }
     superpaper._shell = Shell(**{**actions, **shell_actions})
     superpaper.paths = PATHS
@@ -109,6 +110,9 @@ def application(running=None, profiles=(), active=None, settings=None, **shell_a
     superpaper.session = FakeSession(running)
     superpaper.last_failure = None
     superpaper._profile_watchers = []
+    superpaper._layout_watchers = []
+    superpaper._layout = LAYOUT
+    superpaper._watching_displays = True
     superpaper._reported_layout_problem = None
     superpaper.hotkeys = None
     superpaper.tray = SimpleNamespace(
@@ -153,9 +157,72 @@ def test_a_profile_starts_on_freshly_detected_displays(detection):
     superpaper.start_profile(work)
     superpaper.refresh_displays()
 
-    # Detected here, on the main thread; the session only gets the layout.
-    assert superpaper.session.requests == [("use_displays", FRESH), ("activate", work), ("use_displays", FRESH)]
+    # Detected here, on the main thread; the session only gets the layout, once.
+    assert superpaper.session.requests == [("use_displays", FRESH), ("activate", work)]
     assert detection.config_dirs == [PATHS.config, PATHS.config]
+
+
+def test_a_layout_in_use_is_not_handed_to_the_session_again(detection):
+    superpaper = application()
+
+    superpaper.refresh_displays()
+    superpaper.refresh_displays()
+    superpaper.refresh_displays(redraw=True)
+
+    assert superpaper.session.requests == [("use_displays", FRESH), ("redraw",)]
+
+
+def test_a_new_layout_is_told_to_the_layout_watchers_on_the_ui_thread():
+    superpaper = application()
+    told = []
+    stop = superpaper.watch_layout(told.append)
+
+    superpaper.refresh_displays()
+    assert told == []
+    (_, notify) = superpaper.ui_events[-1]
+    notify()
+    stop()
+    superpaper._layout = LAYOUT
+    superpaper.refresh_displays()
+    superpaper.ui_events[-1][1]()
+
+    assert told == [FRESH]
+    assert superpaper.layout is FRESH
+
+
+def test_layout_watchers_are_told_after_every_detection_even_when_the_layout_is_the_same():
+    superpaper = application()
+    told = []
+    superpaper.watch_layout(told.append)
+    superpaper._layout = FRESH
+
+    superpaper.refresh_displays()
+    superpaper.ui_events[-1][1]()
+
+    assert told == [FRESH]
+    assert superpaper.session.requests == []
+
+
+def test_displays_are_detected_again_when_the_editor_opens():
+    superpaper = application()
+
+    superpaper.open_editor()
+
+    assert superpaper.session.requests == [("use_displays", FRESH)]
+    assert superpaper.ui_events[-1] == "editor"
+
+
+def test_next_detects_the_displays_again_only_where_the_os_cannot_report_changes(detection):
+    watching = application()
+    not_watching = application()
+    not_watching._watching_displays = False
+
+    watching.next_wallpaper()
+    not_watching.next_wallpaper()
+
+    assert watching.session.requests == [("next",)]
+    assert not_watching.session.requests == [("use_displays", FRESH), ("next",)]
+    assert len(detection.config_dirs) == 1
 
 
 @pytest.mark.parametrize("error", [display_detection.DisplayDetectionError(3), OSError("no access to the config")])
@@ -171,12 +238,13 @@ def test_a_failed_display_detection_keeps_the_previous_layout(detection, caplog,
 
 def test_a_saved_layout_that_cant_be_used_is_reported_once_and_the_default_is_used(detection):
     superpaper = application()
+    superpaper._layout = FRESH
     detection.problem = "The saved display layout can't be used."
 
     superpaper.refresh_displays()
     superpaper.refresh_displays()
 
-    assert superpaper.session.requests == [("use_displays", FRESH), ("use_displays", FRESH)]
+    assert superpaper.session.requests == []
     reported = [event for event in superpaper.ui_events if event[0] == "call_soon"]
     assert len(reported) == 1
     reported[0][1]()
@@ -185,6 +253,7 @@ def test_a_saved_layout_that_cant_be_used_is_reported_once_and_the_default_is_us
 
 def test_a_layout_problem_is_reported_again_after_the_layout_was_fine_in_between(detection):
     superpaper = application()
+    superpaper._layout = FRESH
     detection.problem = "can't be used"
     superpaper.refresh_displays()
     detection.problem = None
