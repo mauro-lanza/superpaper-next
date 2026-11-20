@@ -1,55 +1,8 @@
 import sys
 from types import ModuleType, SimpleNamespace
 
-import pytest
-
-import superpaper.desktop as desktop
 from superpaper.desktop.wallpaper import Pieces
 from tests.desktop.conftest import IMAGE, NO_PROFILES, assert_satisfies_desktop
-
-
-def fake_screen(number, x, y, width, height, scale=1.0):
-    frame = SimpleNamespace(origin=SimpleNamespace(x=x, y=y), size=SimpleNamespace(width=width, height=height))
-    return SimpleNamespace(
-        number=number,
-        frame=frame,
-        backingScaleFactor=lambda: scale,
-        localizedName=lambda: f"Screen {number}",
-        deviceDescription=lambda: {"NSScreenNumber": number},
-    )
-
-
-@pytest.fixture
-def appkit(monkeypatch):
-    """AppKit, as ``install(screens)`` gives it, with screens as (x, y, width, height[, scale]) in points.
-
-    The first screen is the primary one. ``install`` returns what was set where, as
-    (screen number, image) pairs; screen numbers count from 1 in the order given.
-    """
-
-    def install(screens):
-        set_images = []
-        workspace = SimpleNamespace(
-            setDesktopImageURL_forScreen_options_error_=lambda url, screen, options, error: (
-                set_images.append((screen.number, url)) or (True, None)
-            )
-        )
-        appkit_module = ModuleType("AppKit")
-        appkit_module.NSScreen = SimpleNamespace(
-            screens=lambda: [fake_screen(number, *screen) for number, screen in enumerate(screens, start=1)]
-        )
-        appkit_module.NSWorkspace = SimpleNamespace(sharedWorkspace=lambda: workspace)
-        foundation = ModuleType("Foundation")
-        foundation.NSURL = SimpleNamespace(fileURLWithPath_=lambda path: path)
-        monkeypatch.setitem(sys.modules, "AppKit", appkit_module)
-        monkeypatch.setitem(sys.modules, "Foundation", foundation)
-        monkeypatch.setitem(sys.modules, "Quartz", None)
-        return set_images
-
-    yield install
-    sys.modules.pop("superpaper.desktop.macos", None)
-    if hasattr(desktop, "macos"):
-        del desktop.macos
 
 
 def test_macos_shows_one_piece_per_screen_in_display_order(appkit):
@@ -90,6 +43,15 @@ def test_macos_detects_retina_screens_in_pixels(appkit):
     found = macos.detect_monitors()
 
     assert [(m.x, m.y, m.width, m.height) for m in found] == [(0, 0, 2880, 1800), (2880, 0, 2560, 1600)]
+
+
+def test_macos_scales_offsets_by_the_primary_screen_but_sizes_by_each_screen(appkit):
+    appkit(screens=[(0, 0, 1440, 900, 2.0), (1440, 0, 1920, 1080, 1.0)])
+    from superpaper.desktop import macos
+
+    found = macos.detect_monitors()
+
+    assert [(m.x, m.y, m.width, m.height) for m in found] == [(0, 0, 2880, 1800), (2880, -360, 1920, 1080)]
 
 
 def test_macos_reads_the_physical_size_from_quartz(appkit, monkeypatch):
