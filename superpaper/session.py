@@ -154,6 +154,12 @@ class Session:
         detected, with their saved layout."""
         self._post(lambda: self._use_displays(layout))
 
+    def redraw(self) -> None:
+        """Show the running profile's current image again, for the layout the session has by
+        now; nothing runs: nothing is shown. The slideshow's countdown and pause are left as
+        they are."""
+        self._post(self._redraw)
+
     def apply_draft(
         self,
         profile: Profile,
@@ -163,8 +169,9 @@ class Session:
         on_done: Callable[[str | None], None] | None = None,
     ) -> None:
         """Show ``images`` with ``profile``'s settings, which aren't a running profile's,
-        such as the editor's unsaved ones or an align test's. The render is kept as a
-        draft, and no slideshow moves on.
+        such as an align test's. The render is kept as a draft, and no slideshow moves on:
+        the running one is paused, so that no tick replaces the draft. It resumes when the
+        user unpauses, or with Next, Apply or a profile picked in the tray.
 
         ``layout`` renders for another layout than the session's, such as the
         editor's unsaved one. ``on_done(problem)`` is called on the worker thread when the
@@ -174,6 +181,10 @@ class Session:
 
         def draft():
             problem = "The wallpaper could not be shown."  # if show() fails unexpectedly
+            running = self._running
+            if running is not None and running.profile.slideshow:
+                self._paused = True
+                self._arm()
             try:
                 problem = show(
                     profile,
@@ -288,14 +299,19 @@ class Session:
         self._on_running_change()
         self._change(steps=0)
 
-    def _change(self, *, steps: int) -> None:
+    def _redraw(self) -> None:
+        self._change(steps=0, restart_countdown=False)
+
+    def _change(self, *, steps: int, restart_countdown: bool = True) -> None:
         """Show the running profile's current images, or with ``steps`` its images that many
-        positions on, rendering only the last; its slideshow changes next one delay from now."""
+        positions on, rendering only the last; its slideshow changes next one delay from now,
+        unless ``restart_countdown`` is False."""
         stored = self._running
         if stored is None:
             logger.info("No profile is running.")
             return
-        self._arm()
+        if restart_countdown:
+            self._arm()
         selection = stored.selection
         for _ in range(steps - 1):
             selection.advance()

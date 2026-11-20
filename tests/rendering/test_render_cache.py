@@ -29,21 +29,21 @@ def test_renders_take_turns_so_the_one_on_screen_is_never_rewritten(tmp_path):
     work = profile_slot(tmp_path, "work")
     image = Image.new("RGB", (5, 3), (10, 20, 30))
 
-    first = render_cache.save(work, image, extension="png")
-    second = render_cache.save(work, image, extension="png")
-    assert names(tmp_path) == ["work-a.png", "work-b.png"]
+    first = render_cache.save(work, image, extension="png", signature="s")
+    second = render_cache.save(work, image, extension="png", signature="s")
+    assert names(tmp_path) == ["work-a.png", "work-a.png.sig", "work-b.png", "work-b.png.sig"]
     render_cache.forget_previous(second)
-    third = render_cache.save(work, image, extension="png")
+    third = render_cache.save(work, image, extension="png", signature="s")
     render_cache.forget_previous(third)
 
     assert (first.name, second.name, third.name) == ("work-a.png", "work-b.png", "work-a.png")
-    assert names(tmp_path) == ["work-a.png"]
+    assert names(tmp_path) == ["work-a.png", "work-a.png.sig"]
     with Image.open(third) as saved:
         assert (saved.format, saved.size, saved.getpixel((4, 2))) == ("PNG", (5, 3), (10, 20, 30))
 
 
 def test_renders_are_saved_with_the_given_extension(tmp_path):
-    saved = render_cache.save(profile_slot(tmp_path, "work"), Image.new("RGB", (5, 3)), extension="jpg")
+    saved = render_cache.save(profile_slot(tmp_path, "work"), Image.new("RGB", (5, 3)), extension="jpg", signature="s")
 
     assert saved.name == "work-a.jpg"
     with Image.open(saved) as image:
@@ -51,7 +51,9 @@ def test_renders_are_saved_with_the_given_extension(tmp_path):
 
 
 def test_drafts_are_kept_apart_from_the_profiles(tmp_path):
-    saved = render_cache.save(render_cache.draft_slot(tmp_path), Image.new("RGB", (5, 3)), extension="png")
+    saved = render_cache.save(
+        render_cache.draft_slot(tmp_path), Image.new("RGB", (5, 3)), extension="png", signature="s"
+    )
 
     assert saved == tmp_path / "preview" / "draft-a.png"
     assert names(tmp_path) == ["preview"]
@@ -87,27 +89,34 @@ def test_the_latest_render_comes_with_its_pieces_in_display_order(tmp_path):
     touch(tmp_path, "work-a.png", "work-a-crop-0.png", modified=1_000_000_000)
     pieces = [f"work-b-crop-{index}.png" for index in range(12)]
     touch(tmp_path, "work-b.png", *pieces, modified=2_000_000_000)
+    (tmp_path / "work-b.png.sig").write_text("what it was made from", encoding="utf-8")
 
     latest = render_cache.latest(profile_slot(tmp_path, "work"))
 
     assert latest == render_cache.Rendered(
-        tmp_path / "work-b.png", [tmp_path / piece for piece in pieces], 2_000_000_000
+        tmp_path / "work-b.png", [tmp_path / piece for piece in pieces], 2_000_000_000, "what it was made from"
     )
     assert render_cache.latest(profile_slot(tmp_path, "home")) is None
+
+
+def test_a_render_without_a_signature_has_none(tmp_path):
+    touch(tmp_path, "work-a.png")
+
+    assert render_cache.latest(profile_slot(tmp_path, "work")).signature is None
 
 
 def test_the_next_render_replaces_the_older_one(tmp_path):
     touch(tmp_path, "work-a.png", modified=2_000_000_000)
     touch(tmp_path, "work-b.png", modified=1_000_000_000)
 
-    saved = render_cache.save(profile_slot(tmp_path, "work"), Image.new("RGB", (1, 1)), extension="png")
+    saved = render_cache.save(profile_slot(tmp_path, "work"), Image.new("RGB", (1, 1)), extension="png", signature="s")
 
     assert saved.name == "work-b.png"
 
 
 def test_the_sweep_removes_only_renders_of_profiles_that_are_gone(tmp_path):
-    kept = ["main2-a.png", "main2-a-crop-0.png", "log", "running_profile", "notes.txt"]
-    gone = ["main_2-a.png", "main-b-crop-1.png", "cli-b.png", "cli-b-crop-0.png"]
+    kept = ["main2-a.png", "main2-a.png.sig", "main2-a-crop-0.png", "log", "running_profile", "notes.txt"]
+    gone = ["main_2-a.png", "main_2-a.png.sig", "main-b-crop-1.png", "cli-b.png", "cli-b-crop-0.png"]
     touch(tmp_path, *kept, *gone, "selections/main2.json", "preview/draft-a.png")
 
     render_cache.sweep(tmp_path, ["main2"])

@@ -52,7 +52,9 @@ def draft(profile, images, paths, layout, desktop):
 
 
 def cached(paths):
-    return sorted(path.relative_to(paths.cache).as_posix() for path in paths.cache.rglob("*") if path.is_file())
+    """The renders in the cache; their signatures are left out."""
+    files = (path for path in paths.cache.rglob("*") if path.is_file() and path.suffix != ".sig")
+    return sorted(path.relative_to(paths.cache).as_posix() for path in files)
 
 
 def errors(caplog):
@@ -218,39 +220,106 @@ def test_a_desktop_that_takes_pieces_gets_one_per_display(app_paths, display_lay
     assert desktop.profiles.cached_pieces("an activity/with a slash") == []
 
 
+CURRENT = ["/current.png"]
+
+
+def write_render(cache, name, layout, files=CURRENT, **kwargs):
+    """A render in ``cache`` made for ``layout`` and ``files``, with its signature."""
+    path = cache / name
+    write_image(path, **kwargs)
+    (cache / f"{name}.sig").write_text(wallpaper_change.render_signature(layout, files), encoding="utf-8")
+
+
+def selection_showing(*files):
+    return SimpleNamespace(current=lambda: list(files))
+
+
 @pytest.fixture
 def startup(app_paths, display_layout, desktop):
     """Show the last wallpaper of profile "main" again, as the tray does when it starts."""
-    main = SimpleNamespace(profile=settings("main"), profile_id=ProfileId.parse("main", windows_names=False))
+    main = SimpleNamespace(
+        profile=settings("main"),
+        profile_id=ProfileId.parse("main", windows_names=False),
+        selection=selection_showing(*CURRENT),
+    )
 
-    def restore():
+    def restore(layout=None):
         return wallpaper_change.show_again(
-            main, app_paths, desktop=desktop, layout=display_layout(TINY_DISPLAYS), set_command=""
+            main, app_paths, desktop=desktop, layout=layout or display_layout(TINY_DISPLAYS), set_command=""
         )
 
     return restore
 
 
-def test_startup_shows_the_last_render_again(app_paths, desktop, startup):
-    write_image(app_paths.cache / "main-a.png", modified=2_000_000_000)
-    write_image(app_paths.cache / "preview" / "draft-a.png", modified=1_000_000_000)
+def test_startup_shows_the_last_render_again(app_paths, display_layout, desktop, startup):
+    write_render(app_paths.cache, "main-a.png", display_layout(TINY_DISPLAYS), modified=2_000_000_000)
 
     assert startup() is True
     assert desktop.handed == [Spanned(str(app_paths.cache / "main-a.png"))]
     assert desktop.profiles.current_profile == "main"
 
 
-def test_startup_shows_a_draft_that_was_shown_after_it(app_paths, desktop, startup):
-    write_image(app_paths.cache / "main-a.png", modified=1_000_000_000)
-    write_image(app_paths.cache / "preview" / "draft-b.png", modified=2_000_000_000)
+def test_startup_ignores_a_draft_that_was_shown_after_it(app_paths, display_layout, desktop, startup):
+    write_render(app_paths.cache, "main-a.png", display_layout(TINY_DISPLAYS), modified=1_000_000_000)
+    write_render(app_paths.cache, "preview/draft-b.png", display_layout(TINY_DISPLAYS), modified=2_000_000_000)
 
     assert startup() is True
-    assert desktop.handed == [Spanned(str(app_paths.cache / "preview" / "draft-b.png"))]
+    assert desktop.handed == [Spanned(str(app_paths.cache / "main-a.png"))]
 
 
-def test_startup_shows_the_pieces_in_display_order_where_the_desktop_takes_them(app_paths, desktop, startup):
+def test_startup_renders_again_what_was_made_for_other_images(app_paths, display_layout, desktop, startup):
+    write_render(app_paths.cache, "main-a.png", display_layout(TINY_DISPLAYS), files=["/earlier.png"])
+
+    assert startup() is False
+    assert desktop.handed == []
+
+
+def test_startup_renders_again_what_was_made_for_another_layout(app_paths, display_layout, desktop, startup):
+    write_render(app_paths.cache, "main-a.png", display_layout(TINY_DISPLAYS))
+    other = replace(display_layout(TINY_DISPLAYS), bezels_mm=((1.0, 1.0), (1.0, 1.0)))
+
+    assert startup(other) is False
+    assert desktop.handed == []
+
+
+def test_startup_renders_again_what_has_no_signature(app_paths, desktop, startup):
+    write_image(app_paths.cache / "main-a.png")
+
+    assert startup() is False
+    assert desktop.handed == []
+
+
+def test_startup_renders_when_the_profile_has_no_images(app_paths, display_layout, desktop):
+    write_render(app_paths.cache, "main-a.png", display_layout(TINY_DISPLAYS))
+    main = SimpleNamespace(
+        profile=settings("main"), profile_id=ProfileId.parse("main", windows_names=False), selection=selection_showing()
+    )
+
+    layout = display_layout(TINY_DISPLAYS)
+    assert wallpaper_change.show_again(main, app_paths, desktop=desktop, layout=layout, set_command="") is False
+
+
+def test_a_change_keeps_what_it_was_made_from_for_the_next_start(tmp_path, app_paths, display_layout, desktop):
+    source = [write_image(tmp_path / "source.png")]
+    layout = display_layout(TINY_DISPLAYS)
+    assert change("main", source, app_paths, layout, desktop) is None
+    desktop.handed.clear()
+    main = SimpleNamespace(
+        profile=settings("main"),
+        profile_id=ProfileId.parse("main", windows_names=False),
+        selection=selection_showing(*source),
+    )
+
+    assert wallpaper_change.show_again(main, app_paths, desktop=desktop, layout=layout, set_command="") is True
+    assert desktop.handed == [Spanned(str(app_paths.cache / "main-a.png"))]
+
+
+def test_startup_shows_the_pieces_in_display_order_where_the_desktop_takes_them(
+    app_paths, display_layout, desktop, startup
+):
     desktop.pieces_taken = True
-    for name in ("main-b.png", "main-b-crop-1.png", "main-b-crop-0.png"):
+    write_render(app_paths.cache, "main-b.png", display_layout(TINY_DISPLAYS))
+    for name in ("main-b-crop-1.png", "main-b-crop-0.png"):
         write_image(app_paths.cache / name)
 
     assert startup() is True
@@ -258,9 +327,9 @@ def test_startup_shows_the_pieces_in_display_order_where_the_desktop_takes_them(
     assert desktop.handed == [Pieces(str(app_paths.cache / "main-b.png"), pieces)]
 
 
-def test_a_desktop_that_keeps_its_wallpaper_isnt_given_it_again_at_startup(app_paths, desktop, startup):
+def test_a_desktop_that_keeps_its_wallpaper_isnt_given_it_again_at_startup(app_paths, display_layout, desktop, startup):
     desktop.wallpaper_kept = True
-    write_image(app_paths.cache / "main-a.png")
+    write_render(app_paths.cache, "main-a.png", display_layout(TINY_DISPLAYS))
 
     assert startup() is True
     assert desktop.handed == []
@@ -281,24 +350,25 @@ def test_a_perspective_that_no_longer_exists_isnt_rendered_again_at_startup(
     app_paths, display_layout, desktop, perspective, default, rendered_again
 ):
     desktop.wallpaper_kept = True
-    write_image(app_paths.cache / "main-a.png")
     desk = Perspective(
         "desk", 0, (0.0, 0.0, 1000.0), (Swivel(SwivelAxis.NONE, 0.0, 0.0, 0.0),) * 2, (Tilt(0.0, 0.0, 0.0),) * 2
     )
     layout = replace(
         display_layout(TINY_DISPLAYS), use_perspective=True, default_perspective=default, perspectives=(desk,)
     )
+    write_render(app_paths.cache, "main-a.png", layout)
     main = SimpleNamespace(
         profile=replace(settings("main", spanmode="advanced"), perspective=perspective),
         profile_id=ProfileId.parse("main", windows_names=False),
+        selection=selection_showing(*CURRENT),
     )
 
     assert wallpaper_change.show_again(main, app_paths, desktop=desktop, layout=layout, set_command="") is True
     assert bool(desktop.handed) is rendered_again
 
 
-def test_startup_without_a_render_shows_nothing(app_paths, desktop, startup):
-    write_image(app_paths.cache / "preview" / "draft-a.png")
+def test_startup_without_a_render_shows_nothing(app_paths, display_layout, desktop, startup):
+    write_render(app_paths.cache, "preview/draft-a.png", display_layout(TINY_DISPLAYS))
 
     assert startup() is False
     assert desktop.handed == []

@@ -217,9 +217,10 @@ class Superpaper:
             if self._shell.confirm(message):
                 profile_store.delete_malformed(diagnostic)
 
-    def refresh_displays(self) -> None:
+    def refresh_displays(self, *, redraw: bool = False) -> None:
         """Detect the displays again and load their saved layout; later wallpaper changes
-        use it. If detection fails, the previous layout stays in use. A saved layout that
+        use it, and with ``redraw`` the running profile's current image is shown again with
+        it at once. If detection fails, the previous layout stays in use. A saved layout that
         can't be used is replaced by the default arrangement, and the user told once.
 
         Displays are detected here, on the main thread, never by the session's worker:
@@ -232,6 +233,8 @@ class Superpaper:
             return
         self._report_layout_problem(loaded.problem)
         self.session.use_displays(loaded.layout)
+        if redraw:
+            self.session.redraw()
 
     def _report_layout_problem(self, problem: str | None) -> None:
         """Tell the user why the saved layout isn't used, unless they were told already."""
