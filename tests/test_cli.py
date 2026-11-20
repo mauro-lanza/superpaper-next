@@ -374,6 +374,14 @@ def test_advanced_cli_arguments_are_preserved(monkeypatch, tmp_path, app_paths, 
     assert desktop.spanned == ["setter {image}"]
 
 
+@pytest.mark.parametrize(
+    "option", [["--offsets", "1", "2"], ["--perspective", "desk"], ["--spangroups", "0", "1"]], ids=lambda o: o[0]
+)
+def test_advanced_options_without_advanced_are_refused(option):
+    with pytest.raises(cli.CliError, match=f"'{option[0]}' only works with advanced spanning"):
+        cli.parse_arguments(["--setimages", __file__, *option], windows_names=False)
+
+
 @pytest.mark.parametrize("arguments", [["--offsets", "1"], ["--advanced", "--offsets", "1", "x"]])
 def test_invalid_arguments_set_nothing_up(tmp_path, desktop, arguments):
     from superpaper.paths import AppPaths
@@ -390,7 +398,7 @@ def test_invalid_arguments_set_nothing_up(tmp_path, desktop, arguments):
     ("arguments", "message"),
     [
         (["--command", "setter", "{image}"], "Remember to put the custom command in quotes."),
-        (["--spangroups", "0x"], "One of the display ids was not an integer: 0x"),
+        (["--advanced", "--spangroups", "0x"], "One of the display ids was not an integer: 0x"),
         (["--profile", "saved"], "Pass either image(s)"),
     ],
 )

@@ -57,6 +57,8 @@ class Session:
     changed setting applies from the next change on. ``clock`` times the slideshow.
     ``on_change(problem)`` is called on the worker thread after each change of the running
     profile (slideshow, next, start), with what went wrong, or None.
+    ``on_skipped(paths)`` is called on the worker thread with the images that had vanished
+    and were skipped for the next ones.
     ``on_running_change()`` is called on the worker thread whenever the running profile
     changes: started, renamed or saved again, stopped.
 
@@ -71,6 +73,7 @@ class Session:
         layout: Layout,
         *,
         on_change: Callable[[str | None], None],
+        on_skipped: Callable[[list[str]], None],
         on_running_change: Callable[[], None],
         set_command: Callable[[], str] = lambda: "",
         clock: Callable[[], float] = time.monotonic,
@@ -78,6 +81,7 @@ class Session:
         self._paths = paths
         self._desktop = desktop
         self._on_change = on_change
+        self._on_skipped = on_skipped
         self._on_running_change = on_running_change
         self._set_command = set_command
         self._clock = clock
@@ -313,9 +317,12 @@ class Session:
         if restart_countdown:
             self._arm()
         selection = stored.selection
+        selection.take_skipped()
         for _ in range(steps - 1):
             selection.advance()
         files = selection.advance() if steps or not selection.is_complete() else selection.current()
+        if skipped := selection.take_skipped():
+            self._on_skipped(skipped)
         if not files:
             problem = f"profile '{stored.profile.name}' has no complete selection."
             logger.error("Wallpaper change skipped: %s", problem)

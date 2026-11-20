@@ -39,8 +39,7 @@ def test_upper_case_image_extensions_are_images(tmp_path):
     [
         ({"name": "  "}, "You must enter a name for the profile."),
         ({"spanmode": "single", "sources": (("a",), ("b",))}, "only one paths field is needed"),
-        ({"spanmode": "multi"}, "each display needs its own paths field"),
-        ({"slideshow": True, "delay": 19.0}, "at least 20 seconds"),
+        ({"slideshow": True, "delay": 4.0}, "at least 5 seconds"),
         ({"sources": ()}, "You must enter at least one path for images."),
         ({"sources": ((),)}, "At least one path for wallpapers must be given."),
         ({"spanmode": "multi", "sources": (("a",), ())}, "Add an image source for every display present."),
@@ -70,9 +69,15 @@ def test_sources_without_images_are_explained(tmp_path, source, message):
 
 
 def test_every_problem_is_reported_at_once():
-    profile = Profile(name="", spanmode="multi", slideshow=True, delay=5.0, sources=((),))
+    profile = Profile(name="", spanmode="multi", slideshow=True, delay=4.0, sources=((),))
 
-    assert len(profile_file.validate(profile)) == 4
+    assert len(profile_file.validate(profile)) == 3
+
+
+def test_one_image_per_display_is_valid_with_a_single_display(images):
+    profile = Profile(name="work", spanmode="multi", slideshow=False, sources=((images,),))
+
+    assert profile_file.validate(profile) == []
 
 
 def test_minimal_profile_uses_legacy_defaults(tmp_path):
