@@ -5,10 +5,10 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
-from AppKit import (
-    NSApplicationDidChangeScreenParametersNotification,  # ty:ignore[unresolved-import]
-    NSScreen,  # ty:ignore[unresolved-import]
-    NSWorkspace,  # ty:ignore[unresolved-import]
+from AppKit import (  # ty:ignore[unresolved-import]
+    NSApplicationDidChangeScreenParametersNotification,
+    NSScreen,
+    NSWorkspace,
 )
 from Foundation import NSURL, NSNotificationCenter  # ty:ignore[unresolved-import]
 
