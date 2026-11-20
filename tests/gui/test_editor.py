@@ -45,7 +45,10 @@ def test_a_new_profile_applied_then_saved_is_the_one_the_editor_reopens_on(gui_e
         "Office", windows_names=False
     )
 
+    frame = editor.frame
     editor.onClose(None)
+    # wx destroys a closed frame when idle; until then the tray would only raise it.
+    gui_env.wait_until(lambda: not frame)
     reopened = gui_env.open_editor(running_work)
     choice = reopened.choice_profiles
     assert choice.GetString(choice.GetSelection()) == "Office"
