@@ -44,6 +44,27 @@ def test_display_detection_retries_exceptions(monkeypatch, desktop):
     assert len(display_detection.detect_displays(desktop)) == 1
 
 
+@pytest.mark.parametrize(
+    ("width", "height", "width_mm", "height_mm", "failed", "size_mm"),
+    [
+        (1080, 1920, 269, 290, True, (286, 509)),
+        (1080, 1920, 195, 345, False, (195, 345)),
+        (1920, 1080, 345, 195, False, (345, 195)),
+        (1920, 1080, 195, 345, False, (345, 195)),
+        (1920, 1200, 330, 190, False, (330, 190)),
+        (1920, 1080, 0, 300, True, (509, 286)),
+        (1920, 1080, None, None, True, (509, 286)),
+    ],
+)
+def test_a_size_inconsistent_with_the_pixels_is_unknown(desktop, width, height, width_mm, height_mm, failed, size_mm):
+    desktop.monitors = [monitor(0, 0, width, height, width_mm, height_mm)]
+
+    (display,) = display_detection.detect_displays(desktop)
+
+    assert display.phys_size_failed is failed
+    assert display.detected_phys_size_mm == size_mm
+
+
 def test_a_layout_needs_at_least_one_display(monkeypatch, tmp_path, desktop):
     monkeypatch.setattr(display_detection.time, "sleep", lambda _delay: None)
 
