@@ -1,17 +1,30 @@
-name: macOS build
+name: macOS
 
 on:
   push:
     branches: [master]
     tags: ["v*"]
+  pull_request:
+    paths:
+      - "superpaper/desktop/**"
+      - "superpaper/paths.py"
+      - "pyproject.toml"
+      - "uv.lock"
+      - "tests/desktop/**"
+      - "release-tooling/**"
+      - ".github/workflows/**"
   workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: macos-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  dmg:
-    name: Build unsigned Apple Silicon dmg
+  macos:
+    name: Test and build unsigned Apple Silicon dmg
     runs-on: macos-15
     steps:
       - name: Check out repository
@@ -22,6 +35,12 @@ jobs:
         with:
           enable-cache: true
           python-version: "3.14"
+
+      - name: Install dev tooling
+        run: uv sync --frozen --group dev
+
+      - name: Test
+        run: uv run pytest
 
       - name: Build Superpaper.app and the dmg
         run: uv run --frozen --group build --extra gui python release-tooling/make-pyinstaller-build.py
