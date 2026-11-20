@@ -2,16 +2,14 @@
 
 How Superpaper is expected to behave for every user interaction. This is the
 specification to check the code against, not a description of the current code.
-Items marked **DECISION** list options and a recommendation (**Rec.**); until
-decided, the spec assumes the recommendation. Items marked **Decided** follow the
-user's stated model.
+Every decision in §4 is decided; body text applies the chosen option, referenced as D-numbers.
 
 ## 1. Concepts and state
 
 ### 1.1 Terms
 
 - **Render**: compose a profile's image(s) for a layout and set them on the desktop. Desktops that take one image per display (macOS, KDE, and any custom set command containing a per-display placeholder) get one piece per display; others get one spanned image. The user sees the same result either way.
-- **Re-detect**: query the OS for the connected displays (count, resolution, physical size, order) and load LAY saved for that display set (its *key*). Happens at: app start, editor open, tray profile pick, profile hotkey, Apply, band Save, tests, and before every Next or slideshow change (D17).
+- **Re-detect**: query the OS for the connected displays (count, resolution, physical size, order) and load LAY saved for that display set (its *key*). Happens at: app start, editor open, tray profile pick, profile hotkey, Apply, band Save, tests, and when the OS reports a display change (added, removed, resolution, arrangement) (D17). Not before every Next or slideshow tick. Where an OS cannot report changes, it also happens on manual Next.
 - **Hot update**: the running profile's stored settings are replaced (Save, rename, Reload Profiles); RUN keeps running with the new settings without re-rendering (D13).
 - **Running** = in RUN. **Active** = in ACT. **Loaded** (editor) = the profile in FORM.
 - **Slideshow profile**: advances SEL every *delay* while running and not paused. A non-slideshow profile never advances on its own.
@@ -25,7 +23,7 @@ user's stated model.
 | **SEL** | Profile selection: the ordered image list and the current position in it. Simple/advanced mode: one image for all displays (or one per span group). Multi-image mode: one current image **per display** (per source list). One SEL per stored profile | Profile cache, persisted | Apply (PICK), Next, slideshow change, Save with a PICK (D13), Delete (removed) |
 | **RUN** | Running profile, slideshow deadline, *paused* | Memory | Apply, tray pick, profile hotkey, startup, Next/tick (deadline), Pause, hot update, Delete of running, Reload (file gone), Quit |
 | **ACT** | Active profile: what runs at next start | Cache file | Every change of which profile runs, rename of the running profile, Delete of running |
-| **LAY** | Saved layout for the current display set: positions, bezels, hand-entered diagonals, perspective definitions, perspectives on/off, default perspective | `display_systems.dat`, `<key>.persp` | Band Save, Apply "save displays" (D4), Perspectives dialog (D19) |
+| **LAY** | Saved layout for the current display set: positions, bezels, hand-entered diagonals, perspective definitions, perspectives on/off, default perspective | `display_systems.dat`, `<key>.persp` | Band Save (including staged perspective changes, D19), Apply "save displays" (D4) |
 | **STG** | Staged layout: editor's copy of LAY with unsaved band edits | Editor memory | Band edits; reset to LAY on editor open, band Revert, band Save, display set change |
 | **FORM** | Editor form: loaded profile (or *new*), edited values, *dirty* | Editor memory | Field edits, dropdown, New, Save, Revert, Delete |
 | **PICK** | Image chosen by clicking a source row (in multi mode: per display) | Editor memory | Source row click; cleared on profile switch, New, Revert, Save, Apply, row removal |
@@ -59,7 +57,7 @@ Unlisted state is unchanged. Unlisted errors show one modal naming the problem; 
 #### E1 Open editor (tray left-click, "Wallpaper Configuration")
 - Already open: raise; nothing else.
 - Re-detect. STG := LAY (default arrangement + message if invalid, inv. 10).
-- FORM: RUN if any, else *new* (D18). Dropdown (read-only list of stored profiles + "New profile") marks the running one "(running)" (decided: marker shown; D11 covers wording only).
+- FORM: RUN if any, else the profile last loaded or saved in the editor this app session (kept in memory only), else *new* (also when that profile was deleted) (D18). Dropdown (read-only list of stored profiles + "Create a new profile") marks the running one "(running)".
 - PICK empty. PREV: SEL with STG; *new*: empty display outlines.
 - Edge: no displays detected → error; editor opens on the last known layout with band Save disabled. Missing images → outlines and a note.
 
@@ -71,23 +69,23 @@ Unlisted state is unchanged. Unlisted errors show one modal naming the problem; 
 Same prompt as E2; FORM := blank defaults, clean; PICK cleared; PREV outlines.
 
 #### E4 Profile fields
-Name; span mode radio (simple / advanced / multi-image); slideshow checkbox, delay, sort; zoom slider, pan X/Y sliders, zoom Reset; manual offsets checkbox and per-display x/y fields; span groups checkbox and per-display group combos; perspective combo; hotkey checkbox and binding field.
+Name; span mode radio (simple / advanced / multi-image); slideshow checkbox, delay (minimum 5 s), sort; zoom slider, pan X/Y sliders, zoom Reset; manual offsets checkbox and per-display x/y fields; span groups checkbox and per-display group combos; perspective combo; hotkey checkbox and binding field.
 - FORM dirty iff values differ from loaded (editing back clears it). Save/Revert enabled only while dirty. PREV updates live.
 - Slideshow on: zoom/pan reset and disabled; a sort is selected if none. Off: zoom/pan enabled.
 - Advanced-only controls (offsets, span groups, perspective, Positions) shown only in advanced mode.
 - Span mode change converts sources (one list ↔ one per display); if sources would be lost, confirm; Cancel keeps the old mode.
 - Span groups: each display's combo assigns it to a group; source lists follow the group count. Single display: span groups and per-display controls disabled (one entry).
-- Perspective combo lists LAY's perspectives + "disabled"; disabled when LAY has perspectives off.
+- Perspective combo lists "default", LAY's named perspectives, "disabled"; the combo is disabled when LAY has perspectives off.
 - Hotkey field: when GEN hotkeys are off (default on macOS), the field stays editable and saved but shows "Hotkeys are off in Settings" (D24).
-- Invalid values (delay ≤ 0 / non-number, non-integer offsets, unparsable or clashing hotkey) are reported on Save/Apply, all at once.
+- Invalid values (delay < 5 s / non-number, non-integer offsets, unparsable or clashing hotkey) are reported on Save/Apply, all at once.
 
 #### E5 Sources: Browse dialog and Remove selected source
 Browse dialog (modal):
 - "Show hidden files" toggles hidden entries in the file tree.
 - Display/Group radio (multi mode or span groups only): which display/group the next Add targets.
-- **Add source**: adds the selected file/folder to the dialog's list (to the chosen target); duplicates ignored. **Remove source** (dialog): removes the selected row from the dialog's list.
+- The dialog opens empty. **Add source**: adds the selected file/folder to the dialog's list (to the chosen target); duplicates ignored. **Remove source** (dialog): removes the selected row from the dialog's list.
 - **Save as browse start** / **Clear browse start**: change GEN immediately (even if the dialog is cancelled).
-- **Ok**: dialog list replaces the editor's sources; FORM dirty if different. **Cancel**: nothing changes except browse start.
+- **Ok**: adds the dialog's paths to the editor's sources, ignoring duplicates; FORM dirty if sources changed. **Cancel**: nothing changes except browse start.
 Editor **Remove selected source**: removes the selected row; none selected → no-op; clears PICK if it was that row; FORM dirty.
 
 #### E6 Click a source row
@@ -96,7 +94,7 @@ Editor **Remove selected source**: removes the selected row; none selected → n
 - Empty folder / missing file → PREV unchanged, note shown; PICK unchanged.
 
 #### E7 Apply
-**Decided:** Apply shows the selected image on the desktop and makes this profile the running one.
+Apply shows the selected image on the desktop and makes this profile the running one.
 1. FORM valid (E9 rules); if dirty or *new*, it is saved first (D1); failure stops here.
 2. If STG ≠ LAY: prompt "Displays have unsaved changes" — **Save displays and apply** / **Apply with saved displays** / **Cancel** (D4). STG invalid → only the last two options.
 3. Order: layout save (if chosen) → SEL := PICK, else current SEL (D3) → RUN := profile, *paused* := false, timer from now (D2) → ACT := profile → one render with LAY.
@@ -133,10 +131,10 @@ Stored profile only; confirm. PROF, SEL, CACHE entry removed; hotkey unbound. Ru
 #### E14 Perspectives dialog (modal)
 Controls: perspective combo (stored perspectives + New), name field, New / Save / Delete, "Use perspective corrections", "Default for this display setup", central display combo, viewer offset fields, per-display swivel-axis combo and rotation fields, Help buttons, Align test, Pick image (file dialog; Cancel keeps the previous image), Test image, OK, Close.
 - Field and combo edits are dialog-local.
-- Save / Delete / corrections checkbox / OK: written to LAY **immediately** (perspectives are global, separate from the band's staged model) (D19). Validation errors, large-image confirmation as dialogs.
-- Close: discards unsaved dialog edits.
-- Align test / Test image: save the perspective, then test as E13 with the picked image (Test image without a picked image: tells the user to pick one).
-- Deleted perspective chosen by the loaded form → form falls back to "disabled" and is dirty. Running profile uses a changed/deleted perspective → re-render current SEL (inv. 5).
+- Save / Delete / corrections checkbox / default checkbox / OK: stage the change into STG with the display band; the band's Save writes it to LAY (D19). Validation errors, large-image confirmation as dialogs.
+- Close: discards unsaved dialog edits; staged changes stay in STG.
+- Align test / Test image: stage the perspective, then test as E13 with the picked image (Test image without a picked image: tells the user to pick one).
+- Deleted perspective chosen by the loaded form → form falls back to "default" and is dirty. After band Save, a running profile using a changed/deleted perspective is re-rendered with its current SEL (inv. 5).
 - Single display: dialog shows one row; perspectives still allowed.
 
 #### E15 Help
@@ -151,7 +149,7 @@ Band edits change STG and PREV only. Band Save/Revert enabled while STG ≠ LAY;
 | B1 | Expand/collapse | Layout only. |
 | B2 | "Input display sizes manually" on/off; type a diagonal | Valid input: a number 1–1000 inches per display (decimal point or comma). Partial/invalid text: field marked red, STG unchanged, Save disabled while any field is invalid. Valid: STG diagonals updated; positions handled per D20 so STG stays valid. Off: detected sizes, typed values remembered for turning back on. |
 | B3 | Bezels: Configure → per-edge buttons (right/bottom of each display) open a popup: value field (mm, ≥ 0; Enter = Apply), Apply, Cancel → Done / Cancel | Popup Apply stages the edge into the in-progress bezels (neighbours shift so no overlap); invalid value → field marked, nothing staged. Done: STG bezels := in-progress. Cancel: back to before Configure. |
-| B4 | Positions (advanced mode): drag, Reset (default arrangement), Exact entry → Done / Cancel | Drags and Reset are in-progress. Exact entry dialog: per-display x/y fields (Enter or Preview redraws), "Use pixels (exact)" converts units, **Apply** copies values into the in-progress positions and closes, Cancel closes without change. Overlapping result → Done refused with message. Done stages into STG (labelled "Done", D10). Cancel restores. FORM never dirtied. Help: popup. |
+| B4 | Positions (advanced mode): drag, Reset (default arrangement), Exact entry → Done / Cancel | Drags and Reset are in-progress. Exact entry dialog: per-display x/y fields (Enter or Preview redraws), "Use pixels (exact)" converts units, **Apply** copies values into the in-progress positions and closes, Cancel closes without change. Overlapping result → Done refused with message. Done stages into STG; the inner button is labelled "Done" (D10). Cancel restores. FORM never dirtied. Help: popup. |
 | B5 | Band Revert | STG := LAY. |
 | B6 | Band Save | STG valid required. LAY := STG for the current key. Running profile re-rendered (inv. 5), timer/pause unchanged. Write failure → error, STG stays unsaved. |
 
@@ -163,7 +161,7 @@ Band edits change STG and PREV only. Band Save/Revert enabled while STG ≠ LAY;
 | T1m | Middle-click (native tray, Linux) | T4. |
 | T2 | Profiles ▸ *not running* | Re-detect; RUN := it, unpaused, timer from now; render its current SEL; ACT := it. |
 | T3 | Profiles ▸ *running* | Idempotent: if paused, unpause and restart the timer; DESK unchanged, no advance (D2b). |
-| T4 | Next Wallpaper | Enabled only when RUN non-empty. Re-detect; SEL advances (multi mode: every display); render; timer from now; *paused* unchanged. Non-slideshow profile with > 1 image: advances (D15). |
+| T4 | Next Wallpaper | Enabled only when RUN non-empty. No re-detect, except on an OS that cannot report display changes (D17). SEL advances (multi mode: every display); render; timer from now; *paused* unchanged. Non-slideshow profile with > 1 image: advances (D15). |
 | T5 | Pause Timer (check) | Enabled only for a running slideshow. Toggles *paused*; resume restarts the timer. Not persisted (D16). |
 | T6 / T7 | Wallpaper Configuration / Settings | E1 / S1. |
 | T8 | Reload Profiles | Re-read PROF; malformed → ask delete or ignore. RUN hot-updated (inv. 6); RUN's file gone → as E11 running. Open editor refreshes the dropdown; dirty FORM kept; clean FORM reloaded. |
@@ -196,7 +194,7 @@ H1 Next = T4. H2 Pause = T5. H3 profile hotkey = T2/T3; deleted profile → noth
 
 | ID | Event | Expected effect |
 | --- | --- | --- |
-| X1 | Display set changes | Noticed at the next re-detect (D17). LAY := saved layout for the new key, else default arrangement. RUN continues; next render fits. Open editor at its next re-detect point: STG reloads (dirty STG → ask first); PICK/sources for a vanished display are kept in FORM but not previewed; PREV redrawn. Per-display sources whose count no longer matches → shown with a warning, Save/Apply ask to fix. |
+| X1 | Display set changes | Noticed when the OS reports it (D17); on an OS that cannot, at the next manual Next, tray pick or editor open. LAY := saved layout for the new key, else default arrangement. RUN continues; next render fits. Open editor at its next re-detect point: STG reloads (dirty STG → ask first); PICK/sources for a vanished display are kept in FORM but not previewed; PREV redrawn. Per-display sources whose count no longer matches → shown with a warning, Save/Apply ask to fix. |
 | X2 | Return to a known set | Its LAY returns unchanged. |
 | X3 | Single display | Positions/span groups/per-display controls show one entry; Positions disabled. |
 | X4 | Source missing at render | D21. |
@@ -259,7 +257,7 @@ H1 Next = T4. H2 Pause = T5. H3 profile hotkey = T2/T3; deleted profile → noth
 3. Unpause → next change one delay later. 4. Restart while paused → runs unpaused.
 
 **J10 Unplug / replug**
-1. Unplug, Next → image fits remaining displays with that set's layout (default if never saved).
+1. Unplug → OS reports the change; Next → image fits remaining displays with that set's layout (default if never saved).
 2. Open editor → band shows that set. 3. Replug, Next → original layout again.
 
 **J11 Quit and restart**
@@ -269,35 +267,31 @@ H1 Next = T4. H2 Pause = T5. H3 profile hotkey = T2/T3; deleted profile → noth
 ## 4. Decisions
 
 ### Decided
-- **Running marker** (was D11): running profile checked in tray and "(running)" in the dropdown.
-- **D2 core**: Apply shows the selected image (not the next) on the already-running profile.
-- **Tests pause the slideshow** (was D8/D9 overlap): required by inv. 4.
-
-### Open
-| ID | Decision | Options | Rec. |
-| --- | --- | --- | --- |
-| D1 | How Apply guarantees a stored profile | a) implicit save with Save's validation; b) block until the user saves | a |
-| D2 | Apply on the running profile: timer/pause | a) restart timer, unpause; b) keep timer and pause | a |
-| D2b | Tray pick of the running profile | a) idempotent: unpause only; b) Next + unpause; c) Next | a — a pick says "run this", not "advance"; Next exists for that |
-| D3 | Apply with no image clicked | a) current SEL; b) first image; c) next | a |
-| D4 | Apply with unsaved layout | a) prompt Save displays and apply / Apply with saved / Cancel; b) silent save; c) saved layout only | a |
-| D5 | Unsaved changes on Close / switch / New / Exit | a) Save/Discard/Cancel; b) discard; c) keep per-profile drafts | a |
-| D6 | Delete running | a) stop, clear ACT, wallpaper stays; b) start another | a |
-| D7 | Test layout | a) STG (refused if invalid); b) LAY | a |
-| D10 | Positions/Bezels inner "Save" | a) "Done" (stage); b) inner writes LAY | a |
-| D11 | Running label wording | "(running)" vs icon | "(running)" |
-| D12a | Clicking a folder row | a) first image in sort order; b) add an in-folder image picker | a now, b later |
-| D12b | Click in multi mode | a) that display only, others SEL; b) whole preview that image | a |
-| D13 | May Save change the desktop? | a) never; saved changes and PICK show at next change, or Apply; b) Save re-renders the running profile | a |
-| D14 | Name change on Save | a) rename; b) copy; c) both | a |
-| D15 | Next on non-slideshow | a) advance; b) disabled | a |
-| D16 | Pause across restart | a) not kept; b) kept | a |
-| D17 | Display change detection | a) at re-detect points (§1.1); b) live OS notification | a |
-| D18 | Editor opens on | a) running else new; b) last edited | a |
-| D19 | Perspectives model | a) immediate, global (own dialog); b) staged with the band, saved by band Save | b for consistency; a is acceptable if the dialog says "saved immediately" |
-| D20 | Diagonal/density edit would overlap | a) re-arrange all, discarding manual positions; b) keep positions, block Save until fixed; c) shift only overlapping displays | c, falling back to a with a message |
-| D21 | Source file missing at render | a) skip to next image, tray notice; b) stop the profile | a; stop only if no image is left |
-| D22 | Corrupt or invalid saved layout on load | a) default arrangement in memory + message, file untouched until Save; b) overwrite at once | a |
-| D23 | Re-detect on dropdown switch | a) no; b) yes | a |
-| D24 | Profile hotkey field while hotkeys are off | a) editable + note; b) disabled | a |
-| D25 | Profile Save while the band is unsaved | a) save profile only, band marker stays; b) prompt to save displays too | a — Save scope is exactly the profile |
+| ID | Decision | Chosen |
+| --- | --- | --- |
+| D1 | How Apply guarantees a stored profile | Implicit save with Save's validation |
+| D2 | Apply on the running profile | Restart timer, unpause; shows the selected image, not the next |
+| D2b | Tray pick of the running profile | Idempotent: unpause only |
+| D3 | Apply with no image clicked | Current SEL |
+| D4 | Apply with unsaved layout | Prompt: Save displays and apply / Apply with saved / Cancel |
+| D5 | Unsaved changes on Close / switch / New / Exit | Save / Discard / Cancel |
+| D6 | Delete running | Stop, clear ACT, wallpaper stays |
+| D7 | Test layout | STG (refused if invalid) |
+| D8 | Tests and the slideshow | A test pauses RUN while shown (inv. 4) |
+| D10 | Positions/Bezels inner button | "Done" stages into STG; does not write LAY |
+| D11 | Running marker | Tray check and "(running)" in the dropdown |
+| D12a | Clicking a folder row | First image in sort order |
+| D12b | Click in multi mode | That display only, others show SEL |
+| D13 | May Save change the desktop? | Never; saved changes and PICK show at next change, or Apply |
+| D14 | Name change on Save | Rename |
+| D15 | Next on non-slideshow | Advances |
+| D16 | Pause across restart | Not kept |
+| D17 | Display change detection | On OS display-change notification (per OS, see investigation), plus tray pick and editor open; where an OS cannot notify: manual Next, tray pick, editor open |
+| D18 | Editor opens on | Running profile, else the profile last loaded or saved this app session (memory only); if deleted, new |
+| D19 | Perspectives model | Staged with the band, written by band Save |
+| D20 | Diagonal/density edit would overlap | Shift only overlapping displays; fall back to re-arranging all with a message |
+| D21 | Source file missing at render | Skip to next image with tray notice; stop only if no image is left |
+| D22 | Corrupt or invalid saved layout on load | Default arrangement in memory + message; file untouched until Save |
+| D23 | Re-detect on dropdown switch | No |
+| D24 | Profile hotkey field while hotkeys are off | Editable + note |
+| D25 | Profile Save while the band is unsaved | Saves the profile only; band marker stays |
