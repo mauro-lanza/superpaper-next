@@ -91,8 +91,17 @@ class _Node:
     children: tuple[int, ...]
 
 
-def _item_node(item: Item) -> _Node:
-    return _Node({"label": item.label, "enabled": True}, item.action, ())
+def _entry_node(entry: Item | Check | Notice) -> _Node:
+    match entry:
+        case Item(label, action, enabled):
+            return _Node({"label": label, "enabled": enabled}, action, ())
+        case Check(label, action, checked, enabled):
+            props = {"label": label, "enabled": enabled, "toggle-type": "checkmark", "toggle-state": int(checked)}
+            return _Node(props, action, ())
+        case Notice(label):
+            return _Node({"label": label, "enabled": False}, None, ())
+        case _:
+            assert_never(entry)
 
 
 class MenuModel:
@@ -125,20 +134,15 @@ class MenuModel:
         nodes: dict[int, _Node] = {}
         for node_id, entry in top:
             match entry:
-                case Item():
-                    nodes[node_id] = _item_node(entry)
-                case Check(label, action, checked):
-                    props = {"label": label, "enabled": True, "toggle-type": "checkmark", "toggle-state": int(checked)}
-                    nodes[node_id] = _Node(props, action, ())
-                case Notice(label):
-                    nodes[node_id] = _Node({"label": label, "enabled": False}, None, ())
+                case Item() | Check() | Notice():
+                    nodes[node_id] = _entry_node(entry)
                 case Separator():
                     nodes[node_id] = _Node({"type": "separator"}, None, ())
                 case Submenu(label, items):
                     children = []
                     for item in items:
                         child_id = next(ids)
-                        nodes[child_id] = _item_node(item)
+                        nodes[child_id] = _entry_node(item)
                         children.append(child_id)
                     props = {"label": label, "enabled": True, "children-display": "submenu"}
                     nodes[node_id] = _Node(props, None, tuple(children))
@@ -150,7 +154,7 @@ class MenuModel:
     def activate(self, item_id: int) -> None:
         """Run the action of the item ``item_id``, if it has one, on the GUI's main loop."""
         node = self.nodes.get(item_id)
-        if node is None or node.action is None:
+        if node is None or node.action is None or not node.props["enabled"]:
             return
         action = node.action
         self._call_soon(lambda: _run_action(action))

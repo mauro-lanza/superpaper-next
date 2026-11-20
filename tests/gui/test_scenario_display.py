@@ -141,7 +141,8 @@ def test_display_settings_and_perspectives(gui_env, saved_layout, snapshots):
     # Apply in the editor: the profile renders with the default perspective.
     panel.onApply(None)
     gui_env.settle(superpaper)
-    assert list((gui_env.paths.cache / "preview").glob("draft-?.png"))
+    assert not list((gui_env.paths.cache / "preview").glob("draft-?.png"))
+    assert superpaper.session.running.profile.name == "Work"
     assert gui_env.shown() == []
 
     # Edit 'desk': viewer 900 mm away.

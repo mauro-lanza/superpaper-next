@@ -3,10 +3,9 @@
 A ProfileForm holds what the editor's fields show: text where the user types, numbers where
 they drag, choices where they pick. A UI reads its fields into one, shows one in its
 fields, and calls the functions here to turn it into a Profile and to tell whether it
-changed. Saving, deleting, reverting and showing what it describes is superpaper.profile_actions.
+changed. Saving, deleting, reverting and applying what it describes is superpaper.profile_actions.
 """
 
-import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import assert_never
@@ -18,10 +17,8 @@ from superpaper.hotkey_keys import format_hotkey, parse_hotkey
 from superpaper.profiles import profile_file
 from superpaper.profiles.profile_file import Correction, OffsetsCorrection, Profile, SpanMode
 from superpaper.profiles.profile_store import StoredProfile
-from superpaper.profiles.selection import Selection, SortMode, is_file
-from superpaper.user_input import Offset, OffsetError, Problems, parse_float
-
-logger = logging.getLogger(__name__)
+from superpaper.profiles.selection import SortMode, is_file
+from superpaper.user_input import Offset, OffsetError, parse_float
 
 SORT_LABELS: dict[SortMode, str] = {
     "shuffle": "Shuffle",
@@ -59,15 +56,6 @@ class ProfileForm:
     """Whether each source is listed for a display or span group, or all are for one image."""
     sources: tuple[tuple[str, str], ...]
     """The source list's rows: the display or group as listed ("" if not per target) and the path."""
-
-
-@dataclass(frozen=True, slots=True)
-class Draft:
-    """A form's profile, ready to be shown once without saving it."""
-
-    profile: Profile
-    images: list[str]
-    chosen: list[str] | None
 
 
 def uses_spangroups(span_mode: SpanMode, spangroups_enabled: bool) -> bool:
@@ -284,9 +272,9 @@ def fingerprint(form: ProfileForm) -> str:
     return profile_file.serialize(profile) + "\n".join(problems)
 
 
-def chosen_images(profile: Profile, focused_path: str | None, loaded: StoredProfile | None) -> list[str] | None:
+def chosen_images(profile: Profile, picked: str | None, loaded: StoredProfile | None) -> list[str] | None:
     """The images chosen to show, for one image spanned (single or advanced): the file
-    focused in the source list, or else what the profile open in the editor shows.
+    clicked in the source list, or else what the profile open in the editor shows.
 
     That profile is the one loaded, by its original name, so a rename in progress keeps
     the selection. None for one image per display, which a slideshow or the first
@@ -294,22 +282,8 @@ def chosen_images(profile: Profile, focused_path: str | None, loaded: StoredProf
     """
     if profile.spanmode == "multi":
         return None
-    if focused_path and is_file(focused_path):
-        return [focused_path]
+    if picked and is_file(picked):
+        return [picked]
     if loaded is not None:
         return loaded.selection.images
     return None
-
-
-def prepare_draft(form: ProfileForm, focused_path: str | None, loaded: StoredProfile | None) -> Draft | Problems:
-    """What showing ``form``'s profile without saving it takes, if it is valid."""
-    profile, problems = parse_form(form)
-    problems += profile_file.validate(profile)
-    if problems:
-        logger.info("Apply: validation failed, nothing applied.")
-        return Problems(tuple(problems))
-    chosen = chosen_images(profile, focused_path, loaded)
-    # The chosen images, or else the first ones of the edited sources.
-    images = Selection(profile.sources, profile.sortmode, profile.selection_size, images=chosen).current()
-    logger.info("Apply preview (unsaved): %s", profile.name)
-    return Draft(profile, images, chosen)

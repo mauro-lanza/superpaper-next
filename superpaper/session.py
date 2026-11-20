@@ -26,7 +26,7 @@ from superpaper.desktop.backend import Desktop
 from superpaper.paths import AppPaths
 from superpaper.profiles.profile_file import Profile
 from superpaper.profiles.profile_id import ProfileId
-from superpaper.profiles.profile_store import write_active_profile
+from superpaper.profiles.profile_store import clear_active_profile, write_active_profile
 from superpaper.wallpaper_change import show, show_again
 
 if TYPE_CHECKING:
@@ -57,6 +57,8 @@ class Session:
     changed setting applies from the next change on. ``clock`` times the slideshow.
     ``on_change(problem)`` is called on the worker thread after each change of the running
     profile (slideshow, next, start), with what went wrong, or None.
+    ``on_running_change()`` is called on the worker thread whenever the running profile
+    changes: started, renamed or saved again, stopped.
 
     ``running``, ``paused`` and ``layout`` say how things stand once the requests
     made so far are handled; only the worker changes them.
@@ -69,12 +71,14 @@ class Session:
         layout: Layout,
         *,
         on_change: Callable[[str | None], None],
+        on_running_change: Callable[[], None],
         set_command: Callable[[], str] = lambda: "",
         clock: Callable[[], float] = time.monotonic,
     ):
         self._paths = paths
         self._desktop = desktop
         self._on_change = on_change
+        self._on_running_change = on_running_change
         self._set_command = set_command
         self._clock = clock
         self._requests: queue.SimpleQueue[Callable[[], None] | _Next | None] = queue.SimpleQueue()
@@ -115,10 +119,16 @@ class Session:
         self._post(lambda: self._restore(stored))
 
     def activate(self, stored: StoredProfile) -> None:
-        """Run the saved profile ``stored``: render it now and start its slideshow,
-        unpaused; it is remembered for the next start. If it runs already, show its next
-        image instead."""
+        """Run the saved profile ``stored``: render its current image now and start its
+        slideshow, unpaused; it is remembered for the next start. If it runs already,
+        nothing is shown and the countdown goes on, unless it was paused: then it is
+        unpaused and the countdown restarts."""
         self._post(lambda: self._activate(stored))
+
+    def apply(self, stored: StoredProfile, picked: Sequence[str] | None) -> None:
+        """Show ``picked``, or else the current image of the saved profile ``stored``, and
+        run it as ``activate`` does, also if it runs already."""
+        self._post(lambda: self._apply(stored, picked))
 
     def next(self) -> None:
         """Show the running profile's next image now; its slideshow counts down from here."""
@@ -133,8 +143,9 @@ class Session:
         new name, or None once deleted.
 
         If it is running, it carries on with ``stored``: the wallpaper stays, and its
-        slideshow counts down from now with the new settings, still paused if it was. A
-        deleted profile stops.
+        slideshow's countdown, and pause, are left as they are; the new settings apply from
+        its next change. A deleted profile stops, and is no longer remembered for the next
+        start.
         """
         self._post(lambda: self._update(profile_id, stored))
 
@@ -243,6 +254,7 @@ class Session:
     def _restore(self, stored: StoredProfile) -> None:
         self._running = stored
         self._paused = False
+        self._on_running_change()
         logger.info("Running profile: %s", stored.profile.name)
         if show_again(stored, self._paths, desktop=self._desktop, layout=self._layout, set_command=self._set_command()):
             self._arm()
@@ -253,8 +265,19 @@ class Session:
         running = self._running
         if running is not None and running.profile_id == stored.profile_id:
             self._running = stored
-            self._change(steps=1)
+            self._on_running_change()
+            if self._paused:
+                self._paused = False
+                self._arm()
             return
+        self._start(stored)
+
+    def _apply(self, stored: StoredProfile, picked: Sequence[str] | None) -> None:
+        if picked:
+            stored.selection.pin(picked)
+        self._start(stored)
+
+    def _start(self, stored: StoredProfile) -> None:
         self._running = stored
         self._paused = False
         logger.info("Starting profile: %s", stored.profile.name)
@@ -262,6 +285,7 @@ class Session:
             write_active_profile(self._paths.cache, stored.profile_id)
         except OSError as error:
             logger.warning("Could not remember the running profile: %s", error)
+        self._on_running_change()
         self._change(steps=0)
 
     def _change(self, *, steps: int) -> None:
@@ -316,11 +340,21 @@ class Session:
         if running is None or running.profile_id != profile_id or stored is running:
             return
         self._running = stored
+        self._on_running_change()
         if stored is None:
             logger.info("The running profile '%s' was deleted; its slideshow stops.", profile_id.value)
-        if stored is None or not stored.profile.slideshow:
             self._paused = False
-        self._arm()
+            self._deadline = None
+            try:
+                clear_active_profile(self._paths.cache)
+            except OSError as error:
+                logger.warning("Could not forget the running profile: %s", error)
+        elif not stored.profile.slideshow:
+            self._paused = False
+            self._deadline = None
+        elif self._deadline is None and not self._paused:
+            # It wasn't a slideshow before; the countdown of one that was is left as it is.
+            self._arm()
 
     def _use_displays(self, layout: Layout) -> None:
         self._layout = layout

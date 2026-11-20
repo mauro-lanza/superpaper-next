@@ -14,11 +14,12 @@ from superpaper.geometry.perspective import Default, Disabled, choice_label, par
 from superpaper.paths import resource
 from superpaper.profile_actions import (
     align_test_profile,
+    apply_profile,
+    check_applicable,
     delete_profile,
     revert_profile,
     save_profile,
     saved_profile,
-    show_draft,
 )
 from superpaper.profiles import form
 from superpaper.profiles.form import parse_offsets
@@ -28,13 +29,20 @@ from superpaper.profiles.selection import first_image, is_file
 from superpaper.ui.browse_dialog import BrowsePaths, source_icon
 from superpaper.ui.display_band import DisplayBand
 from superpaper.ui.help import HelpFrame, image_quality_advice, show_help_popup
-from superpaper.ui.message import ask_unsaved_changes, draft_shown, show_message_dialog
+from superpaper.ui.message import (
+    ask_apply_with_unsaved_displays,
+    ask_unsaved_changes,
+    draft_shown,
+    show_message_dialog,
+)
 from superpaper.ui.perspective_dialog import PerspectiveConfig
 from superpaper.ui.preview import WallpaperPreviewPanel
-from superpaper.unsaved_changes import may_proceed, unsaved_message
+from superpaper.unsaved_changes import ApplyAnswer, may_proceed, unsaved_message
 from superpaper.user_input import Offset, OffsetError, Problems
 
 logger = logging.getLogger(__name__)
+
+RUNNING_MARKER = " (running)"
 
 
 class StagedLayout:
@@ -51,7 +59,20 @@ class StagedLayout:
 class ConfigFrame(wx.Frame):
     """The wallpaper configuration window: see WallpaperSettingsPanel."""
 
-    def __init__(self, paths, get_settings, store, session, *, update_settings, refresh_displays, rebind_hotkey):
+    def __init__(
+        self,
+        paths,
+        get_settings,
+        store,
+        session,
+        *,
+        update_settings,
+        refresh_displays,
+        rebind_hotkey,
+        last_edited,
+        remember_edited,
+        watch_profiles,
+    ):
         wx.Frame.__init__(self, parent=None, title="Superpaper Wallpaper Configuration")
         frame_sizer = wx.BoxSizer(wx.VERTICAL)
         config_panel = WallpaperSettingsPanel(
@@ -63,6 +84,9 @@ class ConfigFrame(wx.Frame):
             update_settings=update_settings,
             refresh_displays=refresh_displays,
             rebind_hotkey=rebind_hotkey,
+            last_edited=last_edited,
+            remember_edited=remember_edited,
+            watch_profiles=watch_profiles,
         )
         self._panel = config_panel
         self.Bind(wx.EVT_CLOSE, self._on_close)
@@ -89,19 +113,34 @@ class ConfigFrame(wx.Frame):
 class WallpaperSettingsPanel(wx.Panel):
     """The profile editor, with the preview of the displays and the display band.
 
-    It edits the saved profiles in ``store`` and tells ``session`` what became of the
-    running one; drafts (Apply, the align tests) are shown by ``session`` too. The
-    display settings band and the perspective dialog work on a staged display layout,
+    It edits the saved profiles in ``store``, and Apply runs one in ``session``, which it
+    also tells what became of the running one. The display
+    settings band and the perspective dialog work on a staged display layout,
     which starts as the session's. ``get_settings()`` returns the general settings as they are now,
     ``update_settings(settings)`` saves them, ``refresh_displays()`` detects the
-    displays again, for the session, and ``rebind_hotkey(before, after)`` moves a saved
-    profile's hotkey along with it.
+    displays again, for the session, ``rebind_hotkey(before, after)`` moves a saved
+    profile's hotkey along with it, ``last_edited()`` and ``remember_edited(profile_id)``
+    keep, across editor windows, the profile the editor last loaded or saved, and
+    ``watch_profiles(callback)`` calls back whenever the saved profiles or the running one
+    change outside the editor, for the dropdown, and returns what stops it.
     """
 
     span_mode: SpanMode
 
     def __init__(
-        self, parent, paths, get_settings, store, session, *, update_settings, refresh_displays, rebind_hotkey
+        self,
+        parent,
+        paths,
+        get_settings,
+        store,
+        session,
+        *,
+        update_settings,
+        refresh_displays,
+        rebind_hotkey,
+        last_edited,
+        remember_edited,
+        watch_profiles,
     ):
         wx.Panel.__init__(self, parent)
         self.frame = parent
@@ -112,9 +151,13 @@ class WallpaperSettingsPanel(wx.Panel):
         self.session = session
         self.refresh_displays = refresh_displays
         self._rebind_hotkey = rebind_hotkey
+        self._remember_edited = remember_edited
         # The saved profile open in the editor: the store's record of it, the one the tray
         # menu offers and the session runs.
         self.loaded_profile = None
+        # The image clicked in the sources, with the source row it came from: shown by Apply,
+        # and what Save selects, until the profile changes or is saved or applied.
+        self._pick: tuple[str, str] | None = None
         self.sizer_main = wx.BoxSizer(wx.VERTICAL)
         self.sizer_top_half = wx.BoxSizer(wx.HORIZONTAL)  # wallpaper/monitor preview
         self.sizer_bottom_half = wx.BoxSizer(wx.VERTICAL)  # settings, buttons etc
@@ -220,16 +263,21 @@ class WallpaperSettingsPanel(wx.Panel):
         self.Bind(wx.EVT_COMBOBOX, self._on_field_changed)
 
         running = self.session.running
-        if running:
-            active_id = self.choice_profiles.FindString(running.profile.name)
-            self.choice_profiles.SetSelection(active_id)
-            self.populate_fields(running)
+        opened_on = running or self._last_edited_record(last_edited())
+        if opened_on:
+            self._select_in_dropdown(opened_on.profile.name)
+            self.populate_fields(opened_on)
         else:
-            # No active profile: start from a clean, empty new-profile baseline.
+            # Nothing to open on: start from a clean, empty new-profile baseline.
+            self._select_in_dropdown(NEW_PROFILE_LABEL)
             self._set_clean_baseline()
 
         # Record the loaded display-wide settings as the system clean baseline.
         self.display_band.set_baseline()
+
+        # Last, so that a constructor that fails leaves nothing watching.
+        self._stop_watching_profiles = watch_profiles(self._refresh_profiles)
+        self.Bind(wx.EVT_WINDOW_DESTROY, self._on_destroy)
 
         ### End __init__.
 
@@ -546,6 +594,8 @@ class WallpaperSettingsPanel(wx.Panel):
         self._loading = True
         profile = stored.profile
         self.loaded_profile = stored
+        self._pick = None
+        self._remember_edited(stored.profile_id)
         shown = form.form_from(profile, self.staged.layout)
         self._write_form(shown)
         self.wpprev_pnl.zoom = profile.zoom
@@ -684,6 +734,7 @@ class WallpaperSettingsPanel(wx.Panel):
 
     def _update_dirty_state(self):
         """Enable/disable Save and Revert based on unsaved profile changes."""
+        self._drop_stale_pick()
         if self._loading or self._clean_serial is None:
             return
         dirty = self.has_unsaved_profile_changes()
@@ -737,9 +788,34 @@ class WallpaperSettingsPanel(wx.Panel):
         self.wpprev_pnl.update_display_data(self._display_areas(), self.span_mode)
 
     def _profile_choices(self):
-        """The profile dropdown's entries: the saved profiles, then starting a new one."""
+        """The profile dropdown's entries: the saved profiles, the running one marked, then starting a new one."""
         self.list_of_profiles = self.store.profiles
-        return [prof.profile.name for prof in self.list_of_profiles] + [NEW_PROFILE_LABEL]
+        running = self.session.running
+        return [
+            prof.profile.name
+            + (RUNNING_MARKER if running is not None and running.profile_id == prof.profile_id else "")
+            for prof in self.list_of_profiles
+        ] + [NEW_PROFILE_LABEL]
+
+    def _last_edited_record(self, profile_id):
+        """The saved profile the editor last loaded or saved, if it still exists."""
+        return self.store.get(profile_id) if profile_id is not None else None
+
+    def _select_in_dropdown(self, name):
+        """Show the saved profile called ``name`` in the dropdown, or its new-profile entry
+        if there is none."""
+        names = [prof.profile.name for prof in self.list_of_profiles]
+        self.choice_profiles.SetSelection(names.index(name) if name in names else len(names))
+
+    def _dropdown_name(self):
+        """The name of the saved profile chosen in the dropdown; the new-profile label for
+        "Create a new profile", and "" if nothing is chosen."""
+        index = self.choice_profiles.GetSelection()
+        if index == wx.NOT_FOUND:
+            return ""
+        if index < len(self.list_of_profiles):
+            return self.list_of_profiles[index].profile.name
+        return NEW_PROFILE_LABEL
 
     def update_choiceprofile(self):
         """Reload profile list into the choice box."""
@@ -967,6 +1043,7 @@ class WallpaperSettingsPanel(wx.Panel):
         if not preview_file:
             return
 
+        self._pick = (path, preview_file)
         display_data = self._display_areas()
         self.wpprev_pnl.preview_wallpaper([preview_file], self.span_mode, display_data, self.preview_spangroups())
 
@@ -1004,6 +1081,17 @@ class WallpaperSettingsPanel(wx.Panel):
         if item != -1:
             self.path_listctrl.DeleteItem(item)
             self._update_dirty_state()
+
+    def _row_path(self, item):
+        """The path of the source list's row ``item``."""
+        return self.path_listctrl.GetItemText(item, 1 if self.path_listctrl.GetColumnCount() == 2 else 0)
+
+    def _drop_stale_pick(self):
+        """Forget the clicked image once the source it came from is no longer listed."""
+        if self._pick is not None:
+            rows = {self._row_path(item) for item in range(self.path_listctrl.GetItemCount())}
+            if self._pick[0] not in rows:
+                self._pick = None
 
     def onClose(self, event):
         """Closes the profile config panel."""
@@ -1045,67 +1133,101 @@ class WallpaperSettingsPanel(wx.Panel):
     def onSelect(self, event):
         """Acts once a profile is picked in the dropdown menu."""
         if event.GetEventObject().GetName() == "ProfileChoice":
-            picked = event.GetString()
+            picked = self._dropdown_name()
             if not self.settle_unsaved_changes(displays=False):
                 loaded = self.loaded_profile.profile.name if self.loaded_profile else NEW_PROFILE_LABEL
-                self.choice_profiles.SetSelection(self.choice_profiles.FindString(loaded))
+                self._select_in_dropdown(loaded)
                 return
             # Saving may have renamed, added or moved entries.
-            index = self.choice_profiles.FindString(picked)
-            self.choice_profiles.SetSelection(index)
+            self._select_in_dropdown(picked)
             if picked == NEW_PROFILE_LABEL:
                 self.onCreateNewProfile(event)
             else:
-                self.populate_fields(self.list_of_profiles[index])
+                self.populate_fields(self.list_of_profiles[self.choice_profiles.GetSelection()])
 
     def onRevert(self, event):
         """Discards unsaved changes and loads the saved profile from disk again, with any
         changes made to its file outside the editor."""
-        selection = self.choice_profiles.GetSelection()
-        name = self.choice_profiles.GetString(selection) if selection != wx.NOT_FOUND else ""
-        profile = revert_profile(name, store=self.store, session=self.session)
+        profile = revert_profile(self._dropdown_name(), store=self.store, session=self.session)
         if profile is not None:
             self.update_choiceprofile()
-            self.choice_profiles.SetSelection(self.choice_profiles.FindString(profile.profile.name))
+            self._select_in_dropdown(profile.profile.name)
             self.populate_fields(profile)
             return
         # No saved profile to revert to: reset to an empty new profile.
         self.onCreateNewProfile(None)
 
     def onApply(self, event):
-        """Render the current edits as a one-off preview without saving.
-
-        The wallpaper is set using the settings exactly as shown in the dialog,
-        but the stored ``.profile`` on disk and the daemon's active/running
-        profile are left untouched. Use Save to persist the changes.
-        """
-        draft = form.prepare_draft(self._read_form(), self._focused_path(), self.loaded_profile)
-        if isinstance(draft, Problems):
-            self._show_problems(draft)
+        """Run the profile the fields describe, showing the image clicked in the sources, or
+        else its current one: saved first if it has unsaved changes, and with the display
+        layout saved too if the user says so."""
+        if self.loaded_profile is None or self.has_unsaved_profile_changes():
+            if not self._save_profile():
+                return
+            stored = self.loaded_profile
+            assert stored is not None  # a saved profile is loaded once saving succeeded
+        else:
+            stored = self.store.get(self.loaded_profile.profile_id) or self.loaded_profile
+            problems = check_applicable(stored)
+            if problems is not None:
+                self._show_problems(problems)
+                return
+        if not self._settle_displays_for_apply():
             return
-        wx.BeginBusyCursor()
-        # The staged layout, so unsaved display settings — bezels, sizes, positions — are
-        # reflected; it is a value, so the worker thread renders exactly what is staged now.
-        show_draft(
-            draft,
-            loaded=self.loaded_profile,
-            layout=self.staged.layout,
-            session=self.session,
-            post=wx.CallAfter,
-            on_shown=draft_shown,
-        )
+        apply_profile(stored, picked=self._pick_image(), session=self.session)
+        self._pick = None
+        self.loaded_profile = stored
+
+    def _on_destroy(self, event):
+        event.Skip()
+        # Child windows send this too.
+        if event.GetEventObject() is self:
+            self._stop_watching_profiles()
+
+    def _refresh_profiles(self):
+        """The saved profiles or the running one changed: show them in the dropdown. A loaded
+        profile that is gone is a new one now: its form is dropped if clean, else kept to be
+        saved anew."""
+        if not self:  # the editor was closed meanwhile
+            return
+        self.update_choiceprofile()
+        loaded = self.loaded_profile
+        if loaded is None or self.store.get(loaded.profile_id) is not None:
+            self._select_in_dropdown(loaded.profile.name if loaded else NEW_PROFILE_LABEL)
+        elif self.has_unsaved_profile_changes():
+            self.loaded_profile = None
+            self._pick = None
+            self._select_in_dropdown(NEW_PROFILE_LABEL)
+            self._clean_serial = form.fingerprint(form.blank_form(self.staged.layout))
+            self._update_dirty_state()
+        else:
+            self.onCreateNewProfile(None)
+
+    def _settle_displays_for_apply(self):
+        """Detect the displays again for Apply and, if the display layout has unsaved
+        changes, ask whether to save it first; returns whether to go on."""
+        band = self.display_band
+        if not band.has_unsaved_changes():
+            self.refresh_displays()
+            return True
+        match ask_apply_with_unsaved_displays(self.frame, can_save=band.can_save()):
+            case ApplyAnswer.SAVE_DISPLAYS:
+                return band.save()
+            case ApplyAnswer.USE_SAVED_DISPLAYS:
+                self.refresh_displays()
+                return True
+            case ApplyAnswer.CANCEL:
+                return False
+            case answer:
+                assert_never(answer)
+
+    def _pick_image(self):
+        """The image clicked in the sources, if any."""
+        return self._pick[1] if self._pick is not None else None
 
     def _show_problems(self, problems: Problems):
         """Tell the user what keeps the profile from being saved or applied."""
         show_message_dialog("\n\n".join(problems.messages), "Error")
-
-    def _focused_path(self):
-        """The path of the focused item of the wallpaper list, if any."""
-        item_idx = self.path_listctrl.GetFocusedItem()
-        if item_idx == -1:
-            return None
-        columns = self.path_listctrl.GetColumnCount()
-        return self.path_listctrl.GetItemText(item_idx, 1 if columns == 2 else 0)
 
     def onSave(self, event):
         """Saves the profile the fields describe, if it is valid."""
@@ -1113,12 +1235,12 @@ class WallpaperSettingsPanel(wx.Panel):
 
     def _save_profile(self):
         """Save the profile the fields describe; tells the user and returns False if it
-        can't be saved. The display layout is not saved with it."""
+        can't be saved. The display layout is not saved with it, and the desktop doesn't change."""
         with wx.BusyCursor():
             current = self._read_form()
             result = save_profile(
                 current,
-                focused_path=self._focused_path(),
+                picked=self._pick_image(),
                 loaded=self.loaded_profile,
                 store=self.store,
                 session=self.session,
@@ -1127,8 +1249,10 @@ class WallpaperSettingsPanel(wx.Panel):
             if isinstance(result, Problems):
                 self._show_problems(result)
                 return False
+            self._pick = None
+            self._remember_edited(result.stored.profile_id)
             self.update_choiceprofile()
-            self.choice_profiles.SetSelection(self.choice_profiles.FindString(current.name))
+            self._select_in_dropdown(current.name)
             # The editor goes on with the store's record of the saved profile.
             self.loaded_profile = result.stored
             self.wpprev_pnl.preview_wallpaper(
@@ -1145,7 +1269,8 @@ class WallpaperSettingsPanel(wx.Panel):
         """Empties the wallpaper profile config fields."""
         self._loading = True
         self.loaded_profile = None
-        self.choice_profiles.SetSelection(self.choice_profiles.FindString(NEW_PROFILE_LABEL))
+        self._pick = None
+        self._select_in_dropdown(NEW_PROFILE_LABEL)
 
         self.refresh_path_listctrl(False, migrate_paths=False)
 
@@ -1163,8 +1288,7 @@ class WallpaperSettingsPanel(wx.Panel):
 
     def onDeleteProfile(self, event):
         """Deletes the currently selected profile after getting confirmation."""
-        selection = self.choice_profiles.GetSelection()
-        selected_name = self.choice_profiles.GetString(selection) if selection != wx.NOT_FOUND else ""
+        selected_name = self._dropdown_name()
         profile = saved_profile(self.store, selected_name)
         if profile is None:
             show_message_dialog("Selected profile is not saved.", "Error")

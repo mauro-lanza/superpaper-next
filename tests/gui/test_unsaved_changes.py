@@ -168,7 +168,7 @@ def test_switching_profile_asks_only_about_the_profile(gui_env, editor, answer):
 
     assert gui_env.unsaved_prompts == [PROFILE_ONLY]
     expected = "Home" if answer is Answer.DISCARD else "Work"
-    assert editor.choice_profiles.GetStringSelection() == expected
+    assert editor._dropdown_name() == expected
     assert editor.tc_name.GetValue() == expected
     assert editor.display_band.has_unsaved_changes()
 
@@ -201,7 +201,7 @@ def test_a_failed_save_before_a_switch_stays_on_the_profile(gui_env, editor):
     editor.onSelect(select_event(editor, "Home"))
 
     assert editor.tc_name.GetValue() == "Work"
-    assert editor.choice_profiles.GetStringSelection() == "Work"
+    assert editor._dropdown_name() == "Work"
     assert editor.has_unsaved_profile_changes()
 
 
@@ -221,7 +221,7 @@ def test_new_profile_asks_the_same_question(gui_env, editor, answer, blank):
 
     assert gui_env.unsaved_prompts == [PROFILE_ONLY]
     assert (editor.tc_name.GetValue() == "") is blank
-    assert editor.choice_profiles.GetStringSelection() == (NEW_PROFILE_LABEL if blank else "Work")
+    assert editor._dropdown_name() == (NEW_PROFILE_LABEL if blank else "Work")
     if answer is Answer.SAVE:
         assert stored_delay(gui_env, "Work") == EDITED_DELAY
 
