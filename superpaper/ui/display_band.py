@@ -11,6 +11,9 @@ from superpaper.ui.help import show_help_popup
 from superpaper.ui.message import show_message_dialog
 
 INVALID_COLOUR = wx.Colour(255, 200, 200)
+LABEL = "Display system settings  (apply to all profiles)"
+UNSAVED_MARKER = "Displays: unsaved"
+INVALID_DIAGONALS_MESSAGE = "Every display size must be a number from 1 to 1000 inches."
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,7 +55,7 @@ class DisplayBand(wx.CollapsiblePane):
     ):
         super().__init__(
             parent,
-            label="Display system settings  (apply to all profiles)",
+            label=LABEL,
             style=wx.CP_DEFAULT_STYLE | wx.CP_NO_TLW_RESIZE,
         )
         self.staged = staged
@@ -70,6 +73,7 @@ class DisplayBand(wx.CollapsiblePane):
         self._typed_diagonals = None
         self._typing = None
         self._reverting = False
+        self._unsaved_marker_shown = False
         self.Bind(wx.EVT_COLLAPSIBLEPANE_CHANGED, self.onToggle)
         pane = self.GetPane()
 
@@ -177,6 +181,7 @@ class DisplayBand(wx.CollapsiblePane):
         self._typing = None
         self.button_system_save.Enable(False)
         self.button_system_revert.Enable(False)
+        self._show_unsaved_marker(False)
 
     def update_dirty(self):
         """Enable Save while there are unsaved changes and every diagonal is valid, and
@@ -187,6 +192,23 @@ class DisplayBand(wx.CollapsiblePane):
         invalid = self._has_invalid_diagonals()
         self.button_system_save.Enable(dirty and not invalid)
         self.button_system_revert.Enable(dirty or invalid)
+        self._show_unsaved_marker(dirty or invalid)
+
+    def has_unsaved_changes(self):
+        """Whether the staged settings differ from the saved ones, or a diagonal is typed
+        that can't be staged."""
+        if self._clean is None:
+            return False
+        return self.staged.layout.settings() != self._clean or self._has_invalid_diagonals()
+
+    def _show_unsaved_marker(self, unsaved):
+        self._unsaved_marker_shown = unsaved
+        self.SetLabel(f"{LABEL}  -  {UNSAVED_MARKER}" if unsaved else LABEL)
+
+    def shows_unsaved_marker(self):
+        """Whether the header carries the unsaved marker. Kept here because wxGTK's
+        CollapsiblePane::SetLabel only updates the GtkExpander, so GetLabel reads back empty."""
+        return self._unsaved_marker_shown
 
     def _has_invalid_diagonals(self):
         return self.cb_diaginch.GetValue() and any(
@@ -231,15 +253,21 @@ class DisplayBand(wx.CollapsiblePane):
             show_message_dialog(layout_edit.REARRANGED_MESSAGE, "Info")
 
     def onSave(self, event):
-        """Write the staged display-wide settings to disk."""
+        self.save()
+
+    def save(self):
+        """Write the staged display-wide settings to disk; tells the user and returns False
+        if a diagonal is invalid or the write fails."""
         if self._has_invalid_diagonals():
-            return
+            show_message_dialog(INVALID_DIAGONALS_MESSAGE, "Error")
+            return False
         failed = self._save_layout(self.staged.layout)
         if failed is not None:
             show_message_dialog(failed.message, "Error")
-            return
+            return False
         self._on_saved()
         self.set_baseline()
+        return True
 
     def onRevert(self, event):
         """Discard unsaved display-wide changes, restoring the baseline."""
