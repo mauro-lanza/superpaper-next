@@ -14,8 +14,12 @@ concurrency:
 
 jobs:
   lint:
-    name: Lint, type-check & test
-    runs-on: ubuntu-latest
+    name: Lint, type-check & test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-15]
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
