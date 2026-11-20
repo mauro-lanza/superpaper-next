@@ -8,8 +8,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol
 
-import superpaper.desktop as desktop
 import superpaper.geometry.display_detection as display_detection
+from superpaper.desktop.backend import Desktop
 from superpaper.desktop.hotkeys import Hotkeys
 from superpaper.paths import AppPaths
 from superpaper.profile_actions import carry_on_running
@@ -50,8 +50,11 @@ class Shell:
 class Superpaper:
     """The tray application as it runs; ``shell`` is the UI it runs in."""
 
-    def __init__(self, shell: Shell, paths: AppPaths, settings: Settings, startup_profile: ProfileId | None):
+    def __init__(
+        self, shell: Shell, paths: AppPaths, desktop: Desktop, settings: Settings, startup_profile: ProfileId | None
+    ):
         self._shell = shell
+        self.desktop = desktop
         self.paths = paths
         self.settings_path = paths.config / SETTINGS_FILE
         self.settings = settings
@@ -60,6 +63,7 @@ class Superpaper:
         self.last_failure: str | None = None
         self.session = Session(
             paths,
+            desktop,
             display_detection.detect_layout(paths.config),
             on_change=self._report_change,
             set_command=lambda: self.settings.set_command,
@@ -136,7 +140,7 @@ class Superpaper:
             logger.info("KDE Plasma without the native tray: auto-opening the configuration")
             self._shell.call_soon(self.open_editor)
         # Say once, now, if wallpapers can't be set here, rather than on every change.
-        problem = desktop.setter_problem(self.settings.set_command)
+        problem = self.desktop.setter_problem(self.settings.set_command)
         if problem:
             logger.error("%s", problem)
             self._shell.call_soon(lambda: self._shell.notify(problem, "Error"))

@@ -46,6 +46,7 @@ def test_a_startup_failure_is_reported_and_the_app_does_not_start(gui_env, monke
         SetTopWindow=lambda frame: None,
         _paths=gui_env.paths,
         _settings=None,
+        _desktop=None,
         _startup_profile=None,
     )
 

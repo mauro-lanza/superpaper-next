@@ -21,6 +21,7 @@ from superpaper.profiles.profile_file import Profile
 from superpaper.profiles.profile_id import ProfileId
 from superpaper.profiles.profile_store import ProfileStore
 from superpaper.settings import Settings, read_settings
+from tests.desktop.fake import FakeDesktop
 
 PATHS = AppPaths(config=Path("/config"), profiles=Path("/config/profiles"), cache=Path("/cache"))
 LAYOUT = SimpleNamespace(name="the detected display layout")
@@ -99,6 +100,7 @@ def application(running=None, profiles=(), active=None, settings=None, **shell_a
     }
     superpaper._shell = Shell(**{**actions, **shell_actions})
     superpaper.paths = PATHS
+    superpaper.desktop = FakeDesktop()
     superpaper.settings_path = PATHS.config / "general_settings"
     superpaper.settings = settings or Settings()
     superpaper.store = FakeStore(profiles, active)
@@ -223,7 +225,7 @@ def test_quitting_stops_the_session_before_the_icon_goes():
         (False, False, ["editor later"]),
     ],
 )
-def test_the_help_and_the_configuration_open_at_start_when_they_should(monkeypatch, show_help, clickable, expected):
+def test_the_help_and_the_configuration_open_at_start_when_they_should(show_help, clickable, expected):
     opened = []
     superpaper = application(
         settings=Settings(show_help=show_help),
@@ -231,7 +233,6 @@ def test_the_help_and_the_configuration_open_at_start_when_they_should(monkeypat
         open_help=lambda app: opened.append("help"),
         call_soon=lambda action: opened.append("editor later") if action == superpaper.open_editor else None,
     )
-    monkeypatch.setattr(controller.desktop, "setter_problem", lambda set_command: None)
     superpaper.tray.clickable = clickable
     superpaper.session.layout = FRESH
 
@@ -240,14 +241,14 @@ def test_the_help_and_the_configuration_open_at_start_when_they_should(monkeypat
     assert opened == expected
 
 
-def test_problems_with_this_desktop_are_said_once_at_start(monkeypatch):
+def test_problems_with_this_desktop_are_said_once_at_start():
     shown = []
     superpaper = application(
         settings=Settings(show_help=False),
         notify=lambda message, title: shown.append((message, title)),
         call_soon=lambda action: action(),
     )
-    monkeypatch.setattr(controller.desktop, "setter_problem", lambda set_command: "no setter here")
+    superpaper.desktop.problem = "no setter here"
     superpaper.session.layout = SimpleNamespace(size_hint=lambda: "enter the sizes")
 
     superpaper._show_at_start()
@@ -279,7 +280,7 @@ def start(monkeypatch, paths):
     for step in ("_run_at_startup", "_start_hotkeys", "_show_at_start"):
         monkeypatch.setattr(controller.Superpaper, step, lambda *args: None)
     shell = application()._shell
-    return controller.Superpaper(shell, paths, Settings(), None)
+    return controller.Superpaper(shell, paths, FakeDesktop(), Settings(), None)
 
 
 def test_a_start_sweeps_the_renders_of_profiles_that_are_gone(tmp_path, monkeypatch):

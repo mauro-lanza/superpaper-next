@@ -35,6 +35,14 @@ def app_paths(tmp_path):
     return paths
 
 
+@pytest.fixture
+def desktop():
+    """The desktop every test runs against: records what it is asked, changes nothing."""
+    from tests.desktop.fake import FakeDesktop
+
+    return FakeDesktop()
+
+
 def load_profile(paths, name):
     """The record of the saved profile ``name`` (or ProfileId), loaded as the tray loads
     it; None if it doesn't load."""

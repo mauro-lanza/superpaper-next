@@ -16,6 +16,7 @@ from superpaper.geometry import display_detection
 from superpaper.profiles.profile_file import Profile
 from superpaper.profiles.profile_id import ProfileId
 from superpaper.session import Session
+from tests.desktop.fake import FakeDesktop
 
 DELAY = 600.0
 
@@ -73,13 +74,14 @@ class Runtime:
         monkeypatch.setattr(session_module, "show_again", self.show_again)
         self.session = Session(
             paths,
+            FakeDesktop(),
             "layout 0",
             on_change=self.reported.append,
             set_command=lambda: self.set_command,
             clock=self.clock,
         )
 
-    def show(self, profile, files, paths, *, layout, set_command="", profile_id=None, running=None):
+    def show(self, profile, files, paths, *, desktop, layout, set_command="", profile_id=None, running=None):
         if self.hold is not None:
             self.holding.set()
             assert self.hold.wait(10)
@@ -94,7 +96,7 @@ class Runtime:
         )
         return self.problem
 
-    def show_again(self, stored, paths, *, layout, set_command=""):
+    def show_again(self, stored, paths, *, desktop, layout, set_command=""):
         self.restored.append(stored.profile.name)
         return self.has_render
 

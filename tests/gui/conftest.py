@@ -19,6 +19,7 @@ from PIL import Image
 
 import superpaper.desktop.process as process
 import superpaper.geometry.display_detection as display_detection
+from superpaper.desktop import linux
 from superpaper.desktop.tray_menu import Submenu
 from superpaper.geometry import display_store
 from superpaper.geometry.perspective import Perspective, Swivel, SwivelAxis, Tilt
@@ -96,7 +97,7 @@ class GuiEnv:
     def start(self, *, settings=None, startup_profile=None):
         """A running Superpaper, quit when the test ends."""
         settings = settings or read_settings(self.settings_path, sys.platform)
-        superpaper = self.ui.app.start_superpaper(self.ui.wx.Frame(None), self.paths, settings, startup_profile)
+        superpaper = self.ui.app.start_superpaper(self.ui.wx.Frame(None), self.paths, settings, linux, startup_profile)
         self.started.append(superpaper)
         return superpaper
 

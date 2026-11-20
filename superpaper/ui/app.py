@@ -9,6 +9,7 @@ from collections.abc import Callable
 import wx  # ty:ignore[unresolved-import]
 
 from superpaper.controller import Shell, Superpaper
+from superpaper.desktop.backend import Desktop
 from superpaper.geometry.display_detection import DisplayDetectionError
 from superpaper.paths import AppPaths
 from superpaper.profiles.profile_id import ProfileId
@@ -22,7 +23,7 @@ from superpaper.ui.tray import TaskBarIcon
 logger = logging.getLogger(__name__)
 
 
-def run(paths: AppPaths, settings: Settings, profile: ProfileId | None = None):
+def run(paths: AppPaths, settings: Settings, desktop: Desktop, profile: ProfileId | None = None):
     """Run the tray application until it is quit; ``profile`` is run at once, if given."""
     # On Linux (wxGTK) the tray icon (StatusNotifierItem) title is derived
     # from the program name, i.e. the basename of sys.argv[0]. When launched
@@ -41,17 +42,18 @@ def run(paths: AppPaths, settings: Settings, profile: ProfileId | None = None):
             DBusGMainLoop(set_as_default=True)
         except ImportError:
             pass
-    app = App(paths, settings, profile)
+    app = App(paths, settings, desktop, profile)
     app.MainLoop()
 
 
 class App(wx.App):
     """The wx application, which builds Superpaper once wx is ready."""
 
-    def __init__(self, paths: AppPaths, settings: Settings, startup_profile: ProfileId | None):
+    def __init__(self, paths: AppPaths, settings: Settings, desktop: Desktop, startup_profile: ProfileId | None):
         # wx.App.__init__ runs OnInit, which builds the application from these.
         self._paths = paths
         self._settings = settings
+        self._desktop = desktop
         self._startup_profile = startup_profile
         super().__init__(False)
 
@@ -61,7 +63,7 @@ class App(wx.App):
         frame = wx.Frame(None)
         self.SetTopWindow(frame)
         try:
-            self.superpaper = start_superpaper(frame, self._paths, self._settings, self._startup_profile)
+            self.superpaper = start_superpaper(frame, self._paths, self._settings, self._desktop, self._startup_profile)
         except DisplayDetectionError as error:
             return _fail_startup(f"No displays could be detected: {error}")
         except (ValueError, configparser.Error) as error:
@@ -82,7 +84,7 @@ def _fail_startup(message: str) -> bool:
 
 
 def start_superpaper(
-    frame: wx.Frame, paths: AppPaths, settings: Settings, startup_profile: ProfileId | None
+    frame: wx.Frame, paths: AppPaths, settings: Settings, desktop: Desktop, startup_profile: ProfileId | None
 ) -> Superpaper:
     """Superpaper running in the wx application whose top window is ``frame``, closed on quitting."""
 
@@ -101,7 +103,7 @@ def start_superpaper(
         make_tray=_make_tray,
         close=close,
     )
-    return Superpaper(shell, paths, settings, startup_profile)
+    return Superpaper(shell, paths, desktop, settings, startup_profile)
 
 
 def _notify(message: str, title: str) -> None:
@@ -148,6 +150,7 @@ def _make_tray(app: Superpaper) -> TaskBarIcon:
         app.session,
         last_failure=lambda: app.last_failure,
         config_dir=app.paths.config,
+        desktop=app.desktop,
         open_editor=app.open_editor,
         open_settings=app.open_settings,
         reload_profiles=app.reload_profiles,

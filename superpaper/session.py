@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from functools import partial
 from typing import TYPE_CHECKING
 
+from superpaper.desktop.backend import Desktop
 from superpaper.paths import AppPaths
 from superpaper.profiles.profile_file import Profile
 from superpaper.profiles.profile_id import ProfileId
@@ -64,6 +65,7 @@ class Session:
     def __init__(
         self,
         paths: AppPaths,
+        desktop: Desktop,
         layout: Layout,
         *,
         on_change: Callable[[str | None], None],
@@ -71,6 +73,7 @@ class Session:
         clock: Callable[[], float] = time.monotonic,
     ):
         self._paths = paths
+        self._desktop = desktop
         self._on_change = on_change
         self._set_command = set_command
         self._clock = clock
@@ -165,6 +168,7 @@ class Session:
                     profile,
                     images,
                     self._paths,
+                    desktop=self._desktop,
                     layout=layout if layout is not None else self._layout,
                     set_command=self._set_command(),
                     running=self._running.profile.name if self._running is not None else None,
@@ -240,7 +244,7 @@ class Session:
         self._running = stored
         self._paused = False
         logger.info("Running profile: %s", stored.profile.name)
-        if show_again(stored, self._paths, layout=self._layout, set_command=self._set_command()):
+        if show_again(stored, self._paths, desktop=self._desktop, layout=self._layout, set_command=self._set_command()):
             self._arm()
         else:
             self._change(steps=0)
@@ -281,6 +285,7 @@ class Session:
             stored.profile,
             files,
             self._paths,
+            desktop=self._desktop,
             layout=self._layout,
             set_command=self._set_command(),
             profile_id=stored.profile_id,
