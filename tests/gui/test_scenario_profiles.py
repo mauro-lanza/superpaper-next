@@ -4,6 +4,8 @@ One test: each step starts from the profiles, selections and running pointer the
 left, and the scenario verifies that sequence (save, apply, rename, delete, restart).
 """
 
+from types import SimpleNamespace
+
 import pytest
 from PIL import Image
 
@@ -49,8 +51,15 @@ def profile_text(paths, name):
 
 def choose(gui_env, superpaper, panel, name):
     """Pick a profile in the editor's profile list, as a click does."""
-    panel.choice_profiles.SetSelection(panel.choice_profiles.FindString(name))
+    panel.update_choiceprofile()
+    panel._select_in_dropdown(name)
     panel.populate_fields(gui_env.saved(superpaper, name))
+
+
+def click_row(panel, index):
+    """Click the source list's row ``index``."""
+    panel.path_listctrl.Focus(index)
+    panel.onWallpaperItemSelected(SimpleNamespace(GetIndex=lambda: index))
 
 
 def test_profile_editor_and_tray(gui_env, wallpapers, snapshots):
@@ -87,16 +96,17 @@ def test_profile_editor_and_tray(gui_env, wallpapers, snapshots):
     assert "zoom=1.25" in profile_text(paths, "Main")
     assert superpaper.session.running.profile.zoom == 1.25
 
-    # Click the second image in the source list; Apply.
-    panel.path_listctrl.Focus(1)
+    # Click the second image in the source list; Apply: it is shown, remembered and running.
+    click_row(panel, 1)
     before = profile_text(paths, "Main")
     panel.onApply(None)
     gui_env.settle(superpaper)
     snapshot("second-image-applied")
-    assert list((paths.cache / "preview").glob("draft-?.png"))
     assert gui_env.shown() == []
     assert shown(gui_env.saved(superpaper, "Main")) == [second_image]
     assert profile_text(paths, "Main") == before
+    assert superpaper.session.running is gui_env.saved(superpaper, "Main")
+    assert panel._pick is None
 
     # Create a new profile 'Office': a slideshow of the wallpapers folder, alphabetical, every 10 minutes; Save.
     panel.onCreateNewProfile(None)

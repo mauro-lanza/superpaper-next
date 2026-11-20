@@ -314,6 +314,11 @@ def write_active_profile(cache_dir: Path, profile_id: ProfileId) -> None:
     write_atomically(_active_pointer_path(cache_dir), profile_id.value.encode("utf-8"))
 
 
+def clear_active_profile(cache_dir: Path) -> None:
+    """Forget the running profile: nothing runs at the next start."""
+    _active_pointer_path(cache_dir).unlink(missing_ok=True)
+
+
 # The current selection is runtime state that changes on every slideshow tick, so it
 # is remembered beside running_profile instead of inside the profile file. A profile
 # file then changes only when the user edits it. A selected= line written by an

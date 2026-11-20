@@ -25,8 +25,10 @@ class Recorder:
         return lambda *args: self.calls.append((name, *args))
 
 
-def profile(name):
-    return SimpleNamespace(profile=Profile(name=name), profile_id=ProfileId.parse(name, windows_names=False))
+def profile(name, *, slideshow=True):
+    return SimpleNamespace(
+        profile=Profile(name=name, slideshow=slideshow), profile_id=ProfileId.parse(name, windows_names=False)
+    )
 
 
 @pytest.fixture
@@ -34,10 +36,10 @@ def recorder():
     return Recorder()
 
 
-def icon(tray, recorder, *, desktop=None, profiles=(), paused=False, failure=None):
+def icon(tray, recorder, *, desktop=None, profiles=(), paused=False, failure=None, running=None):
     """A tray icon, built as the application builds it, with the wx icon."""
     store = SimpleNamespace(profiles=list(profiles))
-    session = SimpleNamespace(paused=paused, next=recorder("next"), toggle_pause=recorder("pause"))
+    session = SimpleNamespace(paused=paused, running=running, next=recorder("next"), toggle_pause=recorder("pause"))
     return tray.TaskBarIcon(
         store,
         session,
@@ -61,7 +63,7 @@ def tray(headless_tray_module, monkeypatch):
 
 def test_the_menu_asks_the_application_and_the_session(tray, recorder):
     work = profile("Work")
-    entries = icon(tray, recorder, profiles=[work]).menu()
+    entries = icon(tray, recorder, profiles=[work], running=work).menu()
     # Open Config Folder and About are the tray's own, tested on their own.
     own = {"Open Config Folder", "About"}
     clickable = [entry for entry in entries if isinstance(entry, (Item, Check)) and entry.label not in own]
@@ -99,6 +101,52 @@ def test_the_menu_lists_the_saved_profiles_and_shows_pause(tray, recorder):
     assert [item.label for item in profiles.items] == ["Work", "Home"]
     assert [entry.checked for entry in entries if isinstance(entry, Check)] == [True]
     assert sum(isinstance(entry, Separator) for entry in entries) == 3
+
+
+def submenu(entries):
+    (profiles,) = (entry for entry in entries if isinstance(entry, Submenu))
+    return profiles
+
+
+def entry_labelled(entries, label):
+    return next(entry for entry in entries if getattr(entry, "label", None) == label)
+
+
+def test_the_running_profile_is_the_one_checked(tray, recorder):
+    work, home = profile("Work"), profile("Home")
+
+    entries = icon(tray, recorder, profiles=[work, home], running=home).menu()
+
+    assert [(item.label, item.checked) for item in submenu(entries).items] == [("Work", False), ("Home", True)]
+
+
+def test_no_profile_is_checked_while_nothing_runs(tray, recorder):
+    entries = icon(tray, recorder, profiles=[profile("Work")]).menu()
+
+    assert [item.checked for item in submenu(entries).items] == [False]
+
+
+def test_without_profiles_the_submenu_holds_a_disabled_placeholder(tray, recorder):
+    assert submenu(icon(tray, recorder).menu()).items == (Notice("(no profiles)"),)
+
+
+def test_next_and_pause_are_disabled_while_nothing_runs(tray, recorder):
+    entries = icon(tray, recorder, profiles=[profile("Work")]).menu()
+
+    assert entry_labelled(entries, "Next Wallpaper").enabled is False
+    assert entry_labelled(entries, "Pause Timer").enabled is False
+
+
+def test_pause_is_enabled_only_for_a_running_slideshow(tray, recorder):
+    slideshow, still = profile("Work"), profile("Home", slideshow=False)
+
+    running_slideshow = icon(tray, recorder, profiles=[slideshow], running=slideshow).menu()
+    running_still = icon(tray, recorder, profiles=[still], running=still).menu()
+
+    assert entry_labelled(running_slideshow, "Pause Timer").enabled is True
+    assert entry_labelled(running_slideshow, "Next Wallpaper").enabled is True
+    assert entry_labelled(running_still, "Pause Timer").enabled is False
+    assert entry_labelled(running_still, "Next Wallpaper").enabled is True
 
 
 def test_a_failed_change_is_the_first_line_of_the_menu_until_cleared(tray, recorder):

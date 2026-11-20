@@ -108,6 +108,7 @@ def application(running=None, profiles=(), active=None, settings=None, **shell_a
     superpaper.store = FakeStore(profiles, active)
     superpaper.session = FakeSession(running)
     superpaper.last_failure = None
+    superpaper._profile_watchers = []
     superpaper._reported_layout_problem = None
     superpaper.hotkeys = None
     superpaper.tray = SimpleNamespace(

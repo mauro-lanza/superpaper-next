@@ -10,6 +10,12 @@ class Answer(Enum):
     CANCEL = "Cancel"
 
 
+class ApplyAnswer(Enum):
+    SAVE_DISPLAYS = "Save displays and apply"
+    USE_SAVED_DISPLAYS = "Apply with saved displays"
+    CANCEL = "Cancel"
+
+
 def unsaved_message(*, profile: bool, displays: bool) -> str | None:
     """The question to ask for what has unsaved changes; None if nothing has."""
     if profile and displays:
