@@ -7,8 +7,9 @@ import sys
 
 import pytest
 
-from superpaper.desktop import kde, process
-from superpaper.desktop.kde import Activities
+from superpaper.desktop import process
+from superpaper.desktop.linux import kde
+from superpaper.desktop.linux.kde import Activities
 
 PIECES = ["/cache/home-a-crop-0.png", "/cache/home-a-crop-1.png"]
 WORK_PIECES = ["/cache/work-b-crop-0.png", "/cache/work-b-crop-1.png"]

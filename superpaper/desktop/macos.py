@@ -1,15 +1,44 @@
 """Set the wallpaper on macOS: one image per screen, through AppKit."""
 
+import os
+from pathlib import Path
 from typing import Any
 
 from AppKit import NSScreen, NSWorkspace  # ty:ignore[unresolved-import]
 from Foundation import NSURL  # ty:ignore[unresolved-import]
 
-from superpaper.desktop.process import Result
+from superpaper.desktop.linux.kde import Activities
+from superpaper.desktop.process import Result, run
+from superpaper.desktop.process import run_hook as run_hook
 from superpaper.desktop.wallpaper import Pieces, Wallpaper
 
 
-def set_wallpaper(wallpaper: Wallpaper) -> Result:
+def takes_pieces(set_command: str) -> bool:
+    """Whether the desktop sets one image per display, so a wallpaper is cut into pieces."""
+    return True
+
+
+def keeps_wallpaper() -> bool:
+    """Whether the desktop shows the last wallpaper again after a restart by itself."""
+    return False
+
+
+def setter_problem(set_command: str) -> str | None:
+    """Why Superpaper can't set the wallpaper on this desktop, if it can't."""
+    return None
+
+
+def set_spanmode(set_command: str) -> Result:
+    """Nothing to set: every screen has its own picture."""
+    return Result()
+
+
+def open_folder(folder: Path) -> Result:
+    """Show ``folder`` in the desktop's file manager."""
+    return run(["open", os.fspath(folder)])
+
+
+def set_wallpaper(wallpaper: Wallpaper, *, set_command: str, activities: Activities) -> Result:
     """Show the pieces of ``wallpaper``, one image per screen, in Superpaper's display order.
 
     Each screen has its own desktop picture. NSScreen doesn't list the screens in any

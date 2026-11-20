@@ -4,10 +4,12 @@ KDE Plasma, window managers through feh, or the user's own command."""
 import logging
 import os
 import shutil
+from pathlib import Path
 from typing import Literal, assert_never
 
-import superpaper.desktop.kde as kde
+import superpaper.desktop.linux.kde as kde
 from superpaper.desktop.process import QUICK, Result, run
+from superpaper.desktop.process import run_hook as run_hook
 from superpaper.desktop.wallpaper import Pieces, Wallpaper
 
 logger = logging.getLogger(__name__)
@@ -68,6 +70,26 @@ def setter(set_command: str) -> Setter:
     if "i3" in desk_env or desk_env == "/usr/share/xsessions/bspwm":
         return "feh"
     return "unknown"
+
+
+def takes_pieces(set_command: str) -> bool:
+    """Whether the desktop sets one image per display, so a wallpaper is cut into pieces."""
+    return setter(set_command) == "kde"
+
+
+def keeps_wallpaper() -> bool:
+    """Whether the desktop shows the last wallpaper again after a restart by itself."""
+    return False
+
+
+def setter_problem(set_command: str) -> str | None:
+    """Why Superpaper can't set the wallpaper on this desktop, if it can't."""
+    return UNKNOWN_DESKTOP if setter(set_command) == "unknown" else None
+
+
+def open_folder(folder: Path) -> Result:
+    """Show ``folder`` in the desktop's file manager."""
+    return run(["xdg-open", os.fspath(folder)])
 
 
 def set_wallpaper(wallpaper: Wallpaper, *, set_command: str, activities: kde.Activities) -> Result:
