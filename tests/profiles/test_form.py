@@ -248,13 +248,15 @@ def images(tmp_path):
     return folder
 
 
-def test_chosen_images_for_one_image_per_display_are_none(images):
+def test_chosen_images_for_one_image_per_display_are_none_without_a_click(images):
     loaded = SimpleNamespace(selection=SimpleNamespace(images=["/x.png"]))
     multi = Profile(name="m", spanmode="multi")
     single = Profile(name="s")
-    assert profile_form.chosen_images(multi, str(images / "a.png"), loaded) is None
-    assert profile_form.chosen_images(single, str(images / "a.png"), loaded) == [str(images / "a.png")]
-    assert profile_form.chosen_images(single, str(images), loaded) == ["/x.png"]
+    both = [str(images / "a.png"), str(images / "b.png")]
+    assert profile_form.chosen_images(multi, None, loaded) is None
+    assert profile_form.chosen_images(multi, both, loaded) == both
+    assert profile_form.chosen_images(single, [str(images / "a.png")], loaded) == [str(images / "a.png")]
+    assert profile_form.chosen_images(single, [str(images)], loaded) == ["/x.png"]
     assert profile_form.chosen_images(single, None, None) is None
 
 

@@ -33,7 +33,7 @@ def first_run_settings(*, hotkeys_by_default: bool) -> Settings:
     return Settings(
         use_hotkeys=hotkeys_by_default,
         hk_binding_next=("control", "super", "w"),
-        hk_binding_pause=("control", "super", "shift", "p"),
+        hk_binding_pause=("control", "shift", "super", "p"),
     )
 
 

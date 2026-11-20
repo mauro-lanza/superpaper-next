@@ -99,6 +99,7 @@ class LayoutEditor:
     def toggle_buttons(self, show_config, in_config):
         """Toggle visibility of display positioning config buttons."""
         self.button_config.Show(show_config)
+        self.button_config.Enable(len(self.preview.staged.layout.displays) > 1)
         self.button_save.Show(in_config)
         self.button_reset.Show(in_config)
         self.button_entry.Show(in_config)

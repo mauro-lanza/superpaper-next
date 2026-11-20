@@ -532,7 +532,50 @@ def test_saved_general_settings_apply_from_now_on(tmp_path, use_hotkeys, registe
     assert superpaper.hotkeys.register_general.called is registered
     assert superpaper.settings == saved
     assert read_settings(superpaper.settings_path, hotkeys_by_default=True) == saved
-    assert shown == [("Logging is enabled after an application restart.", "Info")]
+    expected = [("Logging is enabled after an application restart.", "Info")]
+    if not use_hotkeys:
+        expected.insert(0, ("Hotkeys are turned on or off after an application restart.", "Info"))
+    assert shown == expected
+
+
+def test_settings_with_unusable_hotkeys_are_reported_and_not_saved(tmp_path):
+    shown = []
+    work = profile("Work")
+    work.profile = replace(work.profile, hotkey=("control", "w"))
+    superpaper = application(profiles=[work], notify=lambda message, title: shown.append((message, title)))
+    superpaper.settings_path = tmp_path / "general_settings"
+
+    for bad in (
+        Settings(hk_binding_next=("control", "")),
+        Settings(hk_binding_next=("control", "n"), hk_binding_pause=("control", "n")),
+        Settings(hk_binding_pause=("control", "w")),
+    ):
+        assert superpaper.apply_settings(bad) is False
+
+    assert [title for _, title in shown] == ["Error"] * 3
+    assert not superpaper.settings_path.exists()
+
+
+def test_a_profile_hotkey_that_clashes_already_doesnt_block_other_settings(tmp_path):
+    shown = []
+    keys = ("control", "w")
+    first, second = profile("Work"), profile("Home")
+    for stored in (first, second):
+        stored.profile = replace(stored.profile, hotkey=keys)
+    superpaper = application(
+        profiles=[first, second],
+        settings=Settings(),
+        notify=lambda message, title: shown.append((message, title)),
+    )
+    superpaper.settings_path = tmp_path / "general_settings"
+
+    assert superpaper.apply_settings(replace(superpaper.settings, logging=True)) is True
+    assert superpaper.apply_settings(Settings(hk_binding_pause=keys)) is False
+
+    assert shown[-1] == (
+        "The hotkey 'control+w' is already used by the profile 'Work' and the profile 'Home'.",
+        "Error",
+    )
 
 
 def test_settings_that_cant_be_written_are_reported_and_not_applied(tmp_path):

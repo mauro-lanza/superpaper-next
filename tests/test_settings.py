@@ -26,7 +26,7 @@ def test_first_run_settings(hotkeys_by_default):
 
     assert settings.use_hotkeys is hotkeys_by_default
     assert settings.hk_binding_next == ("control", "super", "w")
-    assert settings.hk_binding_pause == ("control", "super", "shift", "p")
+    assert settings.hk_binding_pause == ("control", "shift", "super", "p")
     assert settings.show_help is True
     assert settings.logging is False
 
@@ -102,7 +102,7 @@ def test_general_settings_round_trip_is_byte_stable(tmp_path):
         "logging=FALSE\n"
         "use hotkeys=TrUe\n"
         "next wallpaper hotkey=control+super+w\n"
-        "pause wallpaper hotkey=control+super+shift+p\n"
+        "pause wallpaper hotkey=control+shift+super+p\n"
         "show_help_at_start=false\n"
         "set_command=env FOO=bar setter --arg=a=b {image}\n"
         "browse_default_dir=/tmp/wallpapers\n"
@@ -119,7 +119,7 @@ def test_general_settings_round_trip_is_byte_stable(tmp_path):
         "logging=false\n"
         "use hotkeys=true\n"
         "next wallpaper hotkey=control+super+w\n"
-        "pause wallpaper hotkey=control+super+shift+p\n"
+        "pause wallpaper hotkey=control+shift+super+p\n"
         "show_help_at_start=false\n"
         "set_command=env FOO=bar setter --arg=a=b {image}\n"
         "browse_default_dir=/tmp/wallpapers\n"

@@ -152,6 +152,26 @@ def test_a_peek_falls_back_to_the_sources_without_forgetting_the_selection(tmp_p
     assert remembered == []
 
 
+def test_a_peek_names_the_selected_images_it_passed_over(tmp_path):
+    (image,) = touch(tmp_path / "available.png")
+    gone = str(tmp_path / "unmounted.png")
+    images = Selection([[image]], "alphabetical", 1, images=[gone])
+
+    assert images.current() == [image]
+    assert images.take_skipped() == [gone]
+    assert images.take_skipped() == []
+
+
+def test_advancing_names_the_images_deleted_since_listing(tmp_path):
+    first, second = touch(tmp_path / "a.png", tmp_path / "b.png")
+    images = Selection([[first, second]], "alphabetical", 1)
+    assert images.current() == [first]
+    (tmp_path / "a.png").unlink()
+
+    assert images.advance() == [second]
+    assert images.take_skipped() == [first]
+
+
 def test_advancing_replaces_a_selection_whose_images_are_gone(tmp_path, remembered):
     (image,) = touch(tmp_path / "available.png")
     images = Selection([[image]], "alphabetical", 1, images=[str(tmp_path / "gone.png")], remember=remembered.append)

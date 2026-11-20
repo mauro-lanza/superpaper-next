@@ -154,12 +154,13 @@ class BrowsePaths(wx.Dialog):
     def onAdd(self, event):
         """Adds selected path to export field."""
         sel_path = self.dir3.GetPath()
-        if self.use_multi_image:
-            # Extra column in advanced mode
-            disp_id = str(self.radiobox_displays.GetSelection())
-            self.append_to_listctrl([disp_id, sel_path])
-        else:
-            self.append_to_listctrl([sel_path])
+        row = [str(self.radiobox_displays.GetSelection()), sel_path] if self.use_multi_image else [sel_path]
+        listed = (
+            [self.paths_listctrl.GetItemText(i, c) for c in range(len(row))]
+            for i in range(self.paths_listctrl.GetItemCount())
+        )
+        if row not in listed:
+            self.append_to_listctrl(row)
 
     def onRemove(self, event):
         """Removes last appended path from export field."""

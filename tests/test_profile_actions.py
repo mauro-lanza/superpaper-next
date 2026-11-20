@@ -17,6 +17,7 @@ from superpaper.profile_actions import (
 from superpaper.profiles.profile_file import OffsetsCorrection
 from superpaper.profiles.profile_id import NEW_PROFILE_LABEL, ProfileId
 from superpaper.profiles.profile_store import ProfileStore
+from superpaper.settings import Settings
 from superpaper.user_input import Problems
 from tests.profiles.conftest import blank
 
@@ -59,13 +60,17 @@ def session(store):
     return FakeSession(store)
 
 
-def save(store, session, form, *, loaded=None, picked=None, rebinds=None):
+GENERAL = Settings()
+
+
+def save(store, session, form, *, loaded=None, picked=None, rebinds=None, settings=GENERAL):
     return save_profile(
         form,
         picked=picked,
         loaded=loaded,
         store=store,
         session=session,
+        settings=settings,
         rebind_hotkey=lambda before, after: rebinds.append((before, after)) if rebinds is not None else None,
     )
 
@@ -110,11 +115,33 @@ def test_saving_over_a_loaded_profile_updates_the_session_and_follows_a_rename(s
     assert store.get(ProfileId.parse("Work", windows_names=False)) is None
 
 
+def test_a_hotkey_that_is_unreadable_or_used_elsewhere_is_a_problem_when_saving(store, session, images):
+    sources = (("", str(images)),)
+    other = save(store, session, blank(name="Other", sources=sources, hotkey_enabled=True, hotkey="control+x"))
+    assert isinstance(other, Saved)
+    unreadable = save(store, session, blank(sources=sources, hotkey_enabled=True, hotkey="control++x"))
+    with_profile = save(store, session, blank(sources=sources, hotkey_enabled=True, hotkey="control+x"))
+    general = Settings(hk_binding_next=("control", "n"))
+    with_general = save(
+        store, session, blank(sources=sources, hotkey_enabled=True, hotkey="control+n"), settings=general
+    )
+    own = save(
+        store,
+        session,
+        blank(name="Other", sources=sources, hotkey_enabled=True, hotkey="control+x"),
+        loaded=other.stored,
+    )
+    assert "not valid" in unreadable.messages[0]
+    assert "the profile 'Other'" in with_profile.messages[0]
+    assert "Next wallpaper hotkey" in with_general.messages[0]
+    assert isinstance(own, Saved)
+
+
 def test_saving_chooses_the_picked_file_else_the_loaded_selection(store, session, images):
     first = save(store, session, blank(sources=(("", str(images)),)))
-    picked = str(images / "b.png")
+    picked = [str(images / "b.png")]
     second = save(store, session, blank(zoom_pct=120, sources=(("", str(images)),)), loaded=first.stored, picked=picked)
-    assert second.stored.selection.images == [picked]
+    assert second.stored.selection.images == picked
 
 
 def test_reverting_loads_the_file_again_and_carries_the_running_profile_on(store, session, images, app_paths):
@@ -166,19 +193,21 @@ def test_applying_runs_the_chosen_image_else_the_current_selection(store, sessio
     saved = save(store, session, blank(sources=(("", str(images)),))).stored
     picked = str(images / "b.png")
 
-    apply_profile(saved, picked=picked, session=session)
+    apply_profile(saved, picked=[picked], session=session)
     apply_profile(saved, picked=None, session=session)
 
     assert session.applied == [(saved, [picked]), (saved, None)]
 
 
-def test_applying_a_multi_image_profile_picks_nothing(store, session, images):
+def test_applying_a_multi_image_profile_shows_one_clicked_image_per_display(store, session, images):
     form = blank(span_mode="multi", per_target_sources=True, sources=(("0", str(images)), ("1", str(images))))
     saved = save(store, session, form).stored
+    picked = [str(images / "b.png"), str(images / "a.png")]
 
-    apply_profile(saved, picked=str(images / "b.png"), session=session)
+    apply_profile(saved, picked=picked, session=session)
+    apply_profile(saved, picked=None, session=session)
 
-    assert session.applied == [(saved, None)]
+    assert session.applied == [(saved, picked), (saved, None)]
 
 
 def test_a_saved_profile_whose_images_are_gone_cant_be_applied(store, session, images):
