@@ -45,9 +45,9 @@ def applied_then_saved(gui_env, running_work, editor):
     assert "selected=" not in gui_env.profile_file("Work").read_text(encoding="utf-8")
     editor.onApply(None)
     gui_env.settle(running_work)
-    store = ProfileStore(gui_env.paths)
+    store = ProfileStore(gui_env.paths, windows_names=False)
     store.reload()
-    stored = store.get(ProfileId("Work")).selection.images
+    stored = store.get(ProfileId.parse("Work", windows_names=False)).selection.images
     editor.tc_sshow_delay.SetValue("15")
     editor.onSave(None)
     gui_env.settle(running_work)

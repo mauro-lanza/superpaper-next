@@ -113,7 +113,9 @@ You can either:
   position in `~/.cache/superpaper/temp` (`$XDG_CACHE_HOME/superpaper/temp`).
 - **Windows:** beside the program for a portable install, otherwise in
   `%LOCALAPPDATA%\Superpaper`.
-- **macOS:** beside the program.
+- **macOS:** settings, profiles and display layouts in
+  `~/Library/Application Support/Superpaper`; rendered wallpapers, the log and the
+  slideshow position in `~/Library/Caches/Superpaper`.
 
 To use other directories, for example to try something without touching your own
 setup, set `SUPERPAPER_CONFIG_HOME` and `SUPERPAPER_CACHE_HOME` to the directories

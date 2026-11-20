@@ -49,9 +49,9 @@ def load_profile(paths, name):
     from superpaper.profiles.profile_id import ProfileId
     from superpaper.profiles.profile_store import ProfileStore
 
-    store = ProfileStore(paths)
+    store = ProfileStore(paths, windows_names=False)
     store.reload()
-    return store.get(name if isinstance(name, ProfileId) else ProfileId(name))
+    return store.get(name if isinstance(name, ProfileId) else ProfileId.parse(name, windows_names=False))
 
 
 def monitor(x, y, width, height, width_mm=500, height_mm=300, name="display"):

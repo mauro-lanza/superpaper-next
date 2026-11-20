@@ -1,6 +1,5 @@
 """Profile identity: which filenames are profiles, and where their files may live."""
 
-import sys
 import unicodedata
 from dataclasses import InitVar, dataclass, field
 from pathlib import Path, PureWindowsPath
@@ -28,24 +27,26 @@ class ProfileId:
     """The filename stem that identifies one wallpaper profile.
 
     ``parse`` accepts every name that can safely be a profile file on this system, so
-    profiles saved by older versions keep loading. ``parse_new`` also requires the name
-    to be portable; use it for names Superpaper is about to create.
+    profiles saved by older versions keep loading; ``windows_names`` says whether that
+    includes Windows' filename rules. ``parse_new`` also requires the name to be
+    portable; use it for names Superpaper is about to create.
     """
 
     raw: InitVar[object]
+    windows_names: InitVar[bool]
     _value: str = field(init=False, repr=False)
 
-    def __post_init__(self, raw: object) -> None:
-        object.__setattr__(self, "_value", _validate_profile_id(raw, new=False))
+    def __post_init__(self, raw: object, windows_names: bool) -> None:
+        object.__setattr__(self, "_value", _validate_profile_id(raw, new=False, windows_names=windows_names))
 
     @classmethod
-    def parse(cls, raw: object) -> ProfileId:
-        return cls(raw)
+    def parse(cls, raw: object, *, windows_names: bool) -> ProfileId:
+        return cls(raw, windows_names)
 
     @classmethod
     def parse_new(cls, raw: object) -> ProfileId:
-        _validate_profile_id(raw, new=True)
-        return cls(raw)
+        _validate_profile_id(raw, new=True, windows_names=False)
+        return cls(raw, windows_names=False)
 
     @property
     def value(self) -> str:
@@ -61,17 +62,17 @@ def collision_key(name: str) -> str:
     return unicodedata.normalize("NFC", name).casefold()
 
 
-def _validate_profile_id(raw: object, *, new: bool) -> str:
+def _validate_profile_id(raw: object, *, new: bool, windows_names: bool) -> str:
     if not isinstance(raw, str):
         message = "Profile names must be strings."
         raise ProfileIdError(message)
-    problem = _problem(raw, new=new)
+    problem = _problem(raw, new=new, windows_names=windows_names)
     if problem is not None:
         raise ProfileIdError(problem)
     return raw
 
 
-def _problem(raw: str, *, new: bool) -> str | None:
+def _problem(raw: str, *, new: bool, windows_names: bool) -> str | None:
     """Why ``raw`` can't identify a profile, or None if it can."""
     # Rules for every name, whatever its origin: a single safe path component that
     # survives the profile's "name=" line and doesn't shadow an entry of the UI.
@@ -89,7 +90,7 @@ def _problem(raw: str, *, new: bool) -> str | None:
         return "Profile names cannot contain path separators."
     if raw.casefold() in _RESERVED_APPLICATION_NAMES:
         return f"'{raw}' is reserved by Superpaper."
-    if new or sys.platform == "win32":
+    if new or windows_names:
         # Windows rejects or silently aliases these names. New names avoid them on
         # every platform so that profiles can move between systems.
         problem = _windows_problem(raw)

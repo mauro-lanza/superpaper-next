@@ -68,7 +68,7 @@ class Superpaper:
             on_change=self._report_change,
             set_command=lambda: self.settings.set_command,
         )
-        self.store = ProfileStore(paths)
+        self.store = ProfileStore(paths, windows_names=desktop.strict_profile_names())
         self._load_profiles()
         # Renders and selections of profiles deleted or renamed since the last start
         # aren't needed.

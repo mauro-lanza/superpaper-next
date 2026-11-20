@@ -1,6 +1,6 @@
 """What every operating system module under desktop/ provides."""
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Protocol
 
@@ -73,4 +73,24 @@ class Desktop(Protocol):
     @staticmethod
     def open_folder(folder: Path) -> Result:
         """Show ``folder`` in the desktop's file manager."""
+        ...
+
+    @staticmethod
+    def default_dirs(environ: Mapping[str, str], install: Path) -> tuple[Path, Path]:
+        """Where this OS keeps Superpaper's files unless told otherwise: the config and the cache directory."""
+        ...
+
+    @staticmethod
+    def hotkeys_by_default() -> bool:
+        """Whether global hotkeys are on in a new installation's settings."""
+        ...
+
+    @staticmethod
+    def render_extension() -> str:
+        """The file extension, without the dot, of rendered wallpapers."""
+        ...
+
+    @staticmethod
+    def strict_profile_names() -> bool:
+        """Whether every existing profile name must follow the filename rules of this OS, not only new ones."""
         ...

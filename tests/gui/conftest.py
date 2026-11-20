@@ -96,7 +96,7 @@ class GuiEnv:
 
     def start(self, *, settings=None, startup_profile=None):
         """A running Superpaper, quit when the test ends."""
-        settings = settings or read_settings(self.settings_path, sys.platform)
+        settings = settings or read_settings(self.settings_path, hotkeys_by_default=True)
         superpaper = self.ui.app.start_superpaper(self.ui.wx.Frame(None), self.paths, settings, linux, startup_profile)
         self.started.append(superpaper)
         return superpaper
@@ -119,7 +119,7 @@ class GuiEnv:
 
     def saved(self, superpaper, name):
         """The store's record of the saved profile ``name``, as the menus offer it."""
-        return superpaper.store.get(ProfileId(name))
+        return superpaper.store.get(ProfileId.parse(name, windows_names=False))
 
     def start_profile(self, superpaper, name):
         self.click(superpaper, name)

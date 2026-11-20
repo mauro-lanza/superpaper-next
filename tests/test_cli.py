@@ -148,7 +148,7 @@ def test_no_arguments_start_the_tray_after_spanning_the_desktop(monkeypatch, app
 
     assert cli.run([], app_paths, desktop) == 0
 
-    assert started == [(app_paths, first_run_settings(sys.platform), None)]
+    assert started == [(app_paths, first_run_settings(hotkeys_by_default=True), None)]
     assert desktop.spanned == [""]
 
 
@@ -178,9 +178,9 @@ def test_first_tray_start_writes_the_default_settings(monkeypatch, app_paths, de
 
     assert cli.run([], app_paths, desktop) == 0
 
-    defaults = first_run_settings(sys.platform)
+    defaults = first_run_settings(hotkeys_by_default=True)
     assert started == [(app_paths, defaults, None)]
-    assert read_settings(app_paths.config / "general_settings", sys.platform) == defaults
+    assert read_settings(app_paths.config / "general_settings", hotkeys_by_default=True) == defaults
 
 
 def test_tray_logs_to_the_cache_when_logging_is_on(monkeypatch, app_paths, desktop):
@@ -256,7 +256,7 @@ def test_reading_settings_with_logging_on_adds_no_handlers(unconfigured_logging,
     settings_file.write_text("logging=true\n", encoding="utf-8")
 
     for _ in range(3):
-        assert read_settings(settings_file, "linux").logging is True
+        assert read_settings(settings_file, hotkeys_by_default=True).logging is True
 
     module_logger.info("not shown")
     assert not module_logger.isEnabledFor(logging.INFO)

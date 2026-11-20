@@ -72,11 +72,11 @@ def run(argv: Sequence[str], paths: AppPaths, desktop: Desktop) -> int:
     setting a wallpaper, so that `--help` or a mistyped option changes nothing.
     """
     try:
-        request = parse_arguments(argv)
+        request = parse_arguments(argv, windows_names=desktop.strict_profile_names())
         match request:
             case StartTray():
                 if request.profile_id is not None:
-                    _check_profile_exists(paths, request.profile_id)
+                    _check_profile_exists(paths, desktop, request.profile_id)
                 _start_tray(paths, desktop, request.profile_id, debug=request.debug)
                 return 0
             case SetImages():
@@ -88,7 +88,7 @@ def run(argv: Sequence[str], paths: AppPaths, desktop: Desktop) -> int:
         return 1
 
 
-def parse_arguments(argv: Sequence[str]) -> Request:
+def parse_arguments(argv: Sequence[str], *, windows_names: bool) -> Request:
     """The request the command line ``argv`` makes. Raises CliError if it can't be met."""
     if not argv:
         return StartTray(profile_id=None, debug=False)
@@ -154,7 +154,7 @@ def parse_arguments(argv: Sequence[str]) -> Request:
         return StartTray(profile_id=None, debug=True)
     if args.profile and not args.setimages:
         try:
-            return StartTray(profile_id=ProfileId.parse(args.profile), debug=args.debug)
+            return StartTray(profile_id=ProfileId.parse(args.profile, windows_names=windows_names), debug=args.debug)
         except ProfileIdError as error:
             message = f"Invalid profile name: {error}"
             raise CliError(message) from error
@@ -234,7 +234,7 @@ def _start_tray(paths: AppPaths, desktop: Desktop, profile_id: ProfileId | None,
         )
         raise CliError(message) from error
     settings_file = paths.config / SETTINGS_FILE
-    settings = read_settings(settings_file, sys.platform)
+    settings = read_settings(settings_file, hotkeys_by_default=desktop.hotkeys_by_default())
     if not settings_file.exists():
         write_settings(settings_file, settings)
     configure_logging(debug=debug or settings.logging, log_file=paths.cache / "log" if settings.logging else None)
@@ -262,10 +262,10 @@ def _detect_displays(paths: AppPaths) -> Layout:
         raise CliError(message) from error
 
 
-def _check_profile_exists(paths: AppPaths, profile_id: ProfileId) -> None:
+def _check_profile_exists(paths: AppPaths, desktop: Desktop, profile_id: ProfileId) -> None:
     ensure_dirs(paths)
     _detect_displays(paths)  # fail here, with a message, rather than in the tray
-    inventory = profile_store.discover(paths)
+    inventory = profile_store.discover(paths, windows_names=desktop.strict_profile_names())
     if inventory.find(profile_id) is None:
         names = [entry.profile_id.value for entry in inventory.entries]
         message = f"No profile was found by the given name: {profile_id.value}. Valid profile names are: {names}"
@@ -277,7 +277,10 @@ def _set_images(request: SetImages, paths: AppPaths, desktop: Desktop) -> int:
     if request.debug:
         logger.info("Command line request: %s", request)
     ensure_dirs(paths)
-    set_command = request.set_command or read_settings(paths.config / SETTINGS_FILE, sys.platform).set_command
+    set_command = (
+        request.set_command
+        or read_settings(paths.config / SETTINGS_FILE, hotkeys_by_default=desktop.hotkeys_by_default()).set_command
+    )
     layout = None
     if request.perspective:
         layout = _detect_displays(paths)

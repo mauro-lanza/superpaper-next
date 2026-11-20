@@ -1,4 +1,4 @@
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
 from superpaper.desktop.process import Result
@@ -77,3 +77,15 @@ class FakeDesktop:
     def open_folder(self, folder: Path) -> Result:
         self.opened.append(folder)
         return self.folder_answer
+
+    def default_dirs(self, environ: Mapping[str, str], install: Path) -> tuple[Path, Path]:
+        return install / "config", install / "cache"
+
+    def hotkeys_by_default(self) -> bool:
+        return True
+
+    def render_extension(self) -> str:
+        return "png"
+
+    def strict_profile_names(self) -> bool:
+        return False

@@ -42,6 +42,52 @@ def test_custom_command_runs_once_in_unknown_session(monkeypatch, ran):
     assert ran[0][1]["timeout"] is None
 
 
+def default_dirs(tmp_path, **environ):
+    """linux.default_dirs for a scratch home, as paths relative to tmp_path."""
+    env = {"HOME": str(tmp_path / "home"), **{key: value.format(root=tmp_path) for key, value in environ.items()}}
+    return tuple(os.path.relpath(path, tmp_path) for path in linux.default_dirs(env, tmp_path / "app"))
+
+
+XDG_DEFAULT = ("home/.config/superpaper", "home/.cache/superpaper/temp")
+
+
+def test_dirs_default_to_the_xdg_fallbacks_in_home(tmp_path):
+    assert default_dirs(tmp_path) == XDG_DEFAULT
+
+
+def test_dirs_use_xdg_directories_that_exist(tmp_path):
+    (tmp_path / "xc").mkdir()
+    (tmp_path / "xk").mkdir()
+
+    assert default_dirs(tmp_path, XDG_CONFIG_HOME="{root}/xc", XDG_CACHE_HOME="{root}/xk") == (
+        "xc/superpaper",
+        "xk/superpaper/temp",
+    )
+
+
+@pytest.mark.parametrize("kind", ["missing", "file", "empty"])
+def test_dirs_ignore_xdg_values_that_are_not_directories(tmp_path, kind):
+    if kind == "file":
+        (tmp_path / "xc").write_text("")
+        (tmp_path / "xk").write_text("")
+    value = "" if kind == "empty" else "{root}/x"
+
+    assert default_dirs(
+        tmp_path, XDG_CONFIG_HOME=value.replace("x", "xc"), XDG_CACHE_HOME=value.replace("x", "xk")
+    ) == (XDG_DEFAULT)
+
+
+def test_snap_uses_its_own_directories(tmp_path):
+    assert default_dirs(tmp_path, SNAP_USER_DATA="{root}/data", SNAP_USER_COMMON="{root}/common") == (
+        "data",
+        "common/temp",
+    )
+
+
+def test_snap_config_and_cache_are_independent(tmp_path):
+    assert default_dirs(tmp_path, SNAP_USER_DATA="{root}/data") == ("data", "home/.cache/superpaper/temp")
+
+
 def test_feh_override_is_exclusive(monkeypatch, ran):
     monkeypatch.setenv("DESKTOP_SESSION", "i3")
 

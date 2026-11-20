@@ -39,7 +39,7 @@ def test_saving_another_profile_leaves_the_slideshow_countdown_alone(running_wor
 
 
 def test_the_hotkey_binds_the_profiles_identity_not_an_object(running_work, home_saved_with_hotkey):
-    assert running_work.hotkeys._profiles.bound == {HOME_KEYS: (ProfileId("Home"),)}
+    assert running_work.hotkeys._profiles.bound == {HOME_KEYS: (ProfileId.parse("Home", windows_names=False),)}
 
 
 def test_the_hotkey_starts_the_profile_with_its_latest_settings(gui_env, running_work, editor, home_saved_with_hotkey):

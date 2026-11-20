@@ -1,7 +1,7 @@
 """Set the wallpaper on macOS: one image per screen, through AppKit."""
 
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -54,6 +54,27 @@ def keeps_wallpaper() -> bool:
 def setter_problem(set_command: str) -> str | None:
     """Why Superpaper can't set the wallpaper on this desktop, if it can't."""
     return None
+
+
+def default_dirs(environ: Mapping[str, str], install: Path) -> tuple[Path, Path]:
+    """~/Library/Application Support/Superpaper and ~/Library/Caches/Superpaper."""
+    library = Path(environ.get("HOME") or os.path.expanduser("~")) / "Library"
+    return library / "Application Support" / "Superpaper", library / "Caches" / "Superpaper"
+
+
+def hotkeys_by_default() -> bool:
+    """Hotkeys are off."""
+    return False
+
+
+def render_extension() -> str:
+    """Rendered wallpapers are PNG."""
+    return "png"
+
+
+def strict_profile_names() -> bool:
+    """Only new profile names must follow the portable rules."""
+    return False
 
 
 def set_spanmode(set_command: str) -> Result:

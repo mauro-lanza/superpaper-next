@@ -95,8 +95,9 @@ class ProfileStore:
     where its slideshow is.
     """
 
-    def __init__(self, paths: AppPaths):
+    def __init__(self, paths: AppPaths, *, windows_names: bool):
         self.paths = paths
+        self.windows_names = windows_names
         self._records: dict[ProfileId, StoredProfile] = {}
 
     @property
@@ -109,7 +110,7 @@ class ProfileStore:
 
     def active(self) -> StoredProfile | None:
         """The profile that was running when Superpaper last exited, if it still loads."""
-        profile_id = read_active_profile_id(self.paths.cache)
+        profile_id = read_active_profile_id(self.paths.cache, windows_names=self.windows_names)
         if profile_id is None:
             return None
         stored = self.get(profile_id)
@@ -119,7 +120,7 @@ class ProfileStore:
 
     def reload(self) -> tuple[ProfileDiscoveryDiagnostic, ...]:
         """Read the profiles directory again; returns the files that couldn't be loaded."""
-        inventory = discover(self.paths)
+        inventory = discover(self.paths, windows_names=self.windows_names)
         previous = self._records
         self._records = {}
         for loaded in inventory.entries:
@@ -147,7 +148,7 @@ class ProfileStore:
             update_active=update_active,
         )
         self.reload()
-        stored = self.get(ProfileId.parse(path.stem))
+        stored = self.get(ProfileId.parse(path.stem, windows_names=self.windows_names))
         if stored is None:
             message = f"The saved profile {path} could not be loaded again."
             raise ProfileTransactionError(_DESTINATION_WRITE, ValueError(message))
@@ -165,7 +166,7 @@ class ProfileStore:
         keep = []
         for stem in stems:
             try:
-                keep.append(ProfileId.parse(stem))
+                keep.append(ProfileId.parse(stem, windows_names=self.windows_names))
             except ProfileIdError:
                 continue
         _sweep_selections(self.paths.cache, keep)
@@ -183,7 +184,7 @@ def _content_digest(content: bytes) -> bytes:
     return hashlib.sha256(content).digest()
 
 
-def discover(paths: AppPaths) -> ProfileInventory:
+def discover(paths: AppPaths, *, windows_names: bool) -> ProfileInventory:
     """Load every profile in the profiles directory and explain the ones that can't load.
 
     Symlinked profiles are followed, so profiles kept in a dotfile repository work.
@@ -201,7 +202,7 @@ def discover(paths: AppPaths) -> ProfileInventory:
         if path.suffix != ".profile":
             continue
         try:
-            profile_id = ProfileId.parse(path.stem)
+            profile_id = ProfileId.parse(path.stem, windows_names=windows_names)
         except ProfileIdError as error:
             diagnostics.append(ProfileDiscoveryDiagnostic(path, ProfileDiagnosticKind.INVALID_FILENAME, str(error)))
             continue
@@ -297,13 +298,13 @@ def _active_pointer_path(cache_dir: Path) -> Path:
     return cache_dir / "running_profile"
 
 
-def read_active_profile_id(cache_dir: Path) -> ProfileId | None:
+def read_active_profile_id(cache_dir: Path, *, windows_names: bool) -> ProfileId | None:
     """The profile that was running when Superpaper last exited, as remembered."""
     path = _active_pointer_path(cache_dir)
     if not path.is_file():
         return None
     try:
-        return ProfileId.parse(path.read_text(encoding="utf-8").splitlines()[0])
+        return ProfileId.parse(path.read_text(encoding="utf-8").splitlines()[0], windows_names=windows_names)
     except OSError, UnicodeError, IndexError, ProfileIdError:
         return None
 

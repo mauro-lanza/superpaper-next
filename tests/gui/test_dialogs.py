@@ -1,5 +1,4 @@
 import logging
-import sys
 from dataclasses import replace
 
 import pytest
@@ -60,7 +59,7 @@ def help_and_browse_written(gui_env, running_work, editor):
     browse = gui_env.open_browse(editor)
     browse.defdir = str(gui_env.images)
     browse._remember_default_dir(str(gui_env.images))
-    return read_settings(gui_env.settings_path, sys.platform)
+    return read_settings(gui_env.settings_path, hotkeys_by_default=True)
 
 
 def test_the_apps_own_settings_follow_the_dialogs_writes(gui_env, running_work, help_and_browse_written):

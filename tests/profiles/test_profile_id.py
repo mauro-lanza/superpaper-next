@@ -1,4 +1,3 @@
-import sys
 import unicodedata
 from pathlib import Path
 
@@ -55,12 +54,12 @@ def test_profile_id_accepts_portable_names(name):
 )
 def test_profile_id_rejects_unsafe_names(name, message):
     with pytest.raises(ProfileIdError, match=message):
-        ProfileId.parse(name)
+        ProfileId.parse(name, windows_names=False)
 
 
 def test_the_new_profile_entry_is_not_a_profile_name():
     with pytest.raises(ProfileIdError, match="reserved by Superpaper"):
-        ProfileId.parse(NEW_PROFILE_LABEL.upper())
+        ProfileId.parse(NEW_PROFILE_LABEL.upper(), windows_names=False)
 
 
 NON_PORTABLE_NAMES = [
@@ -90,10 +89,15 @@ def test_new_profile_names_must_be_portable(name, message):
         ProfileId.parse_new(name)
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="Windows enforces its filename rules for every name")
+@pytest.mark.parametrize("name", ["bad:name", "CON", "trailing."])
+def test_windows_names_apply_to_existing_profiles_when_asked(name):
+    with pytest.raises(ProfileIdError):
+        ProfileId.parse(name, windows_names=True)
+
+
 @pytest.mark.parametrize(("name", "_message"), NON_PORTABLE_NAMES)
 def test_existing_non_portable_names_still_identify_profiles(name, _message):
-    assert ProfileId.parse(name).value == name
+    assert ProfileId.parse(name, windows_names=False).value == name
 
 
 @pytest.mark.parametrize(
@@ -114,37 +118,46 @@ def test_new_profile_name_must_be_nfc():
     with pytest.raises(ProfileIdError, match="NFC"):
         ProfileId.parse_new(decomposed)
     # macOS HFS+ hands out decomposed filenames, so an existing file must still load.
-    assert ProfileId.parse(decomposed).value == decomposed
+    assert ProfileId.parse(decomposed, windows_names=False).value == decomposed
 
 
 @pytest.mark.parametrize("factory", [ProfileId, ProfileId.parse])
 def test_profile_id_public_construction_validates(factory):
     with pytest.raises(ProfileIdError, match="path separators"):
-        factory("../outside")
+        factory("../outside", windows_names=False)
 
 
 @pytest.mark.parametrize("raw", [None, 42, b"Work"])
 def test_profile_id_rejects_non_strings(raw):
     with pytest.raises(ProfileIdError, match="must be strings"):
-        ProfileId.parse(raw)
+        ProfileId.parse(raw, windows_names=False)
 
 
 def test_collision_key_is_case_insensitive():
-    assert ProfileId.parse("Work").collision_key == ProfileId.parse("work").collision_key
+    assert (
+        ProfileId.parse("Work", windows_names=False).collision_key
+        == ProfileId.parse("work", windows_names=False).collision_key
+    )
 
 
 def test_collision_key_uses_unicode_casefold():
-    assert ProfileId.parse("Straße").collision_key == ProfileId.parse("STRASSE").collision_key
+    assert (
+        ProfileId.parse("Straße", windows_names=False).collision_key
+        == ProfileId.parse("STRASSE", windows_names=False).collision_key
+    )
 
 
 def test_collision_key_ignores_unicode_normalization():
     decomposed = unicodedata.normalize("NFD", "Café")
 
-    assert ProfileId.parse(decomposed).collision_key == ProfileId.parse("café").collision_key
+    assert (
+        ProfileId.parse(decomposed, windows_names=False).collision_key
+        == ProfileId.parse("café", windows_names=False).collision_key
+    )
 
 
 def test_profile_path_is_directly_contained(tmp_path):
-    profile_id = ProfileId.parse("Work")
+    profile_id = ProfileId.parse("Work", windows_names=False)
 
     assert profile_path(tmp_path, profile_id) == tmp_path.resolve() / "Work.profile"
 
@@ -154,7 +167,7 @@ def test_profile_path_accepts_relative_root(tmp_path, monkeypatch):
     root = Path("profiles")
     root.mkdir()
 
-    assert profile_path(root, ProfileId("Work")) == root.resolve() / "Work.profile"
+    assert profile_path(root, ProfileId.parse("Work", windows_names=False)) == root.resolve() / "Work.profile"
 
 
 def test_profile_path_accepts_symlinked_profile(tmp_path):
@@ -165,26 +178,29 @@ def test_profile_path_accepts_symlinked_profile(tmp_path):
     dotfile.write_text("name=linked\n", encoding="utf-8")
     (root / "linked.profile").symlink_to(dotfile)
 
-    assert profile_path(root, ProfileId("linked"), allow_missing=False) == root.resolve() / "linked.profile"
+    assert (
+        profile_path(root, ProfileId.parse("linked", windows_names=False), allow_missing=False)
+        == root.resolve() / "linked.profile"
+    )
 
 
 def test_profile_path_allow_missing_accepts_missing_or_regular_file(tmp_path):
     path = tmp_path.resolve() / "managed.profile"
 
-    assert profile_path(tmp_path, ProfileId("managed")) == path
+    assert profile_path(tmp_path, ProfileId.parse("managed", windows_names=False)) == path
     path.write_text("profile", encoding="utf-8")
-    assert profile_path(tmp_path, ProfileId("managed")) == path
+    assert profile_path(tmp_path, ProfileId.parse("managed", windows_names=False)) == path
 
 
 def test_profile_path_allow_missing_rejects_directory(tmp_path):
     (tmp_path / "managed.profile").mkdir()
 
     with pytest.raises(ManagedPathError, match="must be regular files"):
-        profile_path(tmp_path, ProfileId("managed"))
+        profile_path(tmp_path, ProfileId.parse("managed", windows_names=False))
 
 
 def test_profile_path_requires_existing_regular_file(tmp_path):
-    profile_id = ProfileId.parse("missing")
+    profile_id = ProfileId.parse("missing", windows_names=False)
 
     with pytest.raises(ManagedPathError, match="does not exist"):
         profile_path(Path(tmp_path), profile_id, allow_missing=False)

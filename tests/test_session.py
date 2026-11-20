@@ -50,7 +50,7 @@ class Numbered:
 def saved(name, *, slideshow=True, delay=DELAY):
     """A saved profile, as the session is handed it."""
     return SimpleNamespace(
-        profile_id=ProfileId(name),
+        profile_id=ProfileId.parse(name, windows_names=False),
         profile=Profile(name=name, slideshow=slideshow, delay=delay),
         selection=Numbered(name),
     )
@@ -139,8 +139,8 @@ def test_a_started_profile_is_shown_and_remembered(runtime):
 
     assert runtime.shown == ["A-1.png"]
     assert runtime.changes[0].layout == "layout 0"
-    assert runtime.changes[0].profile_id == ProfileId("A")
-    assert runtime.session.running.profile_id == ProfileId("A")
+    assert runtime.changes[0].profile_id == ProfileId.parse("A", windows_names=False)
+    assert runtime.session.running.profile_id == ProfileId.parse("A", windows_names=False)
     assert (runtime.paths.cache / "running_profile").read_text(encoding="utf-8") == "A"
 
 
@@ -329,7 +329,7 @@ def test_saving_the_running_profile_applies_its_new_delay_from_now(runtime):
     runtime.session.activate(saved("A"))
     runtime.advance(DELAY / 2)
     edited = saved("A", delay=2 * DELAY)
-    runtime.session.update(ProfileId("A"), edited)
+    runtime.session.update(ProfileId.parse("A", windows_names=False), edited)
     runtime.advance(2 * DELAY - 1)
     runtime.settle()
     assert runtime.shown == ["A-1.png"]
@@ -343,7 +343,7 @@ def test_saving_the_running_profile_applies_its_new_delay_from_now(runtime):
 def test_a_paused_slideshow_stays_paused_when_its_profile_is_saved(runtime):
     runtime.session.activate(saved("A"))
     runtime.session.toggle_pause()
-    runtime.session.update(ProfileId("A"), saved("A"))
+    runtime.session.update(ProfileId.parse("A", windows_names=False), saved("A"))
     runtime.advance(100 * DELAY)
     runtime.settle()
 
@@ -355,7 +355,7 @@ def test_an_unchanged_profile_keeps_its_countdown(runtime):
     a = saved("A")
     runtime.session.activate(a)
     runtime.advance(DELAY / 2)
-    runtime.session.update(ProfileId("A"), a)
+    runtime.session.update(ProfileId.parse("A", windows_names=False), a)
     runtime.advance(DELAY / 2)
     runtime.settle()
 
@@ -365,9 +365,9 @@ def test_an_unchanged_profile_keeps_its_countdown(runtime):
 def test_a_renamed_profile_keeps_running_under_its_new_name(runtime):
     runtime.session.activate(saved("A"))
     renamed = saved("B")
-    runtime.session.update(ProfileId("A"), renamed)
+    runtime.session.update(ProfileId.parse("A", windows_names=False), renamed)
     # Reloading the profiles then finds no "A": that no longer concerns the running profile.
-    runtime.session.update(ProfileId("A"), None)
+    runtime.session.update(ProfileId.parse("A", windows_names=False), None)
     runtime.advance(DELAY)
     runtime.settle()
 
@@ -383,18 +383,18 @@ def test_only_renaming_the_running_profile_is_a_rename_of_it(runtime, saved_as, 
     runtime.session.activate(saved("A"))
     runtime.settle()
 
-    profile_id = ProfileId(saved_as) if saved_as else None
+    profile_id = ProfileId.parse(saved_as, windows_names=False) if saved_as else None
     assert runtime.session.renames_running(profile_id, new_name) is renames
 
 
 def test_nothing_is_renamed_when_no_profile_runs(runtime):
-    assert runtime.session.renames_running(ProfileId("A"), "B") is False
+    assert runtime.session.renames_running(ProfileId.parse("A", windows_names=False), "B") is False
 
 
 def test_a_deleted_profile_stops(runtime):
     runtime.session.activate(saved("A"))
     runtime.session.toggle_pause()
-    runtime.session.update(ProfileId("A"), None)
+    runtime.session.update(ProfileId.parse("A", windows_names=False), None)
     runtime.session.next()
     runtime.advance(100 * DELAY)
     runtime.settle()
@@ -407,7 +407,7 @@ def test_a_deleted_profile_stops(runtime):
 def test_updating_a_profile_that_isnt_running_changes_nothing(runtime):
     a = saved("A")
     runtime.session.activate(a)
-    runtime.session.update(ProfileId("B"), None)
+    runtime.session.update(ProfileId.parse("B", windows_names=False), None)
     runtime.settle()
 
     assert runtime.session.running is a

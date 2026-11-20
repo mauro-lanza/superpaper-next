@@ -36,7 +36,7 @@ def carry_on_running(store: ProfileStore, session: Session) -> None:
 def saved_profile(store: ProfileStore, name: str) -> StoredProfile | None:
     """The saved profile called ``name``, if there is one."""
     try:
-        return store.get(ProfileId.parse(name))
+        return store.get(ProfileId.parse(name, windows_names=store.windows_names))
     except ProfileIdError:
         return None
 

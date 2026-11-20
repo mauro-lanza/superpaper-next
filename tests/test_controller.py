@@ -115,7 +115,9 @@ def application(running=None, profiles=(), active=None, settings=None, **shell_a
 
 def profile(name):
     """A saved slideshow profile, as the application holds it."""
-    return SimpleNamespace(profile=Profile(name=name, slideshow=True, delay=30.0), profile_id=ProfileId(name))
+    return SimpleNamespace(
+        profile=Profile(name=name, slideshow=True, delay=30.0), profile_id=ProfileId.parse(name, windows_names=False)
+    )
 
 
 def test_the_last_failed_change_is_kept_until_a_change_succeeds():
@@ -171,7 +173,7 @@ def test_a_profile_hotkey_starts_the_currently_loaded_profile():
     superpaper = application(profiles=[current])
 
     # The hotkey is bound to the profile's identity; it starts the record loaded now.
-    superpaper.start_profile_by_id(ProfileId("Work"))
+    superpaper.start_profile_by_id(ProfileId.parse("Work", windows_names=False))
 
     assert superpaper.session.requests == [("use_displays", FRESH), ("activate", current)]
 
@@ -179,7 +181,7 @@ def test_a_profile_hotkey_starts_the_currently_loaded_profile():
 def test_a_hotkey_for_a_deleted_profile_does_nothing():
     superpaper = application()
 
-    superpaper.start_profile_by_id(ProfileId("Deleted"))
+    superpaper.start_profile_by_id(ProfileId.parse("Deleted", windows_names=False))
 
     assert superpaper.session.requests == []
 
@@ -269,7 +271,7 @@ def test_a_start_with_a_profile_runs_it():
     work, home = profile("Work"), profile("Home")
     superpaper = application(profiles=[work, home], active=work)
 
-    superpaper._run_at_startup(ProfileId("Home"))
+    superpaper._run_at_startup(ProfileId.parse("Home", windows_names=False))
 
     assert superpaper.session.requests == [("activate", home)]
 
@@ -306,7 +308,7 @@ def test_a_start_that_cant_list_the_profiles_keeps_every_render(tmp_path, monkey
     assert [path.name for path in paths.cache.iterdir()] == ["Work-a.png"]
 
 
-@pytest.mark.parametrize("startup", [None, ProfileId("Missing")])
+@pytest.mark.parametrize("startup", [None, ProfileId.parse("Missing", windows_names=False)])
 def test_a_start_with_nothing_to_run_runs_nothing(startup):
     superpaper = application(profiles=[profile("Work")])
 
@@ -324,7 +326,9 @@ def test_reloading_tells_the_session_what_became_of_the_running_profile(still_sa
 
     superpaper.reload_profiles()
 
-    assert superpaper.session.requests == [("update", ProfileId("Work"), edited_elsewhere if still_saved else None)]
+    assert superpaper.session.requests == [
+        ("update", ProfileId.parse("Work", windows_names=False), edited_elsewhere if still_saved else None)
+    ]
 
 
 def test_reloading_while_nothing_runs_tells_the_session_nothing():
@@ -350,7 +354,7 @@ def test_a_profile_that_cant_be_loaded_is_deleted_if_the_user_agrees(tmp_path, a
     paths, broken = broken_profile(tmp_path)
     questions = []
     superpaper = application(confirm=lambda message: questions.append(message) or answer)
-    superpaper.store = ProfileStore(paths)
+    superpaper.store = ProfileStore(paths, windows_names=False)
 
     superpaper.reload_profiles()
 
@@ -369,7 +373,7 @@ def test_a_profile_fixed_while_the_question_is_open_is_kept(tmp_path):
         return True
 
     superpaper = application(confirm=fix_then_agree)
-    superpaper.store = ProfileStore(paths)
+    superpaper.store = ProfileStore(paths, windows_names=False)
 
     superpaper.reload_profiles()
 
@@ -383,7 +387,7 @@ def test_only_profiles_that_cant_be_read_as_profiles_are_offered_for_deletion(tm
     (paths.profiles / "gone.profile").symlink_to(tmp_path / "missing")
     (paths.profiles / "folder.profile").mkdir()
     superpaper = application(confirm=lambda message: pytest.fail("asked to delete"))
-    superpaper.store = ProfileStore(paths)
+    superpaper.store = ProfileStore(paths, windows_names=False)
 
     superpaper.reload_profiles()
 
@@ -415,7 +419,7 @@ def test_saved_general_settings_apply_from_now_on(tmp_path, use_hotkeys, registe
     # Hotkeys turned off apply after a restart; nothing new is bound meanwhile.
     assert superpaper.hotkeys.register_general.called is registered
     assert superpaper.settings == saved
-    assert read_settings(superpaper.settings_path, "linux") == saved
+    assert read_settings(superpaper.settings_path, hotkeys_by_default=True) == saved
     assert shown == [("Logging is enabled after an application restart.", "Info")]
 
 
@@ -444,7 +448,7 @@ def test_a_dialog_setting_is_written_and_kept_for_the_next_window(tmp_path):
 
     expected = Settings(browse_default_dir="/pictures", show_help=False)
     assert superpaper.settings == expected
-    assert read_settings(superpaper.settings_path, "linux") == expected
+    assert read_settings(superpaper.settings_path, hotkeys_by_default=True) == expected
 
 
 def test_hotkeys_are_bound_at_start_when_they_are_on(monkeypatch):

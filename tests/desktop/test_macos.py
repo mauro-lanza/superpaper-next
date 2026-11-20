@@ -85,3 +85,22 @@ def test_macos_satisfies_the_desktop_interface(appkit):
     from superpaper.desktop import macos
 
     assert_satisfies_desktop(macos)
+
+
+def test_macos_keeps_its_files_in_the_library(appkit, tmp_path):
+    appkit(screens=[0])
+    from superpaper.desktop import macos
+
+    config, cache = macos.default_dirs({"HOME": str(tmp_path / "home")}, tmp_path / "app")
+
+    assert config == tmp_path / "home" / "Library" / "Application Support" / "Superpaper"
+    assert cache == tmp_path / "home" / "Library" / "Caches" / "Superpaper"
+
+
+def test_macos_defaults_are_png_renders_without_hotkeys_and_portable_profile_names(appkit):
+    appkit(screens=[0])
+    from superpaper.desktop import macos
+
+    assert macos.render_extension() == "png"
+    assert macos.hotkeys_by_default() is False
+    assert macos.strict_profile_names() is False
