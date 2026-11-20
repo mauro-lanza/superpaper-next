@@ -248,9 +248,9 @@ def _span_desktop(desktop: Desktop, set_command: str) -> None:
         logger.warning("Could not set the desktop to span the displays: %s", result.problem)
 
 
-def _detect_displays(paths: AppPaths) -> Layout:
+def _detect_displays(paths: AppPaths, desktop: Desktop) -> Layout:
     try:
-        return detect_layout(paths.config)
+        return detect_layout(paths.config, desktop)
     except DisplayDetectionError as error:
         message = f"No displays could be detected: {error}"
         raise CliError(message) from error
@@ -264,7 +264,7 @@ def _detect_displays(paths: AppPaths) -> Layout:
 
 def _check_profile_exists(paths: AppPaths, desktop: Desktop, profile_id: ProfileId) -> None:
     ensure_dirs(paths)
-    _detect_displays(paths)  # fail here, with a message, rather than in the tray
+    _detect_displays(paths, desktop)  # fail here, with a message, rather than in the tray
     inventory = profile_store.discover(paths, windows_names=desktop.strict_profile_names())
     if inventory.find(profile_id) is None:
         names = [entry.profile_id.value for entry in inventory.entries]
@@ -283,7 +283,7 @@ def _set_images(request: SetImages, paths: AppPaths, desktop: Desktop) -> int:
     )
     layout = None
     if request.perspective:
-        layout = _detect_displays(paths)
+        layout = _detect_displays(paths, desktop)
         perspectives = layout.perspective_names()
         if request.perspective not in perspectives:
             message = f"Valid perspective profile names are: {perspectives}"
@@ -292,7 +292,7 @@ def _set_images(request: SetImages, paths: AppPaths, desktop: Desktop) -> int:
     if problem:
         raise CliError(problem)
     if layout is None:  # the perspective check above already detected them
-        layout = _detect_displays(paths)
+        layout = _detect_displays(paths, desktop)
     if request.advanced and (hint := layout.size_hint()):
         logger.warning("%s", hint)
     _span_desktop(desktop, set_command)

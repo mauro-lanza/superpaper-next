@@ -4,6 +4,7 @@ from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Protocol
 
+from superpaper.desktop.monitors import Monitor
 from superpaper.desktop.process import Result
 from superpaper.desktop.tray_menu import MenuEntry, TrayHandle
 from superpaper.desktop.wallpaper import ProfileWallpapers, Wallpaper
@@ -73,6 +74,11 @@ class Desktop(Protocol):
     @staticmethod
     def open_folder(folder: Path) -> Result:
         """Show ``folder`` in the desktop's file manager."""
+        ...
+
+    @staticmethod
+    def detect_monitors() -> list[Monitor]:
+        """The connected monitors, in pixels from the desktop's top-left corner, in any order; only on the main thread."""
         ...
 
     @staticmethod

@@ -36,7 +36,7 @@ class Detection:
         self.config_dirs = []
         self.error = None
 
-    def __call__(self, config_dir):
+    def __call__(self, config_dir, desktop):
         self.config_dirs.append(config_dir)
         if self.error is not None:
             raise self.error

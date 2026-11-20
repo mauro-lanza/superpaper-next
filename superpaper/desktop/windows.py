@@ -11,6 +11,7 @@ import pythoncom  # ty:ignore[unresolved-import]
 import win32gui  # ty:ignore[unresolved-import]
 from win32com.shell import shell, shellcon  # ty:ignore[unresolved-import]
 
+from superpaper.desktop.monitors import detect_monitors as detect_monitors
 from superpaper.desktop.process import Result
 from superpaper.desktop.process import run_hook as run_hook
 from superpaper.desktop.tray_menu import MenuEntry, TrayHandle

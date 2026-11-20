@@ -27,6 +27,7 @@ class FakeDesktop:
         self.profiles: ProfileWallpapers | None = None
         self.hooks: list[tuple[Path, str, list[str]]] = []
         self.opened: list[Path] = []
+        self.monitors: list = []
 
     def init_main_loop(self) -> None:
         self.main_loops_initialised += 1
@@ -77,6 +78,9 @@ class FakeDesktop:
     def open_folder(self, folder: Path) -> Result:
         self.opened.append(folder)
         return self.folder_answer
+
+    def detect_monitors(self) -> list:
+        return self.monitors
 
     def default_dirs(self, environ: Mapping[str, str], install: Path) -> tuple[Path, Path]:
         return install / "config", install / "cache"

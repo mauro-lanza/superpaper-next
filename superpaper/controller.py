@@ -64,7 +64,7 @@ class Superpaper:
         self.session = Session(
             paths,
             desktop,
-            display_detection.detect_layout(paths.config),
+            display_detection.detect_layout(paths.config, desktop),
             on_change=self._report_change,
             set_command=lambda: self.settings.set_command,
         )
@@ -202,7 +202,7 @@ class Superpaper:
         see display_detection.detect_displays.
         """
         try:
-            layout = display_detection.detect_layout(self.paths.config)
+            layout = display_detection.detect_layout(self.paths.config, self.desktop)
         except (display_detection.DisplayDetectionError, OSError, ValueError, configparser.Error) as error:
             logger.warning("Keeping the previous display layout: %s", error)
             return

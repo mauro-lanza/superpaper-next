@@ -17,6 +17,7 @@ import pytest
 from superpaper.geometry import display_detection
 from superpaper.geometry.perspective import Perspective, Swivel, SwivelAxis, Tilt
 from tests.conftest import monitor
+from tests.desktop.fake import FakeDesktop
 
 DUAL_MONITORS = [
     monitor(0, 0, 2560, 1440, 597, 336, "DP-1"),
@@ -82,8 +83,9 @@ def saved_layouts(tmp_path):
 
 
 def detect(monkeypatch, config_dir, monitors):
-    monkeypatch.setattr(display_detection, "get_monitors", lambda: monitors)
-    return display_detection.detect_layout(config_dir)
+    desktop = FakeDesktop()
+    desktop.monitors = monitors
+    return display_detection.detect_layout(config_dir, desktop)
 
 
 def edit_the_layout(layout):

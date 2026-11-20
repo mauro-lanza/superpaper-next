@@ -6,8 +6,8 @@ import time
 from dataclasses import replace
 from pathlib import Path
 
-from screeninfo import Monitor, get_monitors
-
+from superpaper.desktop.backend import Desktop
+from superpaper.desktop.monitors import Monitor
 from superpaper.geometry import display_store
 from superpaper.geometry.displays import Display, Layout
 
@@ -27,20 +27,19 @@ class DisplayDetectionError(RuntimeError):
         super().__init__(f"Unable to detect any displays after {attempts} attempts.")
 
 
-def detect_layout(config_dir: Path) -> Layout:
+def detect_layout(config_dir: Path, desktop: Desktop) -> Layout:
     """Detect the displays and load the layout saved for them from ``config_dir``."""
-    return display_store.load(config_dir, detect_displays())
+    return display_store.load(config_dir, detect_displays(desktop))
 
 
-def detect_displays() -> tuple[Display, ...]:
+def detect_displays(desktop: Desktop) -> tuple[Display, ...]:
     """
     Detect the displays, sorted by their position on the desktop. Offsets are sanitized so
     that they are always non-negative.
 
-    Only on the main thread: on Linux, screeninfo detects displays with libXrandr, which
+    Only on the main thread: on Linux, the monitors are queried with libXrandr, which
     corrupts memory when two threads use it at once, and GTK uses it on the main thread.
     """
-    # https://github.com/rr-/screeninfo
     if threading.current_thread() is not threading.main_thread():
         message = "Displays can only be detected on the main thread."
         raise RuntimeError(message)
@@ -49,7 +48,7 @@ def detect_displays() -> tuple[Display, ...]:
     last_error = None
     for attempt in range(1, MAX_ATTEMPTS + 1):
         try:
-            monitors = get_monitors()
+            monitors = desktop.detect_monitors()
         except Exception as error:
             last_error = error
             logger.warning("Display detection attempt %d/%d failed: %s", attempt, MAX_ATTEMPTS, error)

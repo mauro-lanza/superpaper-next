@@ -16,19 +16,19 @@ from tests.geometry.conftest import (
 )
 
 
-def test_display_detection_retries_empty_results(monkeypatch):
+def test_display_detection_retries_empty_results(monkeypatch, desktop):
     results = iter([[], [], [monitor(0, 0, 1920, 1080)]])
     sleeps = []
-    monkeypatch.setattr(display_detection, "get_monitors", lambda: next(results))
+    desktop.detect_monitors = lambda: next(results)
     monkeypatch.setattr(display_detection.time, "sleep", sleeps.append)
 
-    detected = display_detection.detect_displays()
+    detected = display_detection.detect_displays(desktop)
 
     assert [display.resolution for display in detected] == [(1920, 1080)]
     assert sleeps == [display_detection.RETRY_DELAY_SECONDS] * 2
 
 
-def test_display_detection_retries_exceptions(monkeypatch):
+def test_display_detection_retries_exceptions(monkeypatch, desktop):
     error = RuntimeError("backend unavailable")
     results = iter([error, [monitor(0, 0, 1920, 1080)]])
 
@@ -38,27 +38,26 @@ def test_display_detection_retries_exceptions(monkeypatch):
             raise result
         return result
 
-    monkeypatch.setattr(display_detection, "get_monitors", get_result)
+    desktop.detect_monitors = get_result
     monkeypatch.setattr(display_detection.time, "sleep", lambda _delay: None)
 
-    assert len(display_detection.detect_displays()) == 1
+    assert len(display_detection.detect_displays(desktop)) == 1
 
 
-def test_a_layout_needs_at_least_one_display(monkeypatch, tmp_path):
-    monkeypatch.setattr(display_detection, "get_monitors", list)
+def test_a_layout_needs_at_least_one_display(monkeypatch, tmp_path, desktop):
     monkeypatch.setattr(display_detection.time, "sleep", lambda _delay: None)
 
     with pytest.raises(display_detection.DisplayDetectionError):
-        display_detection.detect_layout(tmp_path)
+        display_detection.detect_layout(tmp_path, desktop)
 
 
-def test_an_unreadable_saved_layout_is_an_error(monkeypatch, tmp_path):
-    monkeypatch.setattr(display_detection, "get_monitors", lambda: [monitor(0, 0, 2560, 1440)])
+def test_an_unreadable_saved_layout_is_an_error(monkeypatch, tmp_path, desktop):
+    desktop.monitors = [monitor(0, 0, 2560, 1440)]
     monkeypatch.setattr(display_detection.time, "sleep", lambda _delay: None)
     (tmp_path / "display_systems.dat").write_text("not a layout\n", encoding="utf-8")
 
     with pytest.raises(configparser.Error):
-        display_detection.detect_layout(tmp_path)
+        display_detection.detect_layout(tmp_path, desktop)
 
 
 def test_negative_saved_bezels_are_ignored(display_layout, tmp_path, caplog):
@@ -80,14 +79,14 @@ def test_negative_saved_bezels_are_ignored(display_layout, tmp_path, caplog):
     assert "Ignoring the saved bezels" in caplog.text
 
 
-def test_displays_are_detected_only_on_the_main_thread(monkeypatch):
-    # libXrandr, behind screeninfo, corrupts memory when two threads use it at once.
-    monkeypatch.setattr(display_detection, "get_monitors", lambda: pytest.fail("detected off the main thread"))
+def test_displays_are_detected_only_on_the_main_thread(desktop):
+    # libXrandr corrupts memory when two threads use it at once.
+    desktop.detect_monitors = lambda: pytest.fail("detected off the main thread")
     errors = []
 
     def detect():
         try:
-            display_detection.detect_displays()
+            display_detection.detect_displays(desktop)
         except RuntimeError as error:
             errors.append(str(error))
 

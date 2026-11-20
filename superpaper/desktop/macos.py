@@ -8,6 +8,7 @@ from typing import Any
 from AppKit import NSScreen, NSWorkspace  # ty:ignore[unresolved-import]
 from Foundation import NSURL  # ty:ignore[unresolved-import]
 
+from superpaper.desktop.monitors import Monitor
 from superpaper.desktop.process import Result, run
 from superpaper.desktop.process import run_hook as run_hook
 from superpaper.desktop.tray_menu import MenuEntry, TrayHandle
@@ -87,28 +88,74 @@ def open_folder(folder: Path) -> Result:
     return run(["open", os.fspath(folder)])
 
 
+def detect_monitors() -> list[Monitor]:
+    """The screens in pixels from the top-left corner of the primary screen."""
+    return [monitor for monitor, _screen in _screens()]
+
+
+def _screens() -> list[tuple[Monitor, Any]]:
+    """Each screen with its monitor, sorted by position: the one order of detection and wallpaper pieces.
+
+    Cocoa's origin is the primary screen's bottom-left, so ``top = primary height - (y + height)``
+    in points. Points become pixels at the primary screen's scale, so offsets stay consistent on mixed
+    scales; each size uses its own screen's scale.
+    """
+    screens = list(NSScreen.screens())
+    if not screens:
+        return []
+    primary_height = _frame(screens[0]).size.height
+    primary_scale = screens[0].backingScaleFactor()
+    found = []
+    for screen in screens:
+        frame = _frame(screen)
+        scale = screen.backingScaleFactor()
+        top = primary_height - (frame.origin.y + frame.size.height)
+        width_mm, height_mm = _size_in_mm(screen)
+        monitor = Monitor(
+            name=screen.localizedName(),
+            x=round(frame.origin.x * primary_scale),
+            y=round(top * primary_scale),
+            width=round(frame.size.width * scale),
+            height=round(frame.size.height * scale),
+            width_mm=width_mm,
+            height_mm=height_mm,
+        )
+        found.append((monitor, screen))
+    found.sort(key=lambda pair: (pair[0].x, pair[0].y))
+    return found
+
+
+def _frame(screen: Any) -> Any:
+    frame = screen.frame
+    return frame() if callable(frame) else frame
+
+
+def _size_in_mm(screen: Any) -> tuple[int, int] | tuple[None, None]:
+    """The screen's physical size, or unknown without pyobjc-framework-Quartz."""
+    try:
+        from Quartz import CGDisplayScreenSize  # ty:ignore[unresolved-import]
+    except ImportError:
+        return None, None
+    size = CGDisplayScreenSize(screen.deviceDescription()["NSScreenNumber"])
+    return round(size.width), round(size.height)
+
+
 def set_wallpaper(wallpaper: Wallpaper, *, set_command: str, profiles: ProfileWallpapers) -> Result:
     """Show the pieces of ``wallpaper``, one image per screen, in Superpaper's display order.
 
     Each screen has its own desktop picture. NSScreen doesn't list the screens in any
-    particular order, so they are sorted by position first.
+    particular order, so they are sorted by position first (see ``_screens``).
     https://developer.apple.com/documentation/appkit/nsscreen/1388393-screens
     https://developer.apple.com/documentation/appkit/nsworkspace/1527228-setdesktopimageurl
     """
     if not isinstance(wallpaper, Pieces):
         return Result("macOS needs the wallpaper cut into one image per screen.")
-    screens = []
-    for screen in NSScreen.screens():
-        frame: Any = screen.frame
-        if callable(frame):
-            frame = frame()
-        screens.append(((int(frame.origin.x), int(frame.origin.y)), screen))
-    screens.sort(key=lambda pair: pair[0])
+    screens = [screen for _monitor, screen in _screens()]
     if len(screens) != len(wallpaper.pieces):
         return Result(f"There are {len(screens)} screens but {len(wallpaper.pieces)} wallpaper pieces.")
     workspace = NSWorkspace.sharedWorkspace()
     problems = []
-    for (_origin, screen), piece in zip(screens, wallpaper.pieces, strict=True):
+    for screen, piece in zip(screens, wallpaper.pieces, strict=True):
         url = NSURL.fileURLWithPath_(piece)
         _done, error = workspace.setDesktopImageURL_forScreen_options_error_(url, screen, {}, None)
         if error:
