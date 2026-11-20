@@ -49,8 +49,13 @@ def save_profile(
     store: ProfileStore,
     session: Session,
     rebind_hotkey: RebindHotkey,
+    applied: Sequence[str] | None,
 ) -> Saved | Problems:
-    """Save the profile ``form`` describes, over ``loaded`` or as a new one, if it is valid."""
+    """Save the profile ``form`` describes, over ``loaded`` or as a new one, if it is valid.
+
+    ``applied`` are the images on screen from applying exactly this form, or None. Unless
+    the profile runs already, it then becomes the running one, showing those images.
+    """
     profile, problems = parse_form(form)
     logger.info("Saving profile: %s", profile)
     current_profile_id = loaded.profile_id if loaded is not None else None
@@ -63,11 +68,16 @@ def save_profile(
     if problems:
         logger.info("The profile was not saved: %s", problems)
         return Problems(tuple(problems))
+    running = session.running
+    activate = applied is not None and (running is None or running.profile_id != current_profile_id)
     try:
         # Saving loads the profiles again: once, here.
         stored = store.save(
             profile,
-            selected=chosen_images(profile, focused_path, loaded),
+            # Pinned, so that running the profile keeps the applied images on screen.
+            selected=list(applied)
+            if activate and applied is not None
+            else chosen_images(profile, focused_path, loaded),
             current=loaded,
             update_active=session.renames_running(current_profile_id, profile.name),
         )
@@ -79,6 +89,8 @@ def save_profile(
         # slideshow delay take effect at once. Before the running profile is looked up
         # below, which would otherwise find its old name gone.
         session.update(current_profile_id, stored)
+    if activate:
+        session.activate(stored)
     carry_on_running(store, session)
     # Its hotkey follows it, also to a new name.
     rebind_hotkey(loaded, stored)

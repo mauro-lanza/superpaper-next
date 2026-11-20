@@ -127,6 +127,7 @@ class WallpaperSettingsPanel(wx.Panel):
         # Revert enable only when the fields differ. ``_loading`` suppresses tracking while
         # fields are populated programmatically.
         self._clean_serial = None
+        self._applied = None
         self._loading = False
         # This is staged dialog state. Do not publish it until Apply/Save; live
         # field edits must not alter the layout used by background jobs. A Layout
@@ -659,8 +660,16 @@ class WallpaperSettingsPanel(wx.Panel):
     def _set_clean_baseline(self):
         """Record the current field state as the saved/clean baseline."""
         self._clean_serial = self._current_serial()
+        self._applied = None
         self.button_save.Enable(False)
         self.button_revert.Enable(False)
+
+    def _applied_images(self):
+        """The images on screen from applying exactly the current fields, or None: any edit
+        after Apply, or an align test or perspective test, means the screen no longer matches."""
+        if self._applied is not None and self._applied[0] == self._current_serial():
+            return self._applied[1]
+        return None
 
     def _update_dirty_state(self):
         """Enable/disable Save and Revert based on unsaved profile changes."""
@@ -1019,6 +1028,13 @@ class WallpaperSettingsPanel(wx.Panel):
             self._show_problems(draft)
             return
         wx.BeginBusyCursor()
+        serial = self._current_serial()
+
+        def shown(problem):
+            if problem is None:
+                self._applied = (serial, draft.images)
+            draft_shown(problem)
+
         # The staged layout, so unsaved display settings — bezels, sizes, positions — are
         # reflected; it is a value, so the worker thread renders exactly what is staged now.
         show_draft(
@@ -1027,7 +1043,7 @@ class WallpaperSettingsPanel(wx.Panel):
             layout=self.staged.layout,
             session=self.session,
             post=wx.CallAfter,
-            on_shown=draft_shown,
+            on_shown=shown,
         )
 
     def _show_problems(self, problems: Problems):
@@ -1053,6 +1069,7 @@ class WallpaperSettingsPanel(wx.Panel):
                 store=self.store,
                 session=self.session,
                 rebind_hotkey=self._rebind_hotkey,
+                applied=self._applied_images(),
             )
             if isinstance(result, Problems):
                 self._show_problems(result)
@@ -1126,7 +1143,12 @@ class WallpaperSettingsPanel(wx.Panel):
         # With the saved display settings, detected again before the draft is rendered.
         self.refresh_displays()
         profile = align_test_profile(testimage[0], perspective, offsets)
+        self._applied = None
         self.session.apply_draft(profile, testimage, on_done=lambda problem: wx.CallAfter(draft_shown, problem))
+
+    def _show_test_profile(self, profile, images):
+        self._applied = None
+        self.session.apply_draft(profile, images, on_done=lambda problem: wx.CallAfter(draft_shown, problem))
 
     def onPerspectives(self, event):
         """Open perspective configuration dialog."""
@@ -1145,9 +1167,7 @@ class WallpaperSettingsPanel(wx.Panel):
             browse_default_dir=self.settings.browse_default_dir,
             adopt_perspectives=self.adopt_perspectives,
             refresh_displays=self.refresh_displays,
-            show_test_profile=lambda profile, images: self.session.apply_draft(
-                profile, images, on_done=lambda problem: wx.CallAfter(draft_shown, problem)
-            ),
+            show_test_profile=self._show_test_profile,
         )
         dlg.ShowModal()
         dlg.Destroy()

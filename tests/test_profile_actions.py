@@ -27,6 +27,11 @@ class FakeSession:
         self.running = None
         self.updates = []
         self.drafts = []
+        self.activated = []
+
+    def activate(self, stored):
+        self.activated.append(stored)
+        self.running = stored
 
     def renames_running(self, profile_id, new_name):
         return self.running is not None and profile_id == self.running.profile_id and new_name != profile_id.value
@@ -60,7 +65,7 @@ def session(store):
     return FakeSession(store)
 
 
-def save(store, session, form, *, loaded=None, focused_path=None, rebinds=None):
+def save(store, session, form, *, loaded=None, focused_path=None, rebinds=None, applied=None):
     return save_profile(
         form,
         focused_path=focused_path,
@@ -68,6 +73,7 @@ def save(store, session, form, *, loaded=None, focused_path=None, rebinds=None):
         store=store,
         session=session,
         rebind_hotkey=lambda before, after: rebinds.append((before, after)) if rebinds is not None else None,
+        applied=applied,
     )
 
 
@@ -118,6 +124,34 @@ def test_saving_chooses_the_focused_file_else_the_loaded_selection(store, sessio
         store, session, blank(zoom_pct=120, sources=(("", str(images)),)), loaded=first.stored, focused_path=focused
     )
     assert second.stored.selection.images == [focused]
+
+
+def test_saving_what_was_applied_runs_the_new_profile_showing_the_applied_image(store, session, images):
+    example = save(store, session, blank(name="Example", sources=(("", str(images)),))).stored
+    session.running = example
+    applied = [str(images / "b.png")]
+    result = save(store, session, blank(sources=(("", str(images)),)), applied=applied)
+    assert session.activated == [result.stored]
+    assert session.running is result.stored
+    assert result.stored.selection.images == applied
+
+
+def test_saving_without_applying_leaves_the_running_profile_alone(store, session, images):
+    example = save(store, session, blank(name="Example", sources=(("", str(images)),))).stored
+    session.running = example
+    save(store, session, blank(sources=(("", str(images)),)))
+    assert session.activated == []
+    assert session.running is example
+
+
+def test_saving_the_running_profile_after_applying_only_updates_it(store, session, images):
+    first = save(store, session, blank(sources=(("", str(images)),))).stored
+    session.running = first
+    second = save(
+        store, session, blank(zoom_pct=120, sources=(("", str(images)),)), loaded=first, applied=[str(images / "b.png")]
+    )
+    assert session.activated == []
+    assert session.updates[0] == (first.profile_id, second.stored)
 
 
 def test_reverting_loads_the_file_again_and_carries_the_running_profile_on(store, session, images, app_paths):

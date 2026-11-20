@@ -5,7 +5,7 @@ import pytest
 
 from superpaper.profiles.form import spangroups_of
 from superpaper.profiles.profile_id import ProfileId
-from superpaper.profiles.profile_store import ProfileStore
+from superpaper.profiles.profile_store import ProfileStore, read_active_profile_id
 
 
 def slideshow_armed(superpaper):
@@ -30,6 +30,35 @@ def test_the_editor_has_one_offset_group_and_diagonal_field_per_display(running_
     counts = (len(editor.tc_list_offsets), len(editor.ch_list_spangroups), len(editor.display_band.tc_list_diaginch))
     assert displays == 2
     assert counts == (displays,) * 3
+
+
+def test_a_new_profile_applied_then_saved_is_the_one_the_editor_reopens_on(gui_env, running_work, editor):
+    editor.onCreateNewProfile(None)
+    editor.tc_name.ChangeValue("Office")
+    editor.populate_lc_browse([[str(gui_env.images)]])
+    editor.onApply(None)
+    gui_env.settle(running_work)
+    editor.onSave(None)
+    gui_env.settle(running_work)
+    assert running_work.session.running.profile.name == "Office"
+    assert read_active_profile_id(gui_env.paths.cache, windows_names=False) == ProfileId.parse(
+        "Office", windows_names=False
+    )
+
+    editor.onClose(None)
+    reopened = gui_env.open_editor(running_work)
+    choice = reopened.choice_profiles
+    assert choice.GetString(choice.GetSelection()) == "Office"
+    assert reopened.loaded_profile.profile.name == "Office"
+
+
+def test_a_new_profile_saved_without_applying_leaves_the_running_profile(gui_env, running_work, editor):
+    editor.onCreateNewProfile(None)
+    editor.tc_name.ChangeValue("Office")
+    editor.populate_lc_browse([[str(gui_env.images)]])
+    editor.onSave(None)
+    gui_env.settle(running_work)
+    assert running_work.session.running.profile.name == "Work"
 
 
 def test_apply_renders_a_draft_and_leaves_the_running_render_alone(gui_env, running_work, editor):
