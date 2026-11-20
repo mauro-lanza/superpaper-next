@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Literal, assert_never
 
 import superpaper.desktop.linux.kde as kde
+from superpaper.desktop.linux.gdk_displays import watch_displays as watch_displays
 from superpaper.desktop.monitors import detect_monitors as detect_monitors
 from superpaper.desktop.process import QUICK, Result, run
 from superpaper.desktop.process import run_hook as run_hook

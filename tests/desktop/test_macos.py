@@ -103,6 +103,22 @@ def test_macos_satisfies_the_desktop_interface(appkit):
     assert_satisfies_desktop(macos)
 
 
+def test_macos_watches_screen_parameter_changes_and_keeps_the_block(appkit, notification_center):
+    appkit(screens=[(0, 0, 1920, 1080)])
+    from superpaper.desktop import macos
+
+    changes = []
+    assert macos.watch_displays(lambda: changes.append("changed")) is True
+
+    ((name, sender, queue, block),) = notification_center.observers
+    assert (name, sender, queue) == ("screen parameters changed", None, None)
+    assert macos._screen_block is block
+    assert macos._screen_observer is not None
+    notification_center.post("screen parameters changed")
+    notification_center.post("another notification")
+    assert changes == ["changed"]
+
+
 def test_macos_keeps_its_files_in_the_library(appkit, tmp_path):
     appkit(screens=[(0, 0, 1920, 1080)])
     from superpaper.desktop import macos

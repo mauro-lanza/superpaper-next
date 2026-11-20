@@ -10,6 +10,7 @@ from typing import Protocol
 import superpaper.geometry.display_detection as display_detection
 from superpaper.desktop.backend import Desktop
 from superpaper.desktop.hotkeys import Hotkeys
+from superpaper.geometry.displays import Layout
 from superpaper.paths import AppPaths
 from superpaper.profile_actions import carry_on_running
 from superpaper.profiles import profile_store
@@ -45,6 +46,9 @@ class Shell:
     make_tray: Callable[[Superpaper], Tray]
     close: Callable[[], None]
     settle_unsaved_changes: Callable[[], bool]  # False: the user kept the editor's unsaved changes open
+    # Call the action, on the UI thread, once the OS reports a display change and it has
+    # settled; returns whether the OS reports them.
+    watch_displays: Callable[[Callable[[], None]], bool]
 
 
 class Superpaper:
@@ -64,7 +68,11 @@ class Superpaper:
         # The profile last loaded or saved in the editor, for it to open on when nothing runs.
         self.last_edited: ProfileId | None = None
         self._profile_watchers: list[Callable[[], None]] = []
+        self._layout_watchers: list[Callable[[Layout], None]] = []
         loaded = display_detection.detect_layout_or_default(paths.config, desktop)
+        # The layout the session was last given: its own is only up to date once its worker has
+        # handled the request.
+        self._layout = loaded.layout
         self._reported_layout_problem: str | None = None
         self._report_layout_problem(loaded.problem)
         self.session = Session(
@@ -84,6 +92,8 @@ class Superpaper:
             render_cache.sweep(paths.cache, [profile_id.value for profile_id in kept])
         self._run_at_startup(startup_profile)
         self.hotkeys = self._start_hotkeys()
+        # Without notifications, the displays are detected again on manual Next instead.
+        self._watching_displays = shell.watch_displays(self.refresh_displays)
         self.tray = shell.make_tray(self)
         self._show_at_start()
 
@@ -137,7 +147,7 @@ class Superpaper:
             return None
         try:
             hotkeys = Hotkeys(
-                next_wallpaper=self.session.next,
+                next_wallpaper=self.next_wallpaper,
                 pause=self.session.toggle_pause,
                 start_profile=self.start_profile_by_id,
                 call_soon=self._shell.call_soon,
@@ -173,7 +183,8 @@ class Superpaper:
             self._shell.call_soon(lambda: self._shell.notify(size_hint, "Info"))
 
     def open_editor(self) -> None:
-        """Open the wallpaper configuration."""
+        """Open the wallpaper configuration, on the displays as they are now."""
+        self.refresh_displays()
         try:
             self._shell.open_editor(self)
         except Exception as error:
@@ -188,6 +199,13 @@ class Superpaper:
         already, only unpause it and restart its countdown."""
         self.refresh_displays()
         self.session.activate(stored)
+
+    def next_wallpaper(self) -> None:
+        """Show the running profile's next image; the displays are detected again first only
+        where the OS doesn't report their changes."""
+        if not self._watching_displays:
+            self.refresh_displays()
+        self.session.next()
 
     def start_profile_by_id(self, profile_id: ProfileId) -> None:
         """Start the profile currently loaded under ``profile_id``, if it still exists."""
@@ -217,11 +235,23 @@ class Superpaper:
             if self._shell.confirm(message):
                 profile_store.delete_malformed(diagnostic)
 
+    def watch_layout(self, watcher: Callable[[Layout], None]) -> Callable[[], None]:
+        """Call ``watcher(layout)``, on the UI thread, after every detection with the layout in
+        use; returns the function that stops that."""
+        self._layout_watchers.append(watcher)
+        return lambda: self._layout_watchers.remove(watcher)
+
+    @property
+    def layout(self) -> Layout:
+        """The layout later wallpaper changes use."""
+        return self._layout
+
     def refresh_displays(self, *, redraw: bool = False) -> None:
         """Detect the displays again and load their saved layout; later wallpaper changes
         use it, and with ``redraw`` the running profile's current image is shown again with
-        it at once. If detection fails, the previous layout stays in use. A saved layout that
-        can't be used is replaced by the default arrangement, and the user told once.
+        it at once. A layout that is in use already isn't handed to the session again. If
+        detection fails, the previous layout stays in use. A saved layout that can't be used
+        is replaced by the default arrangement, and the user told once.
 
         Displays are detected here, on the main thread, never by the session's worker:
         see display_detection.detect_displays.
@@ -232,9 +262,20 @@ class Superpaper:
             logger.warning("Keeping the previous display layout: %s", error)
             return
         self._report_layout_problem(loaded.problem)
-        self.session.use_displays(loaded.layout)
+        if loaded.layout != self._layout:
+            self._layout = loaded.layout
+            self.session.use_displays(loaded.layout)
+        if self._layout_watchers:
+            # Every re-detect point tells the editors, so one that declined new displays is asked
+            # again; later, so that an editor asking for the refresh isn't replaced under its own handler.
+            layout = self._layout
+            self._shell.call_soon(lambda: self._notify_layout_watchers(layout))
         if redraw:
             self.session.redraw()
+
+    def _notify_layout_watchers(self, layout: Layout) -> None:
+        for watcher in list(self._layout_watchers):
+            watcher(layout)
 
     def _report_layout_problem(self, problem: str | None) -> None:
         """Tell the user why the saved layout isn't used, unless they were told already."""

@@ -39,8 +39,30 @@ def fake_screen(number, x, y, width, height, scale=1.0):
     )
 
 
+class FakeNotificationCenter:
+    """Foundation's NSNotificationCenter: keeps the blocks added to it, which tests post to."""
+
+    def __init__(self):
+        self.observers = []
+
+    def addObserverForName_object_queue_usingBlock_(self, name, sender, queue, block):
+        observer = object()
+        self.observers.append((name, sender, queue, block))
+        return observer
+
+    def post(self, name):
+        for observed, _sender, _queue, block in self.observers:
+            if observed == name:
+                block(SimpleNamespace(name=name))
+
+
 @pytest.fixture
-def appkit(monkeypatch):
+def notification_center():
+    return FakeNotificationCenter()
+
+
+@pytest.fixture
+def appkit(monkeypatch, notification_center):
     """AppKit, as ``install(screens)`` gives it, with screens as (x, y, width, height[, scale]) in points.
 
     The first screen is the primary one. ``install`` returns what was set where, as
@@ -59,8 +81,10 @@ def appkit(monkeypatch):
             screens=lambda: [fake_screen(number, *screen) for number, screen in enumerate(screens, start=1)]
         )
         appkit_module.NSWorkspace = SimpleNamespace(sharedWorkspace=lambda: workspace)
+        appkit_module.NSApplicationDidChangeScreenParametersNotification = "screen parameters changed"
         foundation = ModuleType("Foundation")
         foundation.NSURL = SimpleNamespace(fileURLWithPath_=lambda path: path)
+        foundation.NSNotificationCenter = SimpleNamespace(defaultCenter=lambda: notification_center)
         monkeypatch.setitem(sys.modules, "AppKit", appkit_module)
         monkeypatch.setitem(sys.modules, "Foundation", foundation)
         monkeypatch.setitem(sys.modules, "Quartz", None)

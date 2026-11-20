@@ -21,6 +21,33 @@ from superpaper.ui.tray import TaskBarIcon
 
 logger = logging.getLogger(__name__)
 
+DISPLAY_CHANGE_DEBOUNCE_MS = 500
+
+
+def _watch_displays(frame: wx.Frame, desktop: Desktop, refresh: Callable[[], None]) -> bool:
+    """Call ``refresh()`` once the displays stopped changing for a moment, as the OS
+    reports them; returns whether it does. One change comes as a burst of notifications,
+    possibly from another thread."""
+    timer: wx.CallLater | None = None
+
+    def restart() -> None:
+        nonlocal timer
+        if timer is None:
+            timer = wx.CallLater(DISPLAY_CHANGE_DEBOUNCE_MS, refresh)
+        else:
+            timer.Start(DISPLAY_CHANGE_DEBOUNCE_MS)
+
+    def stop(event: wx.WindowDestroyEvent) -> None:
+        event.Skip()
+        # Child windows send this too.
+        if event.GetEventObject() is frame and timer is not None:
+            timer.Stop()
+
+    frame.Bind(wx.EVT_WINDOW_DESTROY, stop)
+    # wxMSW sends this to top-level windows on WM_DISPLAYCHANGE; other ports never do.
+    frame.Bind(wx.EVT_DISPLAY_CHANGED, lambda event: restart())
+    return desktop.watch_displays(lambda: wx.CallAfter(restart))
+
 
 def run(paths: AppPaths, settings: Settings, desktop: Desktop, profile: ProfileId | None = None):
     """Run the tray application until it is quit; ``profile`` is run at once, if given."""
@@ -91,6 +118,7 @@ def start_superpaper(
         make_tray=_make_tray,
         close=close,
         settle_unsaved_changes=lambda: _settle_editor(open_frames),
+        watch_displays=lambda refresh: _watch_displays(frame, desktop, refresh),
     )
     return Superpaper(shell, paths, desktop, settings, startup_profile)
 
@@ -117,6 +145,8 @@ def _open_editor(app: Superpaper, open_frames: dict[str, wx.Frame]) -> None:
             app.session,
             update_settings=app.update_settings,
             refresh_displays=app.refresh_displays,
+            watch_layout=app.watch_layout,
+            layout=app.layout,
             rebind_hotkey=app.rebind_hotkey,
             last_edited=lambda: app.last_edited,
             remember_edited=lambda profile_id: setattr(app, "last_edited", profile_id),
@@ -154,5 +184,6 @@ def _make_tray(app: Superpaper) -> TaskBarIcon:
         open_settings=app.open_settings,
         reload_profiles=app.reload_profiles,
         start_profile=app.start_profile,
+        next_wallpaper=app.next_wallpaper,
         quit=app.quit,
     )

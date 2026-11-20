@@ -92,6 +92,25 @@ class GuiEnv:
         self.apply_prompts = []
         self.started = []
         self.opened_dialogs = []
+        self.display_watchers = []
+        self.os_notifies = True
+
+    def watch_displays(self, on_change):
+        """Stands in for the OS's display change notifications."""
+        self.display_watchers.append(on_change)
+        return self.os_notifies
+
+    def change_displays(self, monitors, *, notifications=1):
+        """The monitors change, and the OS reports it ``notifications`` times, as a burst."""
+        self.monkeypatch.setattr(linux, "detect_monitors", lambda: monitors)
+        for _ in range(notifications):
+            self.display_watchers[-1]()
+
+    def wait_for_displays(self, superpaper):
+        """Run the event loop past the debounce and what it hands on."""
+        end = time.monotonic() + 0.4
+        self.wait_until(lambda: time.monotonic() > end)
+        self.settle(superpaper)
 
     def ask_unsaved_changes(self, message, parent=None):
         """Stands in for the save/discard/cancel question: records it, answers ``unsaved_answer``."""
@@ -264,6 +283,7 @@ def gui_env(wx_app, app_paths, tmp_path, monkeypatch):
     import superpaper.ui.browse_dialog as browse_dialog
     import superpaper.ui.editor as editor
     import superpaper.ui.help as help_dialog
+    import superpaper.ui.message as message
     import superpaper.ui.perspective_dialog as perspective_dialog
     import superpaper.ui.settings_dialog as settings_dialog
     import superpaper.ui.tray as tray
@@ -274,6 +294,7 @@ def gui_env(wx_app, app_paths, tmp_path, monkeypatch):
         app=app,
         browse_dialog=browse_dialog,
         editor=editor,
+        message=message,
         help=help_dialog,
         hotkeys=hotkeys,
         perspective_dialog=perspective_dialog,
@@ -294,6 +315,8 @@ def gui_env(wx_app, app_paths, tmp_path, monkeypatch):
     env.write_profile("Broken", "name=Broken\ndelay=soon\n")
 
     monkeypatch.setattr(linux, "detect_monitors", lambda: TWO_DISPLAYS)
+    monkeypatch.setattr(linux, "watch_displays", env.watch_displays)
+    monkeypatch.setattr(app, "DISPLAY_CHANGE_DEBOUNCE_MS", 50)
     monkeypatch.setitem(sys.modules, "system_hotkey", SimpleNamespace(SystemHotkey=RecordingSystemHotkey))
     monkeypatch.setattr(sni_tray, "sni_supported", lambda: False)
 
@@ -308,7 +331,8 @@ def gui_env(wx_app, app_paths, tmp_path, monkeypatch):
     def dialog_recorder(source):
         def record_dialog(message, msg_type="Info", parent=None, style="OK"):
             env.dialogs.append((source, msg_type, str(message).splitlines()[0]))
-            return env.answer_yes if style == "YES_NO" else None
+            with ui.message.modal():
+                return env.answer_yes if style == "YES_NO" else None
 
         return record_dialog
 

@@ -28,6 +28,8 @@ class FakeDesktop:
         self.hooks: list[tuple[Path, str, list[str]]] = []
         self.opened: list[Path] = []
         self.monitors: list = []
+        self.watches_displays = True
+        self.display_watchers: list[Callable[[], None]] = []
 
     def init_main_loop(self) -> None:
         self.main_loops_initialised += 1
@@ -81,6 +83,15 @@ class FakeDesktop:
 
     def detect_monitors(self) -> list:
         return self.monitors
+
+    def watch_displays(self, on_change: Callable[[], None]) -> bool:
+        self.display_watchers.append(on_change)
+        return self.watches_displays
+
+    def change_displays(self) -> None:
+        """The OS reports a display change, as often as it would."""
+        for on_change in self.display_watchers:
+            on_change()
 
     def default_dirs(self, environ: Mapping[str, str], install: Path) -> tuple[Path, Path]:
         return install / "config", install / "cache"

@@ -105,6 +105,11 @@ def strict_profile_names() -> bool:
     return True
 
 
+def watch_displays(on_change: Callable[[], None]) -> bool:
+    """Windows reports display changes through wx's EVT_DISPLAY_CHANGED on the top window, so nothing is registered here."""
+    return True
+
+
 def set_spanmode(set_command: str) -> Result:
     """Set Windows to span one image across the displays."""
     # WallpaperStyle 22 is Span; it only applies with TileWallpaper off.

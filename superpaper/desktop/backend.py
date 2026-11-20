@@ -82,6 +82,11 @@ class Desktop(Protocol):
         ...
 
     @staticmethod
+    def watch_displays(on_change: Callable[[], None]) -> bool:
+        """Call ``on_change()`` whenever the OS reports that displays were added, removed, resized or rearranged, on any thread; returns whether the OS does. Without it, the displays are detected again at manual Next."""
+        ...
+
+    @staticmethod
     def default_dirs(environ: Mapping[str, str], install: Path) -> tuple[Path, Path]:
         """Where this OS keeps Superpaper's files unless told otherwise: the config and the cache directory."""
         ...
