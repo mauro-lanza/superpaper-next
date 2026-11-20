@@ -402,9 +402,8 @@ class PerspectiveConfig(wx.Dialog):
             return
         perspective = Named(self.choice_profiles.GetString(self.choice_profiles.GetSelection()))
 
-        # The draft is rendered with the layout onSave just staged.
+        # The test is rendered with the layout onSave just staged.
         profile = align_test_profile(found, perspective, self.typed_offsets)
-        wx.BeginBusyCursor()
         self._show_test_profile(profile, testimage)
 
     def onChooseTestImage(self, event):

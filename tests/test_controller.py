@@ -195,6 +195,14 @@ def test_a_layout_problem_is_reported_again_after_the_layout_was_fine_in_between
     assert len([event for event in superpaper.ui_events if event[0] == "call_soon"]) == 2
 
 
+def test_refreshing_the_displays_can_show_the_running_profile_again_with_them():
+    superpaper = application()
+
+    superpaper.refresh_displays(redraw=True)
+
+    assert superpaper.session.requests == [("use_displays", FRESH), ("redraw",)]
+
+
 def test_a_profile_hotkey_starts_the_currently_loaded_profile():
     current = profile("Work")
     superpaper = application(profiles=[current])

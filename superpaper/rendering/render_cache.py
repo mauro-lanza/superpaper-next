@@ -29,9 +29,11 @@ logger = logging.getLogger(__name__)
 _DRAFTS = "preview"
 """The cache subdirectory of the drafts."""
 
-# <stem>-<turn>[-crop-<display>].<extension>. No file name can be read two ways, because
+# <stem>-<turn>[-crop-<display>].<extension>[.sig]. No file name can be read two ways, because
 # no ending of one of these names is itself one.
-_RENDER_NAME = re.compile(r"(?P<stem>.+)-(?P<turn>[ab])(?:-crop-(?P<piece>[0-9]+))?\.(?:png|jpg)", re.DOTALL)
+_RENDER_NAME = re.compile(
+    r"(?P<stem>.+)-(?P<turn>[ab])(?:-crop-(?P<piece>[0-9]+))?\.(?:png|jpg)(?P<signature>\.sig)?", re.DOTALL
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,6 +52,8 @@ class Rendered:
     pieces: list[Path]
     modified: int
     """When the image was written, in nanoseconds since the epoch."""
+    signature: str | None
+    """What the render was made from, as given to save(); None if it wasn't kept."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,6 +61,7 @@ class _Name:
     stem: str
     turn: str
     piece: int | None
+    signature: bool
 
 
 def slot(cache_dir: Path, profile_id_value: str) -> Slot:
@@ -69,9 +74,9 @@ def draft_slot(cache_dir: Path) -> Slot:
     return Slot(cache_dir / _DRAFTS, "draft")
 
 
-def save(slot: Slot, image: Image.Image, *, extension: str) -> Path:
+def save(slot: Slot, image: Image.Image, *, extension: str, signature: str) -> Path:
     """Write ``image`` as the slot's next render, as a ``jpg`` or ``png`` file, in one step,
-    and return its path.
+    and return its path. ``signature`` is kept beside it, to tell later what it was made from.
 
     The render that isn't the newest is replaced, so the one on screen stays as it is.
     """
@@ -80,6 +85,7 @@ def save(slot: Slot, image: Image.Image, *, extension: str) -> Path:
     path = slot.directory / f"{slot.stem}-{turn}.{extension}"
     slot.directory.mkdir(parents=True, exist_ok=True)
     write_atomically(path, _encode(image, "JPEG" if extension == "jpg" else "PNG"))
+    write_atomically(_signature_path(path), signature.encode())
     return path
 
 
@@ -112,7 +118,7 @@ def latest(slot: Slot) -> Rendered | None:
     renders = _renders(slot)
     images = []
     for path, name in renders:
-        if name.piece is None:
+        if name.piece is None and not name.signature:
             try:
                 images.append((path.stat().st_mtime_ns, path, name.turn))
             except OSError:  # removed meanwhile
@@ -121,7 +127,7 @@ def latest(slot: Slot) -> Rendered | None:
         return None
     modified, image, turn = max(images)
     pieces = sorted((name.piece, path) for path, name in renders if name.turn == turn and name.piece is not None)
-    return Rendered(image, [path for _, path in pieces], modified)
+    return Rendered(image, [path for _, path in pieces], modified, _read_signature(image))
 
 
 def sweep(cache_dir: Path, keep: Iterable[str]) -> None:
@@ -161,7 +167,18 @@ def _parse(filename: str) -> _Name | None:
     if match is None:
         return None
     piece = match["piece"]
-    return _Name(match["stem"], match["turn"], None if piece is None else int(piece))
+    return _Name(match["stem"], match["turn"], None if piece is None else int(piece), match["signature"] is not None)
+
+
+def _signature_path(image: Path) -> Path:
+    return image.with_name(f"{image.name}.sig")
+
+
+def _read_signature(image: Path) -> str | None:
+    try:
+        return _signature_path(image).read_text(encoding="utf-8")
+    except OSError, UnicodeDecodeError:
+        return None
 
 
 def _encode(image: Image.Image, image_format: str) -> bytes:
