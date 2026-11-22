@@ -5,6 +5,7 @@ keep the render (superpaper.rendering.render_cache) and hand it to the desktop
 The command line runs show() directly; the Session's worker runs it for the tray.
 """
 
+import hashlib
 import logging
 from collections.abc import Sequence
 from pathlib import Path
@@ -62,7 +63,9 @@ def show(
             if profile_id is None
             else render_cache.slot(paths.cache, profile_id.value)
         )
-        output = render_cache.save(slot, image, extension=desktop.render_extension())
+        output = render_cache.save(
+            slot, image, extension=desktop.render_extension(), signature=render_signature(layout, files)
+        )
     except OSError as error:
         return _skipped(f"The wallpaper could not be saved: {error}")
     result = set_wallpaper(desktop, output, files, layout=layout, paths=paths, set_command=set_command, running=running)
@@ -138,20 +141,24 @@ def set_wallpaper(
     return result
 
 
-def show_again(stored: StoredProfile, paths: AppPaths, *, desktop: Desktop, layout: Layout, set_command: str) -> bool:
-    """Show the last wallpaper again at startup, without rendering anything.
+def render_signature(layout: Layout, files: Sequence[str]) -> str:
+    """What a render is made from: the display layout and the images, as a stable digest."""
+    return hashlib.sha256(repr((layout, list(files))).encode()).hexdigest()
 
-    That is the last render of the profile ``stored``, or a draft shown after it: the
-    editor's Apply, an align test or the command line. Returns False if the profile has
-    no render to show, so that it can be rendered.
+
+def show_again(stored: StoredProfile, paths: AppPaths, *, desktop: Desktop, layout: Layout, set_command: str) -> bool:
+    """Show the last wallpaper of the profile ``stored`` again at startup, without rendering
+    anything. Returns False unless that render was made for ``layout`` and the profile's
+    current images, so that it can be rendered; drafts shown since are ignored.
     """
     rendered = render_cache.latest(render_cache.slot(paths.cache, stored.profile_id.value))
     if rendered is None:
         logger.info("Profile '%s' has no earlier render to show.", stored.profile.name)
         return False
-    draft = render_cache.latest(render_cache.draft_slot(paths.cache))
-    if draft is not None and draft.modified > rendered.modified:
-        rendered = draft
+    current = stored.selection.current()
+    if not current or rendered.signature != render_signature(layout, current):
+        logger.info("The last render of profile '%s' is not for its current images and displays.", stored.profile.name)
+        return False
     image = str(rendered.image)
     running = stored.profile.name
     if desktop.takes_pieces(set_command) and rendered.pieces:

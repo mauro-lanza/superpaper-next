@@ -37,7 +37,7 @@ class DisplayBand(wx.CollapsiblePane):
     layout in the preview, ``enable_profile_editing(enable)`` locks the profile settings
     while bezels are being set, ``save_layout(layout)`` writes a layout to disk and returns
     a SaveFailed or None, and
-    ``on_saved()`` is called once the layout is saved.
+    ``on_saved(redraw=...)`` is called once the layout is saved.
     """
 
     def __init__(
@@ -257,11 +257,12 @@ class DisplayBand(wx.CollapsiblePane):
             show_message_dialog(layout_edit.REARRANGED_MESSAGE, "Info")
 
     def onSave(self, event):
-        self.save()
+        self.save(redraw=True)
 
-    def save(self):
+    def save(self, *, redraw):
         """Write the staged display-wide settings to disk; tells the user and returns False
-        if a diagonal is invalid or the write fails."""
+        if a diagonal is invalid or the write fails. ``redraw`` says whether the running
+        profile is to be shown again with them."""
         if self._has_invalid_diagonals():
             show_message_dialog(INVALID_DIAGONALS_MESSAGE, "Error")
             return False
@@ -269,7 +270,7 @@ class DisplayBand(wx.CollapsiblePane):
         if failed is not None:
             show_message_dialog(failed.message, "Error")
             return False
-        self._on_saved()
+        self._on_saved(redraw=redraw)
         self.set_baseline()
         return True
 

@@ -44,6 +44,7 @@ MIN_DIAGONAL_INCHES = 1
 MAX_DIAGONAL_INCHES = 1000
 _DIAGONAL = re.compile(r"[0-9]+(?:[.,][0-9]+)?")
 OVERLAP_MESSAGE = "The displays overlap. Move them apart before pressing Done."
+TEST_OVERLAP_MESSAGE = "The displays overlap. Move them apart in Display system settings before running a test."
 REARRANGED_MESSAGE = "The displays could not be kept where they were without overlapping, so they were arranged afresh."
 
 

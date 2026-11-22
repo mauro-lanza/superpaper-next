@@ -548,6 +548,88 @@ def test_a_profile_without_a_complete_selection_is_left_alone(runtime, caplog):
     assert "Wallpaper change skipped: profile 'A' has no complete selection." in caplog.text
 
 
+def test_redrawing_shows_the_current_image_for_the_new_layout_and_leaves_the_countdown_and_pause(runtime):
+    runtime.session.activate(saved("A"))
+    runtime.advance(DELAY / 2)
+    runtime.session.use_displays("layout 1")
+    runtime.session.redraw()
+    runtime.advance(DELAY / 2)
+    runtime.settle()
+
+    assert [(change.image, change.layout) for change in runtime.changes] == [
+        ("A-1.png", "layout 0"),
+        ("A-1.png", "layout 1"),
+        ("A-2.png", "layout 1"),
+    ]
+
+
+def test_redrawing_while_paused_stays_paused(runtime):
+    a = saved("A")
+    runtime.session.activate(a)
+    runtime.session.toggle_pause()
+    runtime.session.redraw()
+    runtime.advance(10 * DELAY)
+    runtime.settle()
+
+    assert runtime.shown == ["A-1.png", "A-1.png"]
+    assert runtime.session.paused is True
+    assert a.selection.number == 1
+
+
+def test_redrawing_with_nothing_running_shows_nothing(runtime):
+    runtime.session.redraw()
+    runtime.settle()
+
+    assert runtime.shown == []
+
+
+def test_a_draft_pauses_the_running_slideshow_so_no_tick_replaces_it(runtime):
+    runtime.session.activate(saved("A"))
+    runtime.session.apply_draft(Profile(name="align test"), ["test.png"])
+    runtime.advance(10 * DELAY)
+    runtime.settle()
+
+    assert runtime.shown == ["A-1.png", "test.png"]
+    assert runtime.session.paused is True
+
+
+@pytest.mark.parametrize(
+    ("leave", "after_a_delay", "paused"),
+    [
+        (lambda session, a: session.toggle_pause(), ["A-1.png", "test.png", "A-2.png"], False),
+        (lambda session, a: session.next(), ["A-1.png", "test.png", "A-2.png"], True),
+        (lambda session, a: session.apply(a, None), ["A-1.png", "test.png", "A-1.png", "A-2.png"], False),
+        (lambda session, a: session.activate(a), ["A-1.png", "test.png", "A-2.png"], False),
+    ],
+    ids=["unpause", "next", "apply", "tray pick"],
+)
+def test_a_test_ends_with_unpause_next_apply_or_a_tray_pick(runtime, leave, after_a_delay, paused):
+    a = saved("A")
+    runtime.session.activate(a)
+    runtime.session.apply_draft(Profile(name="align test"), ["test.png"])
+    leave(runtime.session, a)
+    runtime.advance(DELAY)
+    runtime.settle()
+
+    assert runtime.shown == after_a_delay
+    assert runtime.session.paused is paused
+
+
+def test_a_draft_leaves_a_profile_that_isnt_a_slideshow_unpaused(runtime):
+    runtime.session.activate(saved("A", slideshow=False))
+    runtime.session.apply_draft(Profile(name="align test"), ["test.png"])
+    runtime.settle()
+
+    assert runtime.session.paused is False
+
+
+def test_a_draft_with_nothing_running_pauses_nothing(runtime):
+    runtime.session.apply_draft(Profile(name="align test"), ["test.png"])
+    runtime.settle()
+
+    assert runtime.session.paused is False
+
+
 def test_drafts_are_shown_for_the_layout_given(runtime):
     outcomes = []
     runtime.session.activate(saved("A"))

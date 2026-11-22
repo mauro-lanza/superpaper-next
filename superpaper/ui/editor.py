@@ -230,7 +230,7 @@ class WallpaperSettingsPanel(wx.Panel):
             refresh_preview=self.refresh_layout_preview,
             enable_profile_editing=self.toggle_radio_and_profile_choice,
             save_layout=lambda layout: layout_edit.save_display_settings(paths.config, layout),
-            on_saved=self.refresh_displays,  # the slideshow uses them from now on
+            on_saved=lambda *, redraw: self.refresh_displays(redraw=redraw),
         )
 
         # Add sub-sizers to bottom_half
@@ -1122,7 +1122,9 @@ class WallpaperSettingsPanel(wx.Panel):
             return True
 
         def save():
-            return (not profile_unsaved or self._save_profile()) and (not displays_unsaved or self.display_band.save())
+            return (not profile_unsaved or self._save_profile()) and (
+                not displays_unsaved or self.display_band.save(redraw=True)
+            )
 
         self._settling = True
         try:
@@ -1212,7 +1214,7 @@ class WallpaperSettingsPanel(wx.Panel):
             return True
         match ask_apply_with_unsaved_displays(self.frame, can_save=band.can_save()):
             case ApplyAnswer.SAVE_DISPLAYS:
-                return band.save()
+                return band.save(redraw=False)  # Apply renders once, below
             case ApplyAnswer.USE_SAVED_DISPLAYS:
                 self.refresh_displays()
                 return True
@@ -1316,12 +1318,20 @@ class WallpaperSettingsPanel(wx.Panel):
             return
 
         perspective = self._selected_perspective()
+        self.show_test(align_test_profile(testimage[0], perspective, offsets), testimage)
 
+    def show_test(self, profile, images):
+        """Show a test render of ``images`` with the staged layout, unsaved changes included;
+        the displays overlapping, it is refused and the user told. The running slideshow is
+        paused while it is shown."""
+        layout = self.staged.layout
+        if not layout.is_valid():
+            show_message_dialog(layout_edit.TEST_OVERLAP_MESSAGE, "Error")
+            return
         wx.BeginBusyCursor()
-        # With the saved display settings, detected again before the draft is rendered.
-        self.refresh_displays()
-        profile = align_test_profile(testimage[0], perspective, offsets)
-        self.session.apply_draft(profile, testimage, on_done=lambda problem: wx.CallAfter(draft_shown, problem))
+        self.session.apply_draft(
+            profile, images, layout=layout, on_done=lambda problem: wx.CallAfter(draft_shown, problem)
+        )
 
     def onPerspectives(self, event):
         """Open perspective configuration dialog."""
@@ -1337,9 +1347,7 @@ class WallpaperSettingsPanel(wx.Panel):
             warn_large_img=self.settings.warn_large_img,
             browse_default_dir=self.settings.browse_default_dir,
             stage_perspectives=self.stage_perspectives,
-            show_test_profile=lambda profile, images: self.session.apply_draft(
-                profile, images, layout=self.staged.layout, on_done=lambda problem: wx.CallAfter(draft_shown, problem)
-            ),
+            show_test_profile=self.show_test,
         )
         dlg.ShowModal()
         dlg.Destroy()
