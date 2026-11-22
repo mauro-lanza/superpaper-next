@@ -28,9 +28,10 @@ from superpaper.profiles.selection import first_image, is_file
 from superpaper.ui.browse_dialog import BrowsePaths, source_icon
 from superpaper.ui.display_band import DisplayBand
 from superpaper.ui.help import HelpFrame, image_quality_advice, show_help_popup
-from superpaper.ui.message import draft_shown, show_message_dialog
+from superpaper.ui.message import ask_unsaved_changes, draft_shown, show_message_dialog
 from superpaper.ui.perspective_dialog import PerspectiveConfig
 from superpaper.ui.preview import WallpaperPreviewPanel
+from superpaper.unsaved_changes import may_proceed, unsaved_message
 from superpaper.user_input import Offset, OffsetError, Problems
 
 logger = logging.getLogger(__name__)
@@ -63,6 +64,8 @@ class ConfigFrame(wx.Frame):
             refresh_displays=refresh_displays,
             rebind_hotkey=rebind_hotkey,
         )
+        self._panel = config_panel
+        self.Bind(wx.EVT_CLOSE, self._on_close)
         frame_sizer.Add(config_panel, 1, wx.EXPAND)
         self.SetSizer(frame_sizer)
         self.SetIcon(wx.Icon(str(resource("superpaper.png")), wx.BITMAP_TYPE_PNG))
@@ -71,6 +74,16 @@ class ConfigFrame(wx.Frame):
         self.Center()
         self.Show()
         self.SetMinSize(wx.Size(800, 600))
+
+    def _on_close(self, event):
+        if self._panel.allow_close(event.CanVeto()):
+            event.Skip()  # the default handler destroys the window
+        else:
+            event.Veto()
+
+    def settle_unsaved_changes(self):
+        """Ask about unsaved changes before the application quits; returns whether to go on."""
+        return self._panel.settle_unsaved_changes()
 
 
 class WallpaperSettingsPanel(wx.Panel):
@@ -128,6 +141,7 @@ class WallpaperSettingsPanel(wx.Panel):
         # fields are populated programmatically.
         self._clean_serial = None
         self._loading = False
+        self._settling = False
         # This is staged dialog state. Do not publish it until Apply/Save; live
         # field edits must not alter the layout used by background jobs. A Layout
         # never changes, so starting from the session's needs no copy.
@@ -662,11 +676,17 @@ class WallpaperSettingsPanel(wx.Panel):
         self.button_save.Enable(False)
         self.button_revert.Enable(False)
 
+    def has_unsaved_profile_changes(self):
+        """Whether the fields differ from the saved profile, or from a blank one if new."""
+        if self._loading or self._clean_serial is None:
+            return False
+        return self._current_serial() != self._clean_serial
+
     def _update_dirty_state(self):
         """Enable/disable Save and Revert based on unsaved profile changes."""
         if self._loading or self._clean_serial is None:
             return
-        dirty = self._current_serial() != self._clean_serial
+        dirty = self.has_unsaved_profile_changes()
         if dirty != self.button_save.IsEnabled():
             self.button_save.Enable(dirty)
             self.button_revert.Enable(dirty)
@@ -987,15 +1007,56 @@ class WallpaperSettingsPanel(wx.Panel):
 
     def onClose(self, event):
         """Closes the profile config panel."""
-        self.frame.Close(True)
+        self.frame.Close()
+
+    def allow_close(self, can_veto):
+        """Whether the window may close, asking about unsaved changes first. A close that
+        can't be vetoed, such as the system shutting down, discards them."""
+        if can_veto:
+            return self.settle_unsaved_changes()
+        if self.has_unsaved_changes():
+            logger.warning("The editor is closed by the system: discarding its unsaved changes")
+        return True
+
+    def has_unsaved_changes(self):
+        return self.has_unsaved_profile_changes() or self.display_band.has_unsaved_changes()
+
+    def settle_unsaved_changes(self, *, displays=True):
+        """Ask whether to save or discard what is unsaved: the profile and, if ``displays``,
+        the display layout. Returns whether to go on; a Cancel or a failed Save says no."""
+        # The question is modal but the event loop runs: Exit or a close can arrive meanwhile.
+        if self._settling:
+            return False
+        profile_unsaved = self.has_unsaved_profile_changes()
+        displays_unsaved = displays and self.display_band.has_unsaved_changes()
+        message = unsaved_message(profile=profile_unsaved, displays=displays_unsaved)
+        if message is None:
+            return True
+
+        def save():
+            return (not profile_unsaved or self._save_profile()) and (not displays_unsaved or self.display_band.save())
+
+        self._settling = True
+        try:
+            return may_proceed(ask_unsaved_changes(message, self.frame), save)
+        finally:
+            self._settling = False
 
     def onSelect(self, event):
         """Acts once a profile is picked in the dropdown menu."""
         if event.GetEventObject().GetName() == "ProfileChoice":
-            if event.GetString() == NEW_PROFILE_LABEL:
+            picked = event.GetString()
+            if not self.settle_unsaved_changes(displays=False):
+                loaded = self.loaded_profile.profile.name if self.loaded_profile else NEW_PROFILE_LABEL
+                self.choice_profiles.SetSelection(self.choice_profiles.FindString(loaded))
+                return
+            # Saving may have renamed, added or moved entries.
+            index = self.choice_profiles.FindString(picked)
+            self.choice_profiles.SetSelection(index)
+            if picked == NEW_PROFILE_LABEL:
                 self.onCreateNewProfile(event)
             else:
-                self.populate_fields(self.list_of_profiles[event.GetSelection()])
+                self.populate_fields(self.list_of_profiles[index])
 
     def onRevert(self, event):
         """Discards unsaved changes and loads the saved profile from disk again, with any
@@ -1048,6 +1109,11 @@ class WallpaperSettingsPanel(wx.Panel):
 
     def onSave(self, event):
         """Saves the profile the fields describe, if it is valid."""
+        self._save_profile()
+
+    def _save_profile(self):
+        """Save the profile the fields describe; tells the user and returns False if it
+        can't be saved. The display layout is not saved with it."""
         with wx.BusyCursor():
             current = self._read_form()
             result = save_profile(
@@ -1060,7 +1126,7 @@ class WallpaperSettingsPanel(wx.Panel):
             )
             if isinstance(result, Problems):
                 self._show_problems(result)
-                return
+                return False
             self.update_choiceprofile()
             self.choice_profiles.SetSelection(self.choice_profiles.FindString(current.name))
             # The editor goes on with the store's record of the saved profile.
@@ -1073,6 +1139,7 @@ class WallpaperSettingsPanel(wx.Panel):
             )
             self.list_of_profiles = self.store.profiles
             self._set_clean_baseline()
+        return True
 
     def onCreateNewProfile(self, event):
         """Empties the wallpaper profile config fields."""

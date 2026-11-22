@@ -25,6 +25,7 @@ from superpaper.geometry import display_store
 from superpaper.geometry.perspective import Perspective, Swivel, SwivelAxis, Tilt
 from superpaper.profiles.profile_id import ProfileId
 from superpaper.settings import read_settings
+from superpaper.unsaved_changes import Answer
 from tests.conftest import TWO_DISPLAYS
 from tests.gui.snapshots import Snapshots
 
@@ -85,8 +86,15 @@ class GuiEnv:
         self.commands = []
         self.dialogs = []
         self.answer_yes = True
+        self.unsaved_answer = Answer.DISCARD
+        self.unsaved_prompts = []
         self.started = []
         self.opened_dialogs = []
+
+    def ask_unsaved_changes(self, message, parent=None):
+        """Stands in for the save/discard/cancel question: records it, answers ``unsaved_answer``."""
+        self.unsaved_prompts.append(message)
+        return self.unsaved_answer
 
     def profile_file(self, name):
         return self.paths.profiles / f"{name}.profile"
@@ -215,6 +223,7 @@ class GuiEnv:
         self.answer_yes = True
 
     def close(self):
+        self.unsaved_answer = Answer.DISCARD
         for superpaper in list(self.started):
             self.quit(superpaper)
         self.flush()
@@ -298,6 +307,8 @@ def gui_env(wx_app, app_paths, tmp_path, monkeypatch):
     for name, module in list(sys.modules.items()):
         if name.startswith("superpaper.ui.") and hasattr(module, "show_message_dialog"):
             monkeypatch.setattr(module, "show_message_dialog", dialog_recorder(name.rsplit(".", 1)[-1]))
+        if name.startswith("superpaper.ui.") and hasattr(module, "ask_unsaved_changes"):
+            monkeypatch.setattr(module, "ask_unsaved_changes", env.ask_unsaved_changes)
 
     yield env
     env.close()

@@ -166,7 +166,11 @@ def headless_tray_module(monkeypatch):
     """Import the tray icon against minimal wx stubs."""
     stubs = {
         **wx_stub(),
-        **module_stub("superpaper.ui.message", show_message_dialog=lambda *args, **kwargs: None),
+        **module_stub(
+            "superpaper.ui.message",
+            show_message_dialog=lambda *args, **kwargs: None,
+            ask_unsaved_changes=lambda *args, **kwargs: None,
+        ),
     }
     tray, forget = import_headless(monkeypatch, "tray", stubs)
     yield tray

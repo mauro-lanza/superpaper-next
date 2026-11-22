@@ -44,6 +44,7 @@ class Shell:
     open_help: Callable[[Superpaper], None]
     make_tray: Callable[[Superpaper], Tray]
     close: Callable[[], None]
+    settle_unsaved_changes: Callable[[], bool]  # False: the user kept the editor's unsaved changes open
 
 
 class Superpaper:
@@ -251,7 +252,10 @@ class Superpaper:
         return True
 
     def quit(self) -> None:
-        """Stop the session, take the tray icon away and close the application."""
+        """Stop the session, take the tray icon away and close the application, unless the
+        user keeps unsaved changes in the editor open."""
+        if not self._shell.settle_unsaved_changes():
+            return
         self.session.shutdown()
         self.tray.remove()
         self._shell.close()
