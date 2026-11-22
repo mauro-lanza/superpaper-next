@@ -1,7 +1,7 @@
 """The KDE tray menu (StatusNotifierItem): built without D-Bus from the tray's menu entries."""
 
 from superpaper.desktop.linux.sni_tray import NOTICE_ID, NOTICE_SEPARATOR_ID, MenuModel
-from superpaper.desktop.tray_menu import Check, Item, Separator, Submenu, failure_notice
+from superpaper.desktop.tray_menu import Check, Item, Notice, Separator, Submenu, failure_notice
 
 
 def model_of(menu):
@@ -87,6 +87,41 @@ def test_a_check_item_carries_its_state():
 
     assert check.props == {"label": "Pause Timer", "enabled": True, "toggle-type": "checkmark", "toggle-state": 1}
     assert started == ["pause"]
+
+
+def test_a_disabled_item_ignores_activation():
+    started = []
+    model = model_of(
+        lambda: (
+            Item("Next Wallpaper", lambda: started.append("next"), enabled=False),
+            Check("Pause Timer", lambda: started.append("pause"), checked=False, enabled=False),
+        )
+    )
+
+    model.rebuild()
+    model.activate(model.layout[0])
+    model.activate(model.layout[1])
+
+    assert started == []
+
+
+def test_disabled_items_and_checked_profiles_carry_their_state():
+    menu = lambda: (  # noqa: E731
+        Item("Next Wallpaper", lambda: None, enabled=False),
+        Check("Pause Timer", lambda: None, checked=False, enabled=False),
+        Submenu("Profiles", (Check("Work", lambda: None, checked=True), Notice("(no profiles)"))),
+    )
+    model = model_of(menu)
+
+    model.rebuild()
+    next_item, pause, profiles = (model.nodes[node_id] for node_id in model.layout)
+    work, placeholder = (model.nodes[child] for child in profiles.children)
+
+    assert next_item.props["enabled"] is False
+    assert pause.props["enabled"] is False
+    assert work.props == {"label": "Work", "enabled": True, "toggle-type": "checkmark", "toggle-state": 1}
+    assert placeholder.props == {"label": "(no profiles)", "enabled": False}
+    assert placeholder.action is None
 
 
 def test_separators_and_unknown_ids_do_nothing():

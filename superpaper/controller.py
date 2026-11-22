@@ -61,6 +61,9 @@ class Superpaper:
         # The running profile, its slideshow and every wallpaper change, starting with the
         # displays as they are now. Wallpaper changes use the custom command as last saved.
         self.last_failure: str | None = None
+        # The profile last loaded or saved in the editor, for it to open on when nothing runs.
+        self.last_edited: ProfileId | None = None
+        self._profile_watchers: list[Callable[[], None]] = []
         loaded = display_detection.detect_layout_or_default(paths.config, desktop)
         self._reported_layout_problem: str | None = None
         self._report_layout_problem(loaded.problem)
@@ -69,6 +72,7 @@ class Superpaper:
             desktop,
             loaded.layout,
             on_change=self._report_change,
+            on_running_change=self._report_running_change,
             set_command=lambda: self.settings.set_command,
         )
         self.store = ProfileStore(paths, windows_names=desktop.strict_profile_names())
@@ -91,6 +95,21 @@ class Superpaper:
             self.last_failure = problem
 
         self._shell.call_soon(remember)
+
+    def _report_running_change(self) -> None:
+        """Tell the watchers that the running profile changed; called on the session's worker
+        thread, so they are told on the UI's."""
+        self._shell.call_soon(self._notify_profile_watchers)
+
+    def _notify_profile_watchers(self) -> None:
+        for watcher in list(self._profile_watchers):
+            watcher()
+
+    def watch_profiles(self, watcher: Callable[[], None]) -> Callable[[], None]:
+        """Call ``watcher()``, on the UI thread, whenever the saved profiles are loaded again
+        or the running profile changes; returns the function that stops that."""
+        self._profile_watchers.append(watcher)
+        return lambda: self._profile_watchers.remove(watcher)
 
     def _run_at_startup(self, startup_profile: ProfileId | None) -> None:
         """Run the profile asked for on the command line, or carry on with the one that ran
@@ -165,8 +184,8 @@ class Superpaper:
         self._shell.open_settings(self)
 
     def start_profile(self, stored: StoredProfile) -> None:
-        """Run the saved profile ``stored`` on the displays as they are now, or show its
-        next image if it runs already."""
+        """Run the saved profile ``stored`` on the displays as they are now; if it runs
+        already, only unpause it and restart its countdown."""
         self.refresh_displays()
         self.session.activate(stored)
 
@@ -182,6 +201,7 @@ class Superpaper:
         """Load the profiles again and carry on running the profile that was running."""
         self._load_profiles()
         carry_on_running(self.store, self.session)
+        self._notify_profile_watchers()
 
     def _load_profiles(self) -> None:
         """Read the profiles directory again, offering to delete profiles that can't be loaded."""

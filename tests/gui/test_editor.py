@@ -32,11 +32,12 @@ def test_the_editor_has_one_offset_group_and_diagonal_field_per_display(running_
     assert counts == (displays,) * 3
 
 
-def test_apply_renders_a_draft_and_leaves_the_running_render_alone(gui_env, running_work, editor):
+def test_apply_runs_the_profile_and_renders_it_for_real(gui_env, running_work, editor):
     editor.onApply(None)
     gui_env.settle(running_work)
-    assert drafts(gui_env.paths.cache)
-    assert (gui_env.paths.cache / "Work-a.png").is_file()
+    assert not drafts(gui_env.paths.cache)
+    # The renders take turns: the start-up one was a.
+    assert (gui_env.paths.cache / "Work-b.png").is_file()
 
 
 @pytest.fixture
@@ -146,7 +147,7 @@ def test_deleting_the_running_profile_stops_its_slideshow_and_forgets_its_select
     selection = gui_env.paths.cache / "selections" / "Temp.json"
     had_selection = selection.is_file()
     editor.update_choiceprofile()
-    editor.choice_profiles.SetSelection(editor.choice_profiles.FindString("Temp"))
+    editor._select_in_dropdown("Temp")
     editor.populate_fields(gui_env.saved(running_work, "Temp"))
     gui_env.yes_to_message_dialogs()
     gui_env.shown()
@@ -154,6 +155,7 @@ def test_deleting_the_running_profile_stops_its_slideshow_and_forgets_its_select
     gui_env.settle(running_work)
     assert not gui_env.profile_file("Temp").exists()
     assert running_work.session.running is None
+    assert not (gui_env.paths.cache / "running_profile").exists()
     assert armed
     assert not slideshow_armed(running_work)
     assert had_selection
@@ -194,7 +196,7 @@ def test_the_preview_applies_exif_orientation_like_the_renderer(gui_env, editor)
     assert right[0] > 150
 
 
-def test_apply_returns_while_its_draft_is_still_rendering(gui_env, running_work, editor, monkeypatch):
+def test_apply_returns_while_it_is_still_rendering(gui_env, running_work, editor, monkeypatch):
     session_module = gui_env.ui.session
     real_show = session_module.show
     release = threading.Event()
@@ -219,7 +221,7 @@ def test_apply_returns_while_its_draft_is_still_rendering(gui_env, running_work,
     assert not gui_env.shown()
 
 
-def test_a_draft_that_cant_be_shown_says_why_in_the_editor(gui_env, running_work, editor):
+def test_an_applied_profile_that_cant_be_shown_runs_and_the_tray_says_why(gui_env, running_work, editor):
     bad = gui_env.root / "bad"
     bad.mkdir()
     (bad / "broken.png").write_bytes(b"not an image")
@@ -230,10 +232,9 @@ def test_a_draft_that_cant_be_shown_says_why_in_the_editor(gui_env, running_work
     gui_env.shown()
     editor.onApply(None)
     gui_env.settle(running_work)
-    errors = gui_env.shown()
-    assert len(errors) == 1
-    assert errors[0][:2] == ("message", "Error")
-    assert "broken.png" in errors[0][2]
+    assert gui_env.shown() == []
+    assert running_work.session.running.profile.name == "Bad"
+    assert "broken.png" in running_work.last_failure
 
 
 @pytest.fixture

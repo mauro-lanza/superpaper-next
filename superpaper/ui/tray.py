@@ -26,10 +26,12 @@ TRAY_TOOLTIP = "Superpaper"
 def _append_entries(menu: wx.Menu, entries: tuple[MenuEntry, ...]) -> None:
     for entry in entries:
         match entry:
-            case Item(label, action):
-                _append_item(menu, label, action, wx.ITEM_NORMAL)
-            case Check(label, action, checked):
-                _append_item(menu, label, action, wx.ITEM_CHECK).Check(checked)
+            case Item(label, action, enabled):
+                _append_item(menu, label, action, wx.ITEM_NORMAL).Enable(enabled)
+            case Check(label, action, checked, enabled):
+                item = _append_item(menu, label, action, wx.ITEM_CHECK)
+                item.Check(checked)
+                item.Enable(enabled)
             case Notice(label):
                 menu.Append(-1, label).Enable(False)
             case Separator():
@@ -115,9 +117,15 @@ class TaskBarIcon(wx.adv.TaskBarIcon):
 
     def menu(self) -> tuple[MenuEntry, ...]:
         """The tray menu as it is now, for both the wx and the native SNI tray to show."""
+        running = self._session.running
         profiles = tuple(
-            Item(stored.profile.name, partial(self._start_profile, stored)) for stored in self._store.profiles
-        )
+            Check(
+                stored.profile.name,
+                partial(self._start_profile, stored),
+                checked=running is not None and running.profile_id == stored.profile_id,
+            )
+            for stored in self._store.profiles
+        ) or (Notice("(no profiles)"),)
         failure = self._last_failure()
         failed = (failure_notice(failure), Separator()) if failure is not None else ()
         return (
@@ -129,8 +137,13 @@ class TaskBarIcon(wx.adv.TaskBarIcon):
             Separator(),
             Submenu("Profiles", profiles),
             Separator(),
-            Item("Next Wallpaper", self._session.next),
-            Check("Pause Timer", self._session.toggle_pause, checked=self._session.paused),
+            Item("Next Wallpaper", self._session.next, enabled=running is not None),
+            Check(
+                "Pause Timer",
+                self._session.toggle_pause,
+                checked=self._session.paused,
+                enabled=running is not None and running.profile.slideshow,
+            ),
             Separator(),
             Item("About", self.on_about),
             Item("Exit", self._quit),

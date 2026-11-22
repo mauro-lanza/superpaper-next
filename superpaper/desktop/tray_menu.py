@@ -9,6 +9,7 @@ from typing import Protocol
 class Item:
     label: str
     action: Callable[[], None]
+    enabled: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -16,6 +17,7 @@ class Check:
     label: str
     action: Callable[[], None]
     checked: bool
+    enabled: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,7 +35,7 @@ class Separator:
 @dataclass(frozen=True, slots=True)
 class Submenu:
     label: str
-    items: tuple[Item, ...]
+    items: tuple[Item | Check | Notice, ...]
 
 
 MenuEntry = Item | Check | Notice | Separator | Submenu

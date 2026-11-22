@@ -201,6 +201,10 @@ class DisplayBand(wx.CollapsiblePane):
             return False
         return self.staged.layout.settings() != self._clean or self._has_invalid_diagonals()
 
+    def can_save(self):
+        """Whether the staged settings can be saved: no diagonal is typed that can't be staged."""
+        return not self._has_invalid_diagonals()
+
     def _show_unsaved_marker(self, unsaved):
         self._unsaved_marker_shown = unsaved
         self.SetLabel(f"{LABEL}  -  {UNSAVED_MARKER}" if unsaved else LABEL)

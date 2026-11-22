@@ -1,5 +1,5 @@
 """What the profile editor does with the saved profiles and the session: saving, reverting,
-deleting and showing a draft of what a form describes."""
+deleting and applying what a form describes."""
 
 import pytest
 
@@ -7,13 +7,13 @@ from superpaper.geometry.perspective import Disabled, Named
 from superpaper.profile_actions import (
     Saved,
     align_test_profile,
+    apply_profile,
+    check_applicable,
     delete_profile,
     revert_profile,
     save_profile,
     saved_profile,
-    show_draft,
 )
-from superpaper.profiles.form import prepare_draft
 from superpaper.profiles.profile_file import OffsetsCorrection
 from superpaper.profiles.profile_id import NEW_PROFILE_LABEL, ProfileId
 from superpaper.profiles.profile_store import ProfileStore
@@ -26,7 +26,7 @@ class FakeSession:
         self.store = store
         self.running = None
         self.updates = []
-        self.drafts = []
+        self.applied = []
 
     def renames_running(self, profile_id, new_name):
         return self.running is not None and profile_id == self.running.profile_id and new_name != profile_id.value
@@ -34,9 +34,8 @@ class FakeSession:
     def update(self, profile_id, stored):
         self.updates.append((profile_id, stored))
 
-    def apply_draft(self, profile, images, *, layout, on_done):
-        self.drafts.append((profile, images, layout))
-        self.on_done = on_done
+    def apply(self, stored, picked):
+        self.applied.append((stored, picked))
 
 
 @pytest.fixture
@@ -60,10 +59,10 @@ def session(store):
     return FakeSession(store)
 
 
-def save(store, session, form, *, loaded=None, focused_path=None, rebinds=None):
+def save(store, session, form, *, loaded=None, picked=None, rebinds=None):
     return save_profile(
         form,
-        focused_path=focused_path,
+        picked=picked,
         loaded=loaded,
         store=store,
         session=session,
@@ -111,13 +110,11 @@ def test_saving_over_a_loaded_profile_updates_the_session_and_follows_a_rename(s
     assert store.get(ProfileId.parse("Work", windows_names=False)) is None
 
 
-def test_saving_chooses_the_focused_file_else_the_loaded_selection(store, session, images):
+def test_saving_chooses_the_picked_file_else_the_loaded_selection(store, session, images):
     first = save(store, session, blank(sources=(("", str(images)),)))
-    focused = str(images / "b.png")
-    second = save(
-        store, session, blank(zoom_pct=120, sources=(("", str(images)),)), loaded=first.stored, focused_path=focused
-    )
-    assert second.stored.selection.images == [focused]
+    picked = str(images / "b.png")
+    second = save(store, session, blank(zoom_pct=120, sources=(("", str(images)),)), loaded=first.stored, picked=picked)
+    assert second.stored.selection.images == [picked]
 
 
 def test_reverting_loads_the_file_again_and_carries_the_running_profile_on(store, session, images, app_paths):
@@ -165,33 +162,42 @@ def test_saved_profile_finds_by_name_and_not_by_a_name_no_profile_can_have(store
     assert saved_profile(store, "../x") is None
 
 
-def test_applying_shows_the_chosen_image_for_the_staged_layout_and_pins_it_once_shown(store, session, images, layout):
+def test_applying_runs_the_chosen_image_else_the_current_selection(store, session, images):
     saved = save(store, session, blank(sources=(("", str(images)),))).stored
-    focused = str(images / "b.png")
-    draft = prepare_draft(blank(sources=(("", str(images)),)), focused, saved)
-    posted = []
-    shown = []
-    show_draft(draft, loaded=saved, layout=layout, session=session, post=posted.append, on_shown=shown.append)
-    profile, shown_images, shown_layout = session.drafts[0]
-    assert (profile, shown_images, shown_layout) == (draft.profile, [focused], layout)
-    session.on_done(None)
-    assert saved.selection.images != [focused]
-    posted.pop()()
-    assert saved.selection.images == [focused]
-    assert shown == [None]
+    picked = str(images / "b.png")
+
+    apply_profile(saved, picked=picked, session=session)
+    apply_profile(saved, picked=None, session=session)
+
+    assert session.applied == [(saved, [picked]), (saved, None)]
 
 
-def test_a_draft_that_failed_to_show_leaves_the_selection_alone(store, session, images, layout):
+def test_applying_a_multi_image_profile_picks_nothing(store, session, images):
+    form = blank(span_mode="multi", per_target_sources=True, sources=(("0", str(images)), ("1", str(images))))
+    saved = save(store, session, form).stored
+
+    apply_profile(saved, picked=str(images / "b.png"), session=session)
+
+    assert session.applied == [(saved, None)]
+
+
+def test_a_saved_profile_whose_images_are_gone_cant_be_applied(store, session, images):
     saved = save(store, session, blank(sources=(("", str(images)),))).stored
-    before = saved.selection.images
-    draft = prepare_draft(blank(sources=(("", str(images)),)), str(images / "b.png"), saved)
-    posted = []
-    shown = []
-    show_draft(draft, loaded=saved, layout=layout, session=session, post=posted.append, on_shown=shown.append)
-    session.on_done("broken")
-    posted.pop()()
-    assert saved.selection.images == before
-    assert shown == ["broken"]
+    assert check_applicable(saved) is None
+
+    for path in images.iterdir():
+        path.unlink()
+
+    problems = check_applicable(saved)
+    assert isinstance(problems, Problems)
+    assert "does not contain supported image files" in problems.messages[0]
+
+
+def test_saving_never_runs_a_profile(store, session, images):
+    first = save(store, session, blank(sources=(("", str(images)),)))
+    save(store, session, blank(zoom_pct=120, sources=(("", str(images)),)), loaded=first.stored)
+
+    assert session.applied == []
 
 
 def test_the_align_test_shows_one_image_with_the_typed_offsets_and_chosen_perspective():

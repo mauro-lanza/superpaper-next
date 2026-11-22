@@ -1,15 +1,14 @@
-"""What the profile editor does with the saved profiles and the running session: save, delete
-and revert a profile, and show a draft of one. The rules of the form itself are in
+"""What the profile editor does with the saved profiles and the running session: save, delete,
+revert and apply a profile. The rules of the form itself are in
 superpaper.profiles.form; these put them to use on a ProfileStore and a Session."""
 
 import logging
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
-from superpaper.geometry.displays import Layout
 from superpaper.geometry.perspective import PerspectiveChoice
 from superpaper.profiles import profile_file
-from superpaper.profiles.form import Draft, ProfileForm, chosen_images, parse_form
+from superpaper.profiles.form import ProfileForm, chosen_images, parse_form
 from superpaper.profiles.profile_id import NEW_PROFILE_LABEL, ProfileId, ProfileIdError
 from superpaper.profiles.profile_store import ProfileStore, StoredProfile, validate_managed_profile_id
 from superpaper.session import Session
@@ -44,13 +43,16 @@ def saved_profile(store: ProfileStore, name: str) -> StoredProfile | None:
 def save_profile(
     form: ProfileForm,
     *,
-    focused_path: str | None,
+    picked: str | None,
     loaded: StoredProfile | None,
     store: ProfileStore,
     session: Session,
     rebind_hotkey: RebindHotkey,
 ) -> Saved | Problems:
-    """Save the profile ``form`` describes, over ``loaded`` or as a new one, if it is valid."""
+    """Save the profile ``form`` describes, over ``loaded`` or as a new one, if it is valid.
+
+    The desktop and a running slideshow's countdown stay as they are: ``picked``, the image
+    clicked in the sources, becomes the selection, shown at the next change."""
     profile, problems = parse_form(form)
     logger.info("Saving profile: %s", profile)
     current_profile_id = loaded.profile_id if loaded is not None else None
@@ -67,7 +69,7 @@ def save_profile(
         # Saving loads the profiles again: once, here.
         stored = store.save(
             profile,
-            selected=chosen_images(profile, focused_path, loaded),
+            selected=chosen_images(profile, picked, loaded),
             current=loaded,
             update_active=session.renames_running(current_profile_id, profile.name),
         )
@@ -114,27 +116,13 @@ def align_test_profile(image: str, perspective: PerspectiveChoice, offsets: Sequ
     return profile_file.draft([image], spanmode="advanced", perspective=perspective, offsets=offsets)
 
 
-def show_draft(
-    draft: Draft,
-    *,
-    loaded: StoredProfile | None,
-    layout: Layout,
-    session: Session,
-    post: Callable[[Callable[[], None]], None],
-    on_shown: Callable[[str | None], None],
-) -> None:
-    """Render ``draft`` for ``layout``, the editor's staged one so that unsaved display
-    settings are reflected; the stored profile and the running one are left untouched.
+def check_applicable(stored: StoredProfile) -> Problems | None:
+    """What keeps the saved profile ``stored`` from being shown, if anything."""
+    problems = profile_file.validate(stored.profile)
+    return Problems(tuple(problems)) if problems else None
 
-    ``on_shown(problem)`` runs through ``post`` (the UI thread) once it has been shown.
-    """
 
-    def applied(problem: str | None) -> None:
-        # Pin the applied image so reopening the dialog shows it, not the previously saved one.
-        if problem is None and draft.chosen and loaded is not None:
-            loaded.selection.pin(draft.chosen)
-        on_shown(problem)
-
-    session.apply_draft(
-        draft.profile, draft.images, layout=layout, on_done=lambda problem: post(lambda: applied(problem))
-    )
+def apply_profile(stored: StoredProfile, *, picked: str | None, session: Session) -> None:
+    """Show ``picked`` (the image clicked in the sources), or else the current image of
+    ``stored``, and run it."""
+    session.apply(stored, chosen_images(stored.profile, picked, None))

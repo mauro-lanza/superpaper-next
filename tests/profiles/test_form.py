@@ -17,7 +17,7 @@ from superpaper.profiles.form import (
     spangroups_of,
 )
 from superpaper.profiles.profile_file import OffsetsCorrection, Profile
-from superpaper.user_input import OffsetError, Problems
+from superpaper.user_input import OffsetError
 from tests.profiles.conftest import blank
 
 
@@ -256,17 +256,6 @@ def test_chosen_images_for_one_image_per_display_are_none(images):
     assert profile_form.chosen_images(single, str(images / "a.png"), loaded) == [str(images / "a.png")]
     assert profile_form.chosen_images(single, str(images), loaded) == ["/x.png"]
     assert profile_form.chosen_images(single, None, None) is None
-
-
-def test_an_invalid_form_cant_be_applied(images):
-    result = profile_form.prepare_draft(blank(sources=()), None, None)
-    assert result == Problems(("At least one path for wallpapers must be given.",))
-
-
-def test_a_draft_without_a_chosen_image_shows_the_first_of_the_sources(images):
-    draft = profile_form.prepare_draft(blank(sources=(("", str(images / "a.png")),)), None, None)
-    assert draft.chosen is None
-    assert draft.images == [str(images / "a.png")]
 
 
 def test_a_new_profile_starts_blank_with_a_field_for_every_display(layout):

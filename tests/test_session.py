@@ -35,6 +35,10 @@ class Numbered:
     def __init__(self, name):
         self.name = name
         self.number = 1
+        self.pinned = None
+
+    def pin(self, files):
+        self.pinned = list(files)
 
     def is_complete(self):
         return True
@@ -64,6 +68,7 @@ class Runtime:
         self.clock = Clock()
         self.changes = []
         self.reported = []
+        self.running_changes = []
         self.restored = []
         self.has_render = True
         self.problem = None
@@ -77,6 +82,7 @@ class Runtime:
             FakeDesktop(),
             "layout 0",
             on_change=self.reported.append,
+            on_running_change=lambda: self.running_changes.append(self.session.running),
             set_command=lambda: self.set_command,
             clock=self.clock,
         )
@@ -155,13 +161,91 @@ def test_each_change_reports_its_problem_or_none(runtime):
     assert runtime.reported == ["Image missing", None]
 
 
-def test_starting_the_running_profile_again_shows_its_next_image(runtime):
+def test_starting_the_running_profile_again_keeps_an_unpaused_countdown_as_it_is(runtime):
     a = saved("A")
     runtime.session.activate(a)
+    runtime.advance(DELAY / 2)
     runtime.session.activate(a)
+    runtime.advance(DELAY / 2)
     runtime.settle()
 
     assert runtime.shown == ["A-1.png", "A-2.png"]
+
+
+def test_starting_the_running_profile_again_changes_nothing_but_unpauses_and_restarts_the_countdown(runtime):
+    a = saved("A")
+    runtime.session.activate(a)
+    runtime.session.toggle_pause()
+    runtime.advance(DELAY / 2)
+    runtime.session.activate(a)
+    runtime.advance(DELAY - 1)
+    runtime.settle()
+
+    assert runtime.shown == ["A-1.png"]
+    assert runtime.session.paused is False
+    assert a.selection.number == 1
+
+    runtime.advance(1)
+    runtime.settle()
+    assert runtime.shown == ["A-1.png", "A-2.png"]
+
+
+def test_applying_a_profile_shows_the_picked_image_and_remembers_it(runtime):
+    a = saved("A")
+    runtime.session.apply(a, ["pick.png"])
+    runtime.settle()
+
+    assert a.selection.pinned == ["pick.png"]
+    assert runtime.shown == ["A-1.png"]
+    assert runtime.session.running is a
+    assert (runtime.paths.cache / "running_profile").read_text(encoding="utf-8") == "A"
+
+
+def test_every_change_of_the_running_profile_is_reported(runtime):
+    a, b = saved("A"), saved("B")
+    runtime.session.restore(a)
+    runtime.session.activate(b)
+    runtime.session.activate(b)
+    runtime.session.apply(a, None)
+    runtime.session.update(ProfileId.parse("A", windows_names=False), saved("A"))
+    runtime.session.update(ProfileId.parse("A", windows_names=False), None)
+    runtime.session.update(ProfileId.parse("Z", windows_names=False), None)
+    runtime.settle()
+
+    assert [stored.profile.name if stored else None for stored in runtime.running_changes] == [
+        "A",
+        "B",
+        "B",
+        "A",
+        "A",
+        None,
+    ]
+
+
+def test_applying_without_a_pick_shows_the_current_image(runtime):
+    a = saved("A")
+    runtime.session.apply(a, None)
+    runtime.settle()
+
+    assert a.selection.pinned is None
+    assert runtime.shown == ["A-1.png"]
+
+
+def test_applying_the_running_profile_shows_its_current_image_unpauses_and_restarts_the_countdown(runtime):
+    a = saved("A")
+    runtime.session.activate(a)
+    runtime.session.toggle_pause()
+    runtime.advance(DELAY / 2)
+    runtime.session.apply(a, None)
+    runtime.advance(DELAY - 1)
+    runtime.settle()
+
+    assert runtime.shown == ["A-1.png", "A-1.png"]
+    assert runtime.session.paused is False
+
+    runtime.advance(1)
+    runtime.settle()
+    assert runtime.shown == ["A-1.png", "A-1.png", "A-2.png"]
 
 
 def test_requests_are_handled_in_the_order_they_were_made(runtime):
@@ -325,18 +409,35 @@ def test_a_profile_that_stopped_running_never_changes_again(runtime):
     assert runtime.shown == ["A-1.png", "B-1.png", "B-2.png"]
 
 
-def test_saving_the_running_profile_applies_its_new_delay_from_now(runtime):
+def test_saving_the_running_profile_keeps_its_countdown_and_uses_the_new_delay_at_the_next_change(runtime):
     runtime.session.activate(saved("A"))
     runtime.advance(DELAY / 2)
     edited = saved("A", delay=2 * DELAY)
     runtime.session.update(ProfileId.parse("A", windows_names=False), edited)
-    runtime.advance(2 * DELAY - 1)
+    runtime.advance(DELAY / 2 - 1)
     runtime.settle()
     assert runtime.shown == ["A-1.png"]
     assert runtime.session.running is edited
 
     runtime.advance(1)
     runtime.settle()
+    assert runtime.shown == ["A-1.png", "A-2.png"]
+
+    runtime.advance(2 * DELAY - 1)
+    runtime.settle()
+    assert runtime.shown == ["A-1.png", "A-2.png"]
+
+    runtime.advance(1)
+    runtime.settle()
+    assert runtime.shown == ["A-1.png", "A-2.png", "A-3.png"]
+
+
+def test_saving_a_still_profile_as_a_slideshow_starts_its_countdown(runtime):
+    runtime.session.activate(saved("A", slideshow=False))
+    runtime.session.update(ProfileId.parse("A", windows_names=False), saved("A"))
+    runtime.advance(DELAY)
+    runtime.settle()
+
     assert runtime.shown == ["A-1.png", "A-2.png"]
 
 
@@ -402,6 +503,7 @@ def test_a_deleted_profile_stops(runtime):
     assert runtime.session.running is None
     assert runtime.session.paused is False
     assert runtime.shown == ["A-1.png"]
+    assert not (runtime.paths.cache / "running_profile").exists()
 
 
 def test_updating_a_profile_that_isnt_running_changes_nothing(runtime):
