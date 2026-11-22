@@ -25,7 +25,7 @@ from superpaper.profiles import form
 from superpaper.profiles.form import parse_offsets
 from superpaper.profiles.profile_file import SPAN_MODES, SpanMode
 from superpaper.profiles.profile_id import NEW_PROFILE_LABEL
-from superpaper.profiles.selection import first_image, is_file
+from superpaper.profiles.selection import first_image, is_file, is_folder
 from superpaper.ui.browse_dialog import BrowsePaths, source_icon
 from superpaper.ui.display_band import DisplayBand
 from superpaper.ui.help import HelpFrame, image_quality_advice, show_help_popup
@@ -216,6 +216,8 @@ class WallpaperSettingsPanel(wx.Panel):
         # The image clicked in the sources, with the source row it came from: shown by Apply,
         # and what Save selects, until the profile changes or is saved or applied.
         self._pick: tuple[str, str] | None = None
+        # In multi-image mode the image clicked for each display, by display number.
+        self._pick_by_display: dict[int, tuple[str, str]] = {}
         self.sizer_main = wx.BoxSizer(wx.VERTICAL)
         self.sizer_top_half = wx.BoxSizer(wx.HORIZONTAL)  # wallpaper/monitor preview
         self.sizer_bottom_half = wx.BoxSizer(wx.VERTICAL)  # settings, buttons etc
@@ -441,6 +443,9 @@ class WallpaperSettingsPanel(wx.Panel):
         self.hotkey_bind_sizer.Add(self.button_help_hotkey, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 5)
         self.sizer_setting_hotkey.Add(self.cb_hotkey, 0, wx.ALIGN_LEFT | wx.ALL, 5)
         self.sizer_setting_hotkey.Add(self.hotkey_bind_sizer, 0, wx.CENTER | wx.EXPAND | wx.ALL, 5)
+        self.st_hotkeys_off = wx.StaticText(statbox_parent_hkey, -1, "Hotkeys are off in Settings")
+        self.sizer_setting_hotkey.Add(self.st_hotkeys_off, 0, wx.ALIGN_LEFT | wx.ALL, 5)
+        self.st_hotkeys_off.Show(not self.settings.use_hotkeys)
         self.cb_hotkey.Bind(wx.EVT_CHECKBOX, self.onCheckboxHotkey)
 
         # image scaling & position sizer
@@ -524,6 +529,8 @@ class WallpaperSettingsPanel(wx.Panel):
 
         self.sizer_setting_paths.Add(st_paths_info, 0, wx.ALIGN_LEFT | wx.ALL, 5)
         self.sizer_setting_paths.Add(self.path_listctrl, 1, wx.CENTER | wx.EXPAND | wx.TOP | wx.LEFT | wx.RIGHT, 5)
+        self.st_source_note = wx.StaticText(self.statbox_parent_paths, -1, "")
+        self.sizer_setting_paths.Add(self.st_source_note, 0, wx.ALIGN_LEFT | wx.LEFT | wx.RIGHT, 5)
         # Buttons
         self.sizer_setting_paths_buttons = wx.BoxSizer(wx.HORIZONTAL)
         self.button_browse = wx.Button(self.statbox_parent_paths, label="Browse")
@@ -619,6 +626,10 @@ class WallpaperSettingsPanel(wx.Panel):
         self.sizer_setting_persp.Add(st_perspprof, 0, wx.ALIGN_LEFT | wx.ALL | wx.ALIGN_CENTER_VERTICAL, 0)
         self.sizer_setting_persp.Add(self.ch_persp, 0, wx.ALIGN_LEFT | wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5)
 
+        # With one display there is nothing to offset or group.
+        self.cb_offsets.Enable(num_displays > 1)
+        self.cb_spangroups.Enable(num_displays > 1)
+
         # Add setting subsizers to the adv settings sizer
         self.sizer_setting_adv.Add(self.sizer_setting_offsets, 0, wx.CENTER | wx.EXPAND | wx.ALL, 5)
         self.sizer_setting_adv.Add(self.sizer_setting_spangroups, 0, wx.CENTER | wx.EXPAND | wx.ALL, 5)
@@ -655,7 +666,7 @@ class WallpaperSettingsPanel(wx.Panel):
         self._loading = True
         profile = stored.profile
         self.loaded_profile = stored
-        self._pick = None
+        self._clear_pick()
         self._remember_edited(stored.profile_id)
         shown = form.form_from(profile, self.staged.layout)
         self._write_form(shown)
@@ -665,12 +676,9 @@ class WallpaperSettingsPanel(wx.Panel):
         # Update wallpaper preview from selected profile
         display_data = self._display_areas()
         # Preview the store's current record: its selection follows the slideshow.
-        self.wpprev_pnl.preview_wallpaper(
-            (self.store.get(stored.profile_id) or stored).selection.current(),
-            self.span_mode,
-            display_data,
-            self.preview_spangroups(),
-        )
+        shown_images = (self.store.get(stored.profile_id) or stored).selection.current()
+        self.wpprev_pnl.preview_wallpaper(shown_images, self.span_mode, display_data, self.preview_spangroups())
+        self._set_source_note("" if shown_images else "The images of this profile were not found.")
         self.wpprev_pnl.layout_editor.toggle_buttons(show_config=self.span_mode == "advanced", in_config=False)
 
         # Loaded data is the new clean baseline. Slideshow normalization in
@@ -707,6 +715,7 @@ class WallpaperSettingsPanel(wx.Panel):
             self.cb_hotkey.SetValue(False)
             self.tc_hotkey_bind.Clear()
         wx.PostEvent(self.cb_hotkey, wx.CommandEvent(commandEventType=wx.EVT_CHECKBOX.typeId))
+        self._show_hotkeys_off_note()
 
         # Advanced settings
         self.show_adv_setting_sizer(self.span_mode == "advanced")
@@ -960,6 +969,7 @@ class WallpaperSettingsPanel(wx.Panel):
 
     def toggle_spangroup_widgets(self, enable):
         sizer = self.sizer_setting_spangroups
+        enable = enable and self.cb_spangroups.IsThisEnabled()
         self.sizer_toggle_children(sizer, enable)
         for ch in self.ch_list_spangroups:
             ch.Enable(enable)
@@ -1043,10 +1053,15 @@ class WallpaperSettingsPanel(wx.Panel):
         cb_state = self.cb_hotkey.GetValue()
         sizer = self.hotkey_bind_sizer
         self.sizer_toggle_children(sizer, cb_state)
+        self._show_hotkeys_off_note()
         self._update_dirty_state()
 
+    def _show_hotkeys_off_note(self):
+        self.st_hotkeys_off.Show(not self.settings.use_hotkeys)
+        self.sizer_setting_hotkey.Layout()
+
     def onCheckboxOffsets(self, event):
-        cb_state = self.cb_offsets.GetValue()
+        cb_state = self.cb_offsets.GetValue() and self.cb_offsets.IsThisEnabled()
         sizer = self.sizer_setting_offsets
         self.sizer_toggle_children(sizer, cb_state)
         self._update_dirty_state()
@@ -1079,22 +1094,24 @@ class WallpaperSettingsPanel(wx.Panel):
         return self.image_list.Add(source_icon(path, self.tsize))
 
     def populate_lc_browse(self, pathslist):
+        columns = self.path_listctrl.GetColumnCount()
+        listed = {
+            tuple(self.path_listctrl.GetItemText(row, column) for column in range(columns))
+            for row in range(self.path_listctrl.GetItemCount())
+        }
         for path_item in pathslist:
-            self.append_to_listctrl(path_item)
+            if tuple(path_item) not in listed:
+                listed.add(tuple(path_item))
+                self.append_to_listctrl(path_item)
         self._update_dirty_state()
 
     #
     # Top level button definitions
     #
     def onWallpaperItemSelected(self, event):
-        """Preview the selected wallpaper image in the preview panel."""
+        """Preview the clicked source row's image; in multi mode only that display's."""
         item_idx = event.GetIndex()
-        columns = self.path_listctrl.GetColumnCount()
-        if columns == 2:
-            path = self.path_listctrl.GetItemText(item_idx, 1)
-        else:
-            path = self.path_listctrl.GetItemText(item_idx, 0)
-
+        path = self._row_path(item_idx)
         if not path:
             return
 
@@ -1102,11 +1119,38 @@ class WallpaperSettingsPanel(wx.Panel):
         preview_file = first_image(path)
 
         if not preview_file:
+            self._set_source_note(f"'{path}' has no images." if is_folder(path) else f"'{path}' was not found.")
             return
 
-        self._pick = (path, preview_file)
-        display_data = self._display_areas()
-        self.wpprev_pnl.preview_wallpaper([preview_file], self.span_mode, display_data, self.preview_spangroups())
+        self._set_source_note("")
+        if self.span_mode == "multi":
+            self._pick_by_display[int(self.path_listctrl.GetItemText(item_idx, 0))] = (path, preview_file)
+            images = self._multi_images()
+        else:
+            self._pick = (path, preview_file)
+            images = [preview_file]
+        self.wpprev_pnl.preview_wallpaper(images, self.span_mode, self._display_areas(), self.preview_spangroups())
+
+    def _multi_selection(self):
+        """One image per display: the clicked one where a row was clicked, else the profile's
+        selection; None for a display with neither."""
+        shown = self.loaded_profile.selection.current() if self.loaded_profile is not None else []
+        return [
+            self._pick_by_display[display][1]
+            if display in self._pick_by_display
+            else (shown[display] if display < len(shown) else None)
+            for display in range(len(self.staged.layout.displays))
+        ]
+
+    def _multi_images(self):
+        """The images the preview shows in multi mode: a display with none shows the first one found."""
+        images = self._multi_selection()
+        first = next((image for image in images if image), None)
+        return [image or first for image in images] if first else []
+
+    def _set_source_note(self, text):
+        self.st_source_note.SetLabel(text)
+        self.sizer_setting_paths.Layout()
 
     @property
     def settings(self):
@@ -1147,12 +1191,16 @@ class WallpaperSettingsPanel(wx.Panel):
         """The path of the source list's row ``item``."""
         return self.path_listctrl.GetItemText(item, 1 if self.path_listctrl.GetColumnCount() == 2 else 0)
 
+    def _clear_pick(self):
+        self._pick = None
+        self._pick_by_display = {}
+
     def _drop_stale_pick(self):
-        """Forget the clicked image once the source it came from is no longer listed."""
-        if self._pick is not None:
-            rows = {self._row_path(item) for item in range(self.path_listctrl.GetItemCount())}
-            if self._pick[0] not in rows:
-                self._pick = None
+        """Forget the clicked images once the sources they came from are no longer listed."""
+        rows = {self._row_path(item) for item in range(self.path_listctrl.GetItemCount())}
+        if self._pick is not None and self._pick[0] not in rows:
+            self._pick = None
+        self._pick_by_display = {display: pick for display, pick in self._pick_by_display.items() if pick[0] in rows}
 
     def onClose(self, event):
         """Closes the profile config panel."""
@@ -1239,8 +1287,8 @@ class WallpaperSettingsPanel(wx.Panel):
                 return
         if not self._settle_displays_for_apply():
             return
-        apply_profile(stored, picked=self._pick_image(), session=self.session)
-        self._pick = None
+        apply_profile(stored, picked=self._picked_images(), session=self.session)
+        self._clear_pick()
         self.loaded_profile = stored
 
     def _on_destroy(self, event):
@@ -1257,11 +1305,23 @@ class WallpaperSettingsPanel(wx.Panel):
             return
         self.update_choiceprofile()
         loaded = self.loaded_profile
-        if loaded is None or self.store.get(loaded.profile_id) is not None:
+        current = self.store.get(loaded.profile_id) if loaded is not None else None
+        if loaded is None or current is not None:
             self._select_in_dropdown(loaded.profile.name if loaded else NEW_PROFILE_LABEL)
+            if (
+                loaded is not None
+                and current is not None
+                and current is not loaded
+                and not self.has_unsaved_profile_changes()
+            ):
+                # Saved again outside the editor: a clean form shows it; a dirty one keeps its edits.
+                if current.profile != loaded.profile:
+                    self.populate_fields(current)
+                else:
+                    self.loaded_profile = current
         elif self.has_unsaved_profile_changes():
             self.loaded_profile = None
-            self._pick = None
+            self._clear_pick()
             self._select_in_dropdown(NEW_PROFILE_LABEL)
             self._clean_serial = form.fingerprint(form.blank_form(self.staged.layout))
             self._update_dirty_state()
@@ -1288,10 +1348,11 @@ class WallpaperSettingsPanel(wx.Panel):
                 offsets=_fitted(shown.offsets, count, "0,0"),
                 spangroup_choices=_fitted(shown.spangroup_choices, count, 0),
             )
-        return self.loaded_profile, shown, self._pick
+        return self.loaded_profile, shown, (self._pick, dict(self._pick_by_display))
 
-    def carry_over(self, loaded, shown, pick):
+    def carry_over(self, loaded, shown, picks):
         """Show again what ``carried_over`` took from the editor this one replaces."""
+        pick, pick_by_display = picks
         current = self.store.get(loaded.profile_id) if loaded is not None else None
         if current is not None:
             self._select_in_dropdown(current.profile.name)
@@ -1303,7 +1364,10 @@ class WallpaperSettingsPanel(wx.Panel):
             self._write_form(shown)
             self.refresh_layout_preview()
             self._loading = False
-        self._pick = pick if current is not None or shown is not None else None
+        if current is not None or shown is not None:
+            self._pick, self._pick_by_display = pick, pick_by_display
+        else:
+            self._clear_pick()
         self._update_dirty_state()
         if self._vanished_sources():
             show_message_dialog(VANISHED_SOURCES_MESSAGE, "Displays changed", self.frame)
@@ -1356,9 +1420,13 @@ class WallpaperSettingsPanel(wx.Panel):
             case answer:
                 assert_never(answer)
 
-    def _pick_image(self):
-        """The image clicked in the sources, if any."""
-        return self._pick[1] if self._pick is not None else None
+    def _picked_images(self):
+        """The images clicked in the sources, if any: one, or in multi mode one per display
+        (the others from the profile's selection; none while a display has no image)."""
+        if self.span_mode != "multi":
+            return [self._pick[1]] if self._pick is not None else None
+        images = self._multi_selection()
+        return images if self._pick_by_display and None not in images else None
 
     def _show_problems(self, problems: Problems):
         """Tell the user what keeps the profile from being saved or applied."""
@@ -1377,16 +1445,17 @@ class WallpaperSettingsPanel(wx.Panel):
             current = self._read_form()
             result = save_profile(
                 current,
-                picked=self._pick_image(),
+                picked=self._picked_images(),
                 loaded=self.loaded_profile,
                 store=self.store,
                 session=self.session,
+                settings=self.settings,
                 rebind_hotkey=self._rebind_hotkey,
             )
             if isinstance(result, Problems):
                 self._show_problems(result)
                 return False
-            self._pick = None
+            self._clear_pick()
             self._remember_edited(result.stored.profile_id)
             self.update_choiceprofile()
             self._select_in_dropdown(current.name)
@@ -1406,7 +1475,8 @@ class WallpaperSettingsPanel(wx.Panel):
         """Empties the wallpaper profile config fields."""
         self._loading = True
         self.loaded_profile = None
-        self._pick = None
+        self._clear_pick()
+        self._set_source_note("")
         self._select_in_dropdown(NEW_PROFILE_LABEL)
 
         self.refresh_path_listctrl(False, migrate_paths=False)

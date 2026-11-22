@@ -36,6 +36,12 @@ class Numbered:
         self.name = name
         self.number = 1
         self.pinned = None
+        self.vanished = []
+        self.drops = {}
+
+    def take_skipped(self):
+        skipped, self.vanished = self.vanished, []
+        return skipped
 
     def pin(self, files):
         self.pinned = list(files)
@@ -48,6 +54,7 @@ class Numbered:
 
     def advance(self):
         self.number += 1
+        self.vanished = self.drops.get(self.number, [])
         return self.current()
 
 
@@ -72,6 +79,7 @@ class Runtime:
         self.restored = []
         self.has_render = True
         self.problem = None
+        self.skipped = []
         self.set_command = "first {image}"
         self.hold = None
         self.holding = threading.Event()
@@ -82,6 +90,7 @@ class Runtime:
             FakeDesktop(),
             "layout 0",
             on_change=self.reported.append,
+            on_skipped=self.skipped.append,
             on_running_change=lambda: self.running_changes.append(self.session.running),
             set_command=lambda: self.set_command,
             clock=self.clock,
@@ -159,6 +168,34 @@ def test_each_change_reports_its_problem_or_none(runtime):
     runtime.settle()
 
     assert runtime.reported == ["Image missing", None]
+
+
+def test_images_the_selection_skipped_are_reported_once_per_change(runtime):
+    stored = saved("A")
+    stored.selection.drops = {2: ["gone.png"]}
+    runtime.session.activate(stored)
+    runtime.settle()
+    runtime.session.next()
+    runtime.settle()
+
+    assert runtime.shown == ["A-1.png", "A-2.png"]
+    assert runtime.reported == [None, None]
+    assert runtime.skipped == [["gone.png"]]
+
+
+def test_a_change_stops_when_the_selection_has_no_images_left(runtime):
+    class Emptied(Numbered):
+        def advance(self):
+            return []
+
+    stored = saved("A")
+    stored.selection = Emptied("A")
+    runtime.session.activate(stored)
+    runtime.session.next()
+    runtime.settle()
+
+    assert runtime.reported == [None, "profile 'A' has no complete selection."]
+    assert runtime.skipped == []
 
 
 def test_starting_the_running_profile_again_keeps_an_unpaused_countdown_as_it_is(runtime):
@@ -539,7 +576,7 @@ def test_a_profile_without_an_earlier_render_is_rendered_at_startup(runtime):
 
 def test_a_profile_without_a_complete_selection_is_left_alone(runtime, caplog):
     empty = saved("A")
-    empty.selection = SimpleNamespace(is_complete=lambda: False, advance=list)
+    empty.selection = SimpleNamespace(is_complete=lambda: False, advance=list, take_skipped=list)
     runtime.session.activate(empty)
     runtime.settle()
 

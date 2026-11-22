@@ -170,6 +170,15 @@ def parse_arguments(argv: Sequence[str], *, windows_names: bool) -> Request:
         if not os.path.isfile(filename):
             message = f"One of the passed image names was not a file: {filename}"
             raise CliError(message)
+    if not args.advanced:
+        for option, given in (
+            ("--offsets", args.offsets),
+            ("--perspective", args.perspective),
+            ("--spangroups", args.spangroups),
+        ):
+            if given:
+                message = f"'{option}' only works with advanced spanning: add '-a' or '--advanced'."
+                raise CliError(message)
     try:
         spangroups = profile_file.parse_spangroups(args.spangroups) if args.spangroups else None
     except ValueError as error:

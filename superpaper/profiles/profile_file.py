@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 SpanMode = Literal["single", "advanced", "multi"]
 SPAN_MODES: tuple[SpanMode, ...] = get_args(SpanMode)
-MIN_DELAY = 20
+MIN_DELAY = 5
 """The shortest slideshow delay, in seconds: rendering a wallpaper takes a while."""
 
 
@@ -326,13 +326,8 @@ def validate(profile: Profile) -> list[str]:
         problems.append("You must enter a name for the profile.")
     if profile.spanmode == "single" and len(profile.sources) > 1:
         problems.append("When spanning a single image across all monitors, only one paths field is needed.")
-    if profile.spanmode == "multi" and len(profile.sources) < 2:
-        problems.append("When setting a different image on every display, each display needs its own paths field.")
     if profile.slideshow and profile.delay < MIN_DELAY:
-        problems.append(
-            "It is advisable to set the slideshow delay to be at least "
-            f"{MIN_DELAY} seconds due to the time the image processing takes."
-        )
+        problems.append(f"The slideshow delay must be at least {MIN_DELAY} seconds.")
     return problems + _source_problems(profile)
 
 

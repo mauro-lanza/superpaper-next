@@ -13,7 +13,7 @@ from typing import assert_never
 from superpaper.geometry.canvas import DisplayArea
 from superpaper.geometry.displays import Layout
 from superpaper.geometry.perspective import Default, PerspectiveChoice
-from superpaper.hotkey_keys import format_hotkey, parse_hotkey
+from superpaper.hotkey_keys import format_hotkey, parse_hotkey, unparsable_problem
 from superpaper.profiles import profile_file
 from superpaper.profiles.profile_file import Correction, OffsetsCorrection, Profile, SpanMode
 from superpaper.profiles.profile_store import StoredProfile
@@ -218,7 +218,8 @@ def parse_form(form: ProfileForm) -> tuple[Profile, list[str]]:
         if form.sort_label is not None:
             sortmode = _SORT_MODE_OF_LABEL[form.sort_label]
     hotkey = parse_hotkey(form.hotkey) if form.hotkey_enabled else None
-
+    if form.hotkey_enabled and (problem := unparsable_problem(form.hotkey)):
+        problems.append(problem)
     # manual offsets; an empty field means no offset
     corrections: tuple[Correction, ...] = ()
     if form.offsets_applied:
@@ -272,18 +273,19 @@ def fingerprint(form: ProfileForm) -> str:
     return profile_file.serialize(profile) + "\n".join(problems)
 
 
-def chosen_images(profile: Profile, picked: str | None, loaded: StoredProfile | None) -> list[str] | None:
-    """The images chosen to show, for one image spanned (single or advanced): the file
-    clicked in the source list, or else what the profile open in the editor shows.
+def chosen_images(profile: Profile, picked: Sequence[str] | None, loaded: StoredProfile | None) -> list[str] | None:
+    """The images chosen to show: those clicked in the source list (one, or one per display
+    in multi mode), or else for one image spanned (single or advanced) what the profile
+    open in the editor shows.
 
     That profile is the one loaded, by its original name, so a rename in progress keeps
-    the selection. None for one image per display, which a slideshow or the first
-    images of the sources provide.
+    the selection. None for one image per display without a click, which a slideshow or
+    the first images of the sources provide.
     """
+    if picked and all(is_file(image) for image in picked):
+        return list(picked)
     if profile.spanmode == "multi":
         return None
-    if picked and is_file(picked):
-        return [picked]
     if loaded is not None:
         return loaded.selection.images
     return None

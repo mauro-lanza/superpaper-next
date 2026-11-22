@@ -86,6 +86,16 @@ class Selection:
         self._lock = threading.Lock()
         self._lists: list[_ImageList] | None = None
         self._pending: tuple[list[str], list[int]] | None = None
+        self._skipped: list[str] = []
+
+    def take_skipped(self) -> list[str]:
+        """The images passed over since the last call because they had gone, each once."""
+        with self._lock:
+            skipped, self._skipped = self._skipped, []
+            return skipped
+
+    def _note_skipped(self, files: Sequence[str]) -> None:
+        self._skipped += [path for path in files if path not in self._skipped]
 
     @property
     def images(self) -> list[str] | None:
@@ -105,6 +115,7 @@ class Selection:
         with self._lock:
             if self._is_complete():
                 return list(self._selected or [])
+            self._note_skipped([path for path in self._selected or [] if not os.path.isfile(path)])
             return self._next_batch(peek=True)
 
     def advance(self) -> list[str]:
@@ -152,6 +163,7 @@ class Selection:
                     self._pending = None
                 return list(files)
             self._pending = None
+            self._note_skipped([path for path in files if not os.path.isfile(path)])
             if relists == _MAX_RELISTS:
                 break
             logger.info("An image has gone since the sources were listed; listing them again.")

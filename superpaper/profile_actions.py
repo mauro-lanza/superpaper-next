@@ -7,11 +7,13 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
 from superpaper.geometry.perspective import PerspectiveChoice
+from superpaper.hotkey_keys import clash_problem
 from superpaper.profiles import profile_file
 from superpaper.profiles.form import ProfileForm, chosen_images, parse_form
 from superpaper.profiles.profile_id import NEW_PROFILE_LABEL, ProfileId, ProfileIdError
 from superpaper.profiles.profile_store import ProfileStore, StoredProfile, validate_managed_profile_id
 from superpaper.session import Session
+from superpaper.settings import Settings
 from superpaper.user_input import Offset, Problems
 
 logger = logging.getLogger(__name__)
@@ -43,16 +45,18 @@ def saved_profile(store: ProfileStore, name: str) -> StoredProfile | None:
 def save_profile(
     form: ProfileForm,
     *,
-    picked: str | None,
+    picked: Sequence[str] | None,
     loaded: StoredProfile | None,
     store: ProfileStore,
     session: Session,
+    settings: Settings,
     rebind_hotkey: RebindHotkey,
 ) -> Saved | Problems:
     """Save the profile ``form`` describes, over ``loaded`` or as a new one, if it is valid.
 
     The desktop and a running slideshow's countdown stay as they are: ``picked``, the image
-    clicked in the sources, becomes the selection, shown at the next change."""
+    clicked in the sources, becomes the selection, shown at the next change. Its hotkey
+    must not be one of the general ``settings``' or another profile's."""
     profile, problems = parse_form(form)
     logger.info("Saving profile: %s", profile)
     current_profile_id = loaded.profile_id if loaded is not None else None
@@ -62,6 +66,14 @@ def save_profile(
         except (OSError, ProfileIdError, ValueError) as error:
             problems.insert(0, str(error))
     problems += profile_file.validate(profile)
+    taken = [("the Next wallpaper hotkey", settings.hk_binding_next), ("the Pause hotkey", settings.hk_binding_pause)]
+    taken += [
+        (f"the profile '{other.profile.name}'", other.profile.hotkey)
+        for other in store.profiles
+        if other.profile_id != current_profile_id
+    ]
+    if clash := clash_problem(profile.hotkey, taken):
+        problems.append(clash)
     if problems:
         logger.info("The profile was not saved: %s", problems)
         return Problems(tuple(problems))
@@ -122,7 +134,7 @@ def check_applicable(stored: StoredProfile) -> Problems | None:
     return Problems(tuple(problems)) if problems else None
 
 
-def apply_profile(stored: StoredProfile, *, picked: str | None, session: Session) -> None:
-    """Show ``picked`` (the image clicked in the sources), or else the current image of
+def apply_profile(stored: StoredProfile, *, picked: Sequence[str] | None, session: Session) -> None:
+    """Show ``picked`` (the images clicked in the sources), or else the current image of
     ``stored``, and run it."""
     session.apply(stored, chosen_images(stored.profile, picked, None))
