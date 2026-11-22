@@ -1,4 +1,3 @@
-import configparser
 import logging
 import os
 import subprocess
@@ -11,6 +10,7 @@ from superpaper import cli
 from superpaper.cli import configure_logging, parse_offset_args
 from superpaper.desktop.process import Result
 from superpaper.geometry.display_detection import DisplayDetectionError
+from superpaper.geometry.display_store import LoadedLayout
 from superpaper.settings import read_settings
 from superpaper.user_input import OffsetError
 from tests.conftest import monitor, write_profile
@@ -275,12 +275,12 @@ def test_setimages_dispatches_one_shot_render(monkeypatch, tmp_path, app_paths, 
     def detect(config_dir, desktop):
         assert config_dir == app_paths.config
         captured["detections"] = captured.get("detections", 0) + 1
-        return layout
+        return LoadedLayout(layout, None)
 
     def show(profile, images, paths, *, desktop, layout, set_command):
         captured["render"] = (profile, images, paths, desktop, layout, set_command)
 
-    monkeypatch.setattr(cli, "detect_layout", detect)
+    monkeypatch.setattr(cli, "detect_layout_or_default", detect)
     monkeypatch.setattr(cli, "show", show)
 
     assert cli.run(["--setimages", str(image)], app_paths, desktop) == 0
@@ -302,7 +302,11 @@ def test_setimages_uses_the_saved_set_command_unless_one_is_given(
     image.touch()
     (app_paths.config / "general_settings").write_text("set_command=saved {image}\n", encoding="utf-8")
     shown = []
-    monkeypatch.setattr(cli, "detect_layout", lambda config_dir, desktop: SimpleNamespace(size_hint=lambda: ""))
+    monkeypatch.setattr(
+        cli,
+        "detect_layout_or_default",
+        lambda config_dir, desktop: LoadedLayout(SimpleNamespace(size_hint=lambda: ""), None),
+    )
     monkeypatch.setattr(cli, "show", lambda *args, set_command, **kwargs: shown.append(set_command))
 
     assert cli.run(["--setimages", str(image), *extra_arguments], app_paths, desktop) == 0
@@ -313,7 +317,9 @@ def test_setimages_uses_the_saved_set_command_unless_one_is_given(
 def test_a_wallpaper_that_cant_be_shown_exits_with_an_error(monkeypatch, tmp_path, app_paths, desktop):
     image = tmp_path / "wallpaper.png"
     image.touch()
-    monkeypatch.setattr(cli, "detect_layout", lambda config_dir, desktop: SimpleNamespace())
+    monkeypatch.setattr(
+        cli, "detect_layout_or_default", lambda config_dir, desktop: LoadedLayout(SimpleNamespace(), None)
+    )
     # The problem is logged where it happens.
     monkeypatch.setattr(cli, "show", lambda *args, **kwargs: f"The image {image} can't be opened.")
 
@@ -328,7 +334,7 @@ def test_advanced_cli_arguments_are_preserved(monkeypatch, tmp_path, app_paths, 
     image.touch()
     captured = {}
     layout = SimpleNamespace(perspective_names=lambda: ["desk"], size_hint=lambda: None)
-    monkeypatch.setattr(cli, "detect_layout", lambda config_dir, desktop: layout)
+    monkeypatch.setattr(cli, "detect_layout_or_default", lambda config_dir, desktop: LoadedLayout(layout, None))
     monkeypatch.setattr(
         cli,
         "show",
@@ -418,7 +424,9 @@ def test_an_undetected_display_size_is_mentioned_when_spanning_by_size(
     image.touch()
     arguments = ["--setimages", str(image), "--command", "setter {image}"]
     monkeypatch.setattr(
-        cli, "detect_layout", lambda config_dir, desktop: SimpleNamespace(size_hint=lambda: "Enter its size.")
+        cli,
+        "detect_layout_or_default",
+        lambda config_dir, desktop: LoadedLayout(SimpleNamespace(size_hint=lambda: "Enter its size."), None),
     )
     monkeypatch.setattr(cli, "show", lambda *args, **kwargs: None)
 
@@ -448,7 +456,7 @@ def test_profile_launch_returns_after_the_tray_quits(monkeypatch, app_paths, des
     tray_calls = []
     app.run = lambda paths, settings, desktop, profile=None: tray_calls.append(profile)
     monkeypatch.setitem(sys.modules, "superpaper.ui.app", app)
-    monkeypatch.setattr(cli, "detect_layout", lambda config_dir, desktop: None)
+    monkeypatch.setattr(cli, "detect_layout_or_default", lambda config_dir, desktop: LoadedLayout(None, None))
 
     assert cli.run(["--profile", "saved"], app_paths, desktop) == 0
     assert [profile_id.value for profile_id in tray_calls] == ["saved"]
@@ -458,7 +466,9 @@ def test_profile_launch_returns_after_the_tray_quits(monkeypatch, app_paths, des
 def test_invalid_profile_id_fails_before_inventory_or_display_data(monkeypatch, app_paths, desktop):
     profiles = app_paths.profiles
     (profiles / "existing.profile").write_text("name=existing\n", encoding="utf-8")
-    monkeypatch.setattr(cli, "detect_layout", lambda config_dir, desktop: pytest.fail("display data was requested"))
+    monkeypatch.setattr(
+        cli, "detect_layout_or_default", lambda config_dir, desktop: pytest.fail("display data was requested")
+    )
     monkeypatch.setattr(cli.profile_store, "discover", lambda paths: pytest.fail("inventory was constructed"))
 
     assert cli.run(["--profile", "../invalid"], app_paths, desktop) == 1
@@ -468,8 +478,6 @@ def test_invalid_profile_id_fails_before_inventory_or_display_data(monkeypatch, 
     ("error", "message"),
     [
         (DisplayDetectionError(3), "No displays could be detected"),
-        (ValueError("bad"), "The saved display layout could not be read"),
-        (configparser.Error("bad"), "The saved display layout could not be read"),
         (OSError("disk"), "Superpaper's files could not be read or written"),
     ],
 )
@@ -479,7 +487,7 @@ def test_profile_launch_reports_layout_failure(monkeypatch, app_paths, desktop, 
     def fail(config_dir, desktop):
         raise error
 
-    monkeypatch.setattr(cli, "detect_layout", fail)
+    monkeypatch.setattr(cli, "detect_layout_or_default", fail)
 
     assert cli.run(["--profile", "existing"], app_paths, desktop) == 1
     assert message in caplog.text
@@ -498,7 +506,7 @@ def test_profile_lookup_accepts_valid_unicode(monkeypatch, app_paths, desktop):
 
     app.run = run
     monkeypatch.setitem(sys.modules, "superpaper.ui.app", app)
-    monkeypatch.setattr(cli, "detect_layout", lambda config_dir, desktop: None)
+    monkeypatch.setattr(cli, "detect_layout_or_default", lambda config_dir, desktop: LoadedLayout(None, None))
 
     with pytest.raises(SystemExit):
         cli.run(["--profile", "Työ"], app_paths, desktop)
@@ -522,7 +530,7 @@ def test_profile_launch_accepts_profiles_saved_by_older_versions(monkeypatch, tm
     calls = []
     app.run = lambda paths, settings, desktop, profile=None: calls.append(profile)
     monkeypatch.setitem(sys.modules, "superpaper.ui.app", app)
-    monkeypatch.setattr(cli, "detect_layout", lambda config_dir, desktop: None)
+    monkeypatch.setattr(cli, "detect_layout_or_default", lambda config_dir, desktop: LoadedLayout(None, None))
 
     assert cli.run(["--profile", "saved"], app_paths, desktop) == 0
     assert [profile_id.value for profile_id in calls] == ["saved"]
@@ -535,7 +543,7 @@ def test_profile_lookup_rejects_malformed_content_before_tray(monkeypatch, app_p
     calls = []
     app.run = lambda paths, settings, desktop, profile=None: calls.append(profile)
     monkeypatch.setitem(sys.modules, "superpaper.ui.app", app)
-    monkeypatch.setattr(cli, "detect_layout", lambda config_dir, desktop: None)
+    monkeypatch.setattr(cli, "detect_layout_or_default", lambda config_dir, desktop: LoadedLayout(None, None))
 
     assert cli.run(["--profile", "saved"], app_paths, desktop) == 1
 
@@ -562,18 +570,40 @@ def test_an_empty_image_name_is_refused(app_paths, desktop, caplog):
         ("display_systems.dat", "[{key}]\nppi_norm_offsets = 0,0\n", "layout {key}"),
     ],
 )
-def test_a_corrupt_saved_layout_exits_with_a_message_naming_the_file(
-    monkeypatch, tmp_path, app_paths, desktop, display_layout, caplog, filename, content, named
+def test_a_corrupt_saved_layout_falls_back_to_the_default_with_a_warning_on_stderr(
+    monkeypatch, tmp_path, app_paths, desktop, display_layout, capsys, filename, content, named
 ):
     image = tmp_path / "wallpaper.png"
     image.touch()
     key = display_layout([monitor(0, 0, 1920, 1080, 527, 296, "A")]).key
-    (app_paths.config / filename.format(key=key)).write_text(content.format(key=key), encoding="utf-8")
-    monkeypatch.setattr(cli, "show", lambda *args, **kwargs: pytest.fail("rendered"))
+    path = app_paths.config / filename.format(key=key)
+    path.write_text(content.format(key=key), encoding="utf-8")
+    rendered = []
+    monkeypatch.setattr(cli, "show", lambda *args, layout, **kwargs: rendered.append(layout))
 
-    with caplog.at_level(logging.ERROR):
-        assert cli.run(["--setimages", str(image)], app_paths, desktop) == 1
+    assert cli.run(["--setimages", str(image)], app_paths, desktop) == 0
 
-    message = next(record.getMessage() for record in caplog.records if "could not be read" in record.getMessage())
-    assert filename.format(key=key) in message
-    assert named.format(key=key) in message
+    (warning,) = capsys.readouterr().err.splitlines()
+    assert warning.startswith("Warning: The saved display layout can't be used")
+    assert filename.format(key=key) in warning
+    assert named.format(key=key) in warning
+    assert [layout.is_valid() for layout in rendered] == [True]
+    assert path.read_text(encoding="utf-8") == content.format(key=key)
+
+
+def test_an_overlapping_saved_layout_falls_back_to_the_default_with_a_warning_on_stderr(
+    monkeypatch, tmp_path, app_paths, desktop, capsys
+):
+    from tests.geometry.conftest import OVERLAPPING_DAT, OVERLAPPING_MONITORS
+
+    image = tmp_path / "wallpaper.png"
+    image.touch()
+    desktop.monitors = OVERLAPPING_MONITORS
+    (app_paths.config / "display_systems.dat").write_text(OVERLAPPING_DAT, encoding="utf-8")
+    rendered = []
+    monkeypatch.setattr(cli, "show", lambda *args, layout, **kwargs: rendered.append(layout))
+
+    assert cli.run(["--setimages", str(image)], app_paths, desktop) == 0
+
+    assert "the displays overlap" in capsys.readouterr().err
+    assert [layout.is_valid() for layout in rendered] == [True]

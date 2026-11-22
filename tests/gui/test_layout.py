@@ -138,10 +138,11 @@ def test_the_perspective_dialog_has_a_row_per_display(running_work, perspective_
 
 
 def study_dialog(gui_env, editor):
-    """A perspective dialog on unsaved diagonals, filled in to save the perspective "study" as the default."""
+    """A perspective dialog on unsaved diagonals and bezels, filled in to stage the perspective "study" as the default."""
     editor.staged.layout = editor.staged.layout.with_diagonals(
         [55.0] * len(editor.staged.layout.displays)
     ).with_initial_offsets()
+    stage_bezels(editor, 9.0)
     dialog = gui_env.open_perspectives(editor)
     dialog.warn_large_img = True
     dialog.tc_name.SetValue("study")
@@ -150,73 +151,92 @@ def study_dialog(gui_env, editor):
     return dialog
 
 
-class SavedStudy:
-    """The perspective "study" saved while the editor holds an unsaved band edit."""
+class StagedStudy:
+    """The perspective "study" staged in the dialog while the editor holds unsaved band edits."""
 
     def __init__(self, gui_env, running_work, editor):
         self.editor = editor
         self.config = gui_env.paths.config
-        # Saving the band first gives display_systems.dat for the perspective save to leave alone.
+        # Saving the band first gives display_systems.dat for the perspective to be staged against.
         editor.display_band.onSave(None)
         gui_env.settle(running_work)
-        self.session_layout = running_work.session.layout
-        self.session_bezels = self.session_layout.bezels_in_mm()
-        self.saved_max_ppi = self.session_layout.max_ppi()
+        self.saved_dat = self.dat()
         self.dialog = study_dialog(gui_env, editor)
-        self.saved_bezel_lines = self.bezel_lines()
-        stage_bezels(editor, 9.0)
         self.dialog.onSave(None)
-        self.saved_dat = (self.config / "display_systems.dat").read_text(encoding="utf-8")
-        self.saved_persp = (self.config / f"{editor.staged.layout.key}.persp").read_text(encoding="utf-8")
 
-    def bezel_lines(self):
-        text = (self.config / "display_systems.dat").read_text(encoding="utf-8")
-        return [line for line in text.splitlines() if "bezel_mms" in line]
+    def dat(self):
+        return (self.config / "display_systems.dat").read_text(encoding="utf-8")
+
+    def persp_path(self):
+        return self.config / f"{self.editor.staged.layout.key}.persp"
 
 
 @pytest.fixture
-def saved_study(gui_env, running_work, editor):
-    return SavedStudy(gui_env, running_work, editor)
+def staged_study(gui_env, running_work, editor):
+    return StagedStudy(gui_env, running_work, editor)
 
 
-def test_a_perspective_save_leaves_the_unsaved_band_edit_unsaved_in_the_editor_and_on_disk(
-    running_work, editor, saved_study
-):
-    assert [line for line in saved_study.saved_dat.splitlines() if "bezel_mms" in line] == saved_study.saved_bezel_lines
-    assert editor.staged.layout.bezels_in_mm()[0] == (9.0, 0.0)
-    assert running_work.session.layout != editor.staged.layout
-    assert running_work.session.layout.bezels_in_mm() == saved_study.session_bezels
-
-
-def test_the_editor_stages_its_own_layout_and_the_dialog_works_on_the_saved_one(editor, saved_study):
-    assert saved_study.dialog.layout.bezels_in_mm() == saved_study.session_bezels
-    assert editor.staged.layout.bezels_in_mm() != saved_study.session_bezels
-    assert saved_study.session_layout.bezels_in_mm() == saved_study.session_bezels
-
-
-def test_the_saved_perspective_is_converted_with_the_saved_layouts_density(editor, saved_study):
-    depth_line = next(line for line in saved_study.saved_persp.splitlines() if line.startswith("viewer_pos"))
-    viewer_depth = float(depth_line.split("=")[1].split(",")[2])
-    assert abs(viewer_depth - 600 * saved_study.saved_max_ppi / 25.4) < 1e-6
-    assert editor.staged.layout.max_ppi() != saved_study.saved_max_ppi
-
-
-def test_a_saved_perspective_becomes_the_default_in_memory_and_on_disk_with_no_scratch_entry(editor, saved_study):
+def test_a_perspective_is_staged_with_the_band_and_nothing_is_written(running_work, editor, staged_study):
     assert editor.staged.layout.default_perspective == "study"
     assert sorted(editor.staged.layout.perspective_names()) == ["study"]
-    assert "def_perspective = study" in saved_study.saved_dat
-    assert saved_study.saved_persp.startswith("[study]\n")
-    assert "\0" not in saved_study.saved_dat + saved_study.saved_persp
+    assert staged_study.dat() == staged_study.saved_dat
+    assert not staged_study.persp_path().exists()
+    assert running_work.session.layout.default_perspective is None
+    assert editor.display_band.button_system_save.IsEnabled()
 
 
-def test_the_perspective_dialogs_test_renders_a_draft(gui_env, running_work, saved_study):
+def test_a_staged_perspective_alone_makes_the_band_unsaved(gui_env, running_work, editor):
+    band = editor.display_band
+    band.onSave(None)
+    gui_env.settle(running_work)
+    assert not band.button_system_save.IsEnabled()
+
+    dialog = gui_env.open_perspectives(editor)
+    dialog.tc_name.SetValue("study")
+    dialog.tclist_vieweroffs[2].SetValue("600")
+    dialog.onSave(None)
+
+    assert band.button_system_save.IsEnabled()
+    assert band.button_system_revert.IsEnabled()
+
+
+def test_the_band_save_writes_the_staged_perspective_with_the_staged_layout(
+    gui_env, running_work, editor, staged_study
+):
+    editor.display_band.onSave(None)
+    gui_env.settle(running_work)
+
+    assert "def_perspective = study" in staged_study.dat()
+    assert "bezel_mms = 9.0,0.0;0.0,0.0" in staged_study.dat()
+    assert staged_study.persp_path().read_text(encoding="utf-8").startswith("[study]\n")
+    assert running_work.session.layout.default_perspective == "study"
+    assert not editor.display_band.button_system_save.IsEnabled()
+
+
+def test_the_band_revert_discards_the_staged_perspective(editor, staged_study):
+    editor.display_band.onRevert(None)
+
+    assert editor.staged.layout.perspective_names() == []
+    assert editor.staged.layout.default_perspective is None
+    assert not editor.display_band.button_system_save.IsEnabled()
+    assert not staged_study.persp_path().exists()
+
+
+def test_the_staged_perspective_is_converted_with_the_staged_layouts_density(editor, staged_study):
+    study = editor.staged.layout.perspective("study")
+
+    assert abs(study.viewer_pos[2] - 600 * editor.staged.layout.max_ppi() / 25.4) < 1e-6
+
+
+def test_the_perspective_dialogs_test_renders_a_draft(gui_env, running_work, staged_study):
     before = drafts(gui_env.paths.cache)
     gui_env.shown()
-    saved_study.dialog.test_image = str(gui_env.images / "c.png")
-    saved_study.dialog.onTestWallpaper(None)
+    staged_study.dialog.test_image = str(gui_env.images / "c.png")
+    staged_study.dialog.onTestWallpaper(None)
     gui_env.settle(running_work)
     assert drafts(gui_env.paths.cache) != before
     assert not gui_env.shown()
+    assert staged_study.dat() == staged_study.saved_dat
 
 
 @pytest.fixture

@@ -346,5 +346,4 @@ def saved_layout(gui_env):
     )
     layout = layout.with_perspective(wall, use_perspective=True, is_default=False)
     display_store.save_layout(gui_env.paths.config, layout)
-    display_store.save_perspective_choice(gui_env.paths.config, layout)
     return layout

@@ -132,7 +132,7 @@ def test_a_layout_is_never_changed_an_edit_is_a_new_layout(monkeypatch, saved_la
 
     with pytest.raises(FrozenInstanceError):
         layout.use_perspective = False  # ty: ignore[invalid-assignment]
-    assert edited.ppi_norm_offsets == ((5, 6), (5, 6))
+    assert edited.ppi_norm_offsets == ((5, 6), (4005, 6))
     assert layout.ppi_norm_offsets == offsets
     assert layout.uses_user_diagonals and layout.bezels_in_mm() == [(10.5, 0.0), (0.0, 0.0)]
 

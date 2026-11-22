@@ -1,25 +1,23 @@
-"""Saving a perspective from the dialog's fields."""
+"""Staging a perspective from the dialog's fields."""
 
 import re
 from dataclasses import astuple
 
 import pytest
 
-from superpaper.geometry import canvas, display_store
-from superpaper.geometry.display_store import SaveFailed
+from superpaper.geometry import canvas
 from superpaper.geometry.perspective import Perspective, Swivel, SwivelAxis, Tilt
 from superpaper.geometry.perspective_form import (
     NeedsConfirm,
     PerspectiveForm,
-    Saved,
+    Staged,
     blank_form,
     check_new_perspective_name,
     form_from,
     parse_rotations_mm,
     parse_viewer_offsets_mm,
     perspective_from_mm,
-    save_choice,
-    save_perspective,
+    stage_perspective,
 )
 from superpaper.user_input import Problems
 
@@ -47,34 +45,32 @@ def form(**changes):
     return PerspectiveForm(**(fields | changes))
 
 
-def save(layout, tmp_path, form_=None, *, warn_large=True, confirmed=False):
-    return save_perspective(
+def stage(layout, form_=None, *, warn_large=True, confirmed=False):
+    return stage_perspective(
         form_ or form(),
         layout=layout,
         offsets=((0, 0), (0, 0)),
         warn_large=warn_large,
         confirmed=confirmed,
-        config_dir=tmp_path,
     )
 
 
-def test_a_valid_form_is_saved_into_the_layout_and_its_file(layout, tmp_path):
-    result = save(layout, tmp_path)
+def test_a_valid_form_is_staged_into_the_layout(layout):
+    result = stage(layout)
 
-    assert isinstance(result, Saved)
+    assert isinstance(result, Staged)
     assert result.layout.default_perspective == "desk"
     assert result.layout.perspective("desk").central_display == 0
     assert result.layout.perspective("desk").viewer_pos[2] == pytest.approx(600 * layout.max_ppi() / 25.4)
-    assert display_store.load(tmp_path, layout.displays).perspectives[0].name == "desk"
+    assert layout.perspective("desk") is None
 
 
-def test_a_form_without_a_name_is_a_problem_and_saves_nothing(layout, tmp_path):
-    assert save(layout, tmp_path, form(name="")) == Problems(("Profile name is required.",))
-    assert not list(tmp_path.iterdir())
+def test_a_form_without_a_name_is_a_problem(layout):
+    assert stage(layout, form(name="")) == Problems(("Profile name is required.",))
 
 
-def test_a_new_perspective_cannot_take_a_reserved_name(layout, tmp_path):
-    result = save(layout, tmp_path, form(name="Default"))
+def test_a_new_perspective_cannot_take_a_reserved_name(layout):
+    result = stage(layout, form(name="Default"))
 
     assert isinstance(result, Problems)
     assert "reserved" in result.messages[0]
@@ -88,55 +84,32 @@ def test_a_new_perspective_cannot_take_a_reserved_name(layout, tmp_path):
         ({"rotation_cells": (ZEROS, ("0", "0", "0", "oops", "0", "0"))}, "Display 1, 'Tilt angle'"),
     ],
 )
-def test_fields_that_are_not_numbers_are_a_problem(layout, tmp_path, changes, message):
-    result = save(layout, tmp_path, form(**changes))
+def test_fields_that_are_not_numbers_are_a_problem(layout, changes, message):
+    result = stage(layout, form(**changes))
 
     assert isinstance(result, Problems)
     assert message in result.messages[0]
 
 
-def test_a_large_intermediate_image_needs_confirming_before_anything_is_saved(layout, tmp_path, monkeypatch):
+def test_a_large_intermediate_image_needs_confirming_before_it_is_staged(layout, monkeypatch):
     monkeypatch.setattr(canvas, "MAX_PERSPECTIVE_CANVAS", 10)
 
-    result = save(layout, tmp_path)
+    result = stage(layout)
 
     assert isinstance(result, NeedsConfirm)
     assert "Intermediate resolution with these settings is" in result.message
-    assert not list(tmp_path.iterdir())
 
 
-def test_a_confirmed_large_image_is_saved(layout, tmp_path, monkeypatch):
+def test_a_confirmed_large_image_is_staged(layout, monkeypatch):
     monkeypatch.setattr(canvas, "MAX_PERSPECTIVE_CANVAS", 10)
 
-    assert isinstance(save(layout, tmp_path, confirmed=True), Saved)
+    assert isinstance(stage(layout, confirmed=True), Staged)
 
 
-def test_the_size_warning_can_be_turned_off(layout, tmp_path, monkeypatch):
+def test_the_size_warning_can_be_turned_off(layout, monkeypatch):
     monkeypatch.setattr(canvas, "MAX_PERSPECTIVE_CANVAS", 10)
 
-    assert isinstance(save(layout, tmp_path, warn_large=False), Saved)
-
-
-def test_a_file_that_cannot_be_written_is_a_failure_with_the_layout_unchanged(layout, tmp_path):
-    blocked = tmp_path / "file"
-    blocked.write_text("")
-
-    result = save_perspective(
-        form(),
-        layout=layout,
-        offsets=((0, 0), (0, 0)),
-        warn_large=False,
-        confirmed=False,
-        config_dir=blocked,
-    )
-
-    assert isinstance(result, SaveFailed)
-    assert result.message.startswith("The perspective settings could not be saved: ")
-    assert layout.perspective("desk") is None
-
-
-def test_the_choice_alone_can_be_saved(layout, tmp_path):
-    assert save_choice(tmp_path, layout.with_use_perspective(False)) is None
+    assert isinstance(stage(layout, warn_large=False), Staged)
 
 
 def test_a_blank_form_is_neutral_for_every_display(layout):
@@ -149,8 +122,8 @@ def test_a_blank_form_is_neutral_for_every_display(layout):
     assert blank.use_perspective == layout.use_perspective
 
 
-def test_a_blank_form_is_not_a_saveable_perspective_until_named_and_given_a_distance(layout, tmp_path):
-    assert isinstance(save(layout, tmp_path, blank_form(layout)), Problems)
+def test_a_blank_form_is_not_a_stageable_perspective_until_named_and_given_a_distance(layout):
+    assert isinstance(stage(layout, blank_form(layout)), Problems)
 
 
 def test_a_stored_perspective_is_shown_in_millimetres(layout):
@@ -177,7 +150,7 @@ def test_a_perspective_that_is_not_the_default_is_not_shown_as_default(layout):
     assert not form_from(stored, layout).is_default
 
 
-def test_showing_a_perspective_and_saving_it_again_gives_the_same_perspective(layout, tmp_path):
+def test_showing_a_perspective_and_staging_it_again_gives_the_same_perspective(layout):
     ppm = layout.max_ppi() / 25.4
     stored = Perspective(
         "desk",
@@ -188,9 +161,9 @@ def test_showing_a_perspective_and_saving_it_again_gives_the_same_perspective(la
     )
     with_it = layout.with_perspective(stored, use_perspective=True, is_default=True)
 
-    result = save(with_it, tmp_path, form_from(stored, with_it))
+    result = stage(with_it, form_from(stored, with_it))
 
-    assert isinstance(result, Saved)
+    assert isinstance(result, Staged)
     assert flatten(result.layout.perspective("desk")) == pytest.approx(flatten(stored))
 
 
