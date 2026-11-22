@@ -170,6 +170,8 @@ class WallpaperPreviewPanel(wx.Panel):
             st_bmp.SetBitmap(bmp)
 
     def refresh_preview(self, use_ppi_px=False):
+        if 0 in self.GetSize():  # not laid out yet; the resize that follows draws it
+            return
         if use_ppi_px:
             self.dtop_canvas_px = canvas.desktop_extent_with_bezels(self.display_data)
         else:

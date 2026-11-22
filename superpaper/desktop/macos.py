@@ -5,14 +5,21 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
-from AppKit import NSScreen, NSWorkspace  # ty:ignore[unresolved-import]
-from Foundation import NSURL  # ty:ignore[unresolved-import]
+from AppKit import (  # ty:ignore[unresolved-import]
+    NSApplicationDidChangeScreenParametersNotification,  # ty:ignore[unresolved-import]
+    NSScreen,  # ty:ignore[unresolved-import]
+    NSWorkspace,  # ty:ignore[unresolved-import]
+)
+from Foundation import NSURL, NSNotificationCenter  # ty:ignore[unresolved-import]
 
 from superpaper.desktop.monitors import Monitor
 from superpaper.desktop.process import Result, run
 from superpaper.desktop.process import run_hook as run_hook
 from superpaper.desktop.tray_menu import MenuEntry, TrayHandle
 from superpaper.desktop.wallpaper import Pieces, ProfileWallpapers, Wallpaper
+
+_screen_observer: Any = None
+_screen_block: Callable[[Any], None] | None = None
 
 
 def init_main_loop() -> None:
@@ -91,6 +98,21 @@ def open_folder(folder: Path) -> Result:
 def detect_monitors() -> list[Monitor]:
     """The screens in pixels from the top-left corner of the primary screen."""
     return [monitor for monitor, _screen in _screens()]
+
+
+def watch_displays(on_change: Callable[[], None]) -> bool:
+    """Call ``on_change()`` on the main thread when the screen parameters change; always True."""
+    global _screen_observer, _screen_block
+
+    def block(notification: Any) -> None:
+        on_change()
+
+    # NSNotificationCenter doesn't keep the Python callable alive on its own.
+    _screen_block = block
+    _screen_observer = NSNotificationCenter.defaultCenter().addObserverForName_object_queue_usingBlock_(
+        NSApplicationDidChangeScreenParametersNotification, None, None, block
+    )
+    return True
 
 
 def _screens() -> list[tuple[Monitor, Any]]:

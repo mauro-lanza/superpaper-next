@@ -53,6 +53,14 @@ def test_an_unknown_platform_sets_nothing_and_says_so():
     assert unknown.setter_problem("") is None
 
 
+def test_an_unknown_platform_cannot_watch_the_displays():
+    assert unknown.watch_displays(lambda: None) is False
+
+
+def test_windows_reports_display_changes_through_wx_so_it_registers_nothing(windows):
+    assert windows.watch_displays(lambda: None) is True
+
+
 @pytest.mark.parametrize("module", [linux, unknown])
 def test_linux_and_unknown_defaults_are_png_renders_hotkeys_and_portable_profile_names(module):
     assert module.render_extension() == "png"

@@ -33,7 +33,10 @@ from superpaper.ui.message import (
     ask_apply_with_unsaved_displays,
     ask_unsaved_changes,
     draft_shown,
+    in_modal,
     show_message_dialog,
+    show_modal,
+    when_modals_closed,
 )
 from superpaper.ui.perspective_dialog import PerspectiveConfig
 from superpaper.ui.preview import WallpaperPreviewPanel
@@ -43,6 +46,14 @@ from superpaper.user_input import Offset, OffsetError, Problems
 logger = logging.getLogger(__name__)
 
 RUNNING_MARKER = " (running)"
+VANISHED_SOURCES_MESSAGE = (
+    "Some sources are listed for displays that are no longer connected. They are kept, but not shown."
+)
+
+
+def _fitted(values, count, filler):
+    """``values`` cut or filled up with ``filler`` to ``count`` entries."""
+    return tuple(values[:count]) + (filler,) * (count - len(values))
 
 
 class StagedLayout:
@@ -57,7 +68,12 @@ class StagedLayout:
 
 
 class ConfigFrame(wx.Frame):
-    """The wallpaper configuration window: see WallpaperSettingsPanel."""
+    """The wallpaper configuration window: see WallpaperSettingsPanel.
+
+    ``layout`` is the display layout it opens on, and ``watch_layout(callback)`` calls back
+    with the new layout when the displays change meanwhile, and returns what stops it. The
+    panel is then built again for the new displays, carrying over the profile it shows.
+    """
 
     def __init__(
         self,
@@ -66,6 +82,8 @@ class ConfigFrame(wx.Frame):
         store,
         session,
         *,
+        layout,
+        watch_layout,
         update_settings,
         refresh_displays,
         rebind_hotkey,
@@ -74,8 +92,9 @@ class ConfigFrame(wx.Frame):
         watch_profiles,
     ):
         wx.Frame.__init__(self, parent=None, title="Superpaper Wallpaper Configuration")
-        frame_sizer = wx.BoxSizer(wx.VERTICAL)
-        config_panel = WallpaperSettingsPanel(
+        self._frame_sizer = wx.BoxSizer(wx.VERTICAL)
+        self._build_panel = partial(
+            WallpaperSettingsPanel,
             self,
             paths,
             get_settings,
@@ -88,16 +107,54 @@ class ConfigFrame(wx.Frame):
             remember_edited=remember_edited,
             watch_profiles=watch_profiles,
         )
-        self._panel = config_panel
+        self._panel = self._build_panel(layout=layout)
+        self._newest_layout = layout
         self.Bind(wx.EVT_CLOSE, self._on_close)
-        frame_sizer.Add(config_panel, 1, wx.EXPAND)
-        self.SetSizer(frame_sizer)
+        self._frame_sizer.Add(self._panel, 1, wx.EXPAND)
+        self.SetSizer(self._frame_sizer)
         self.SetIcon(wx.Icon(str(resource("superpaper.png")), wx.BITMAP_TYPE_PNG))
         self.Fit()
         self.Layout()
         self.Center()
         self.Show()
         self.SetMinSize(wx.Size(800, 600))
+        # Last, so that a constructor that fails leaves nothing watching.
+        self._stop_watching_layout = watch_layout(self._displays_changed)
+        self.Bind(wx.EVT_WINDOW_DESTROY, self._on_destroy)
+
+    def _on_destroy(self, event):
+        event.Skip()
+        # Child windows send this too.
+        if event.GetEventObject() is self:
+            self._stop_watching_layout()
+
+    def _displays_changed(self, layout):
+        """The displays changed: show their layout. Unsaved display settings are only dropped
+        if the user agrees; if not, the editor stays as it is. While a modal is open, only the
+        newest layout is remembered and shown once it has closed: the handler that opened it
+        goes on with this editor's panel."""
+        self._newest_layout = layout
+        if not self or layout.key == self._panel.staged.layout.key:
+            return
+        if in_modal():
+            when_modals_closed(self._show_newest_layout)
+            return
+        old = self._panel
+        if not old.confirm_new_displays(layout):
+            return
+        carried = old.carried_over(layout)
+        size = self.GetSize()
+        new = self._build_panel(layout=layout)
+        self._frame_sizer.Replace(old, new)
+        old.Destroy()
+        self._panel = new
+        self.SetSize(size)
+        self.Layout()
+        new.carry_over(*carried)
+
+    def _show_newest_layout(self):
+        if self:
+            self._displays_changed(self._newest_layout)
 
     def _on_close(self, event):
         if self._panel.allow_close(event.CanVeto()):
@@ -116,7 +173,7 @@ class WallpaperSettingsPanel(wx.Panel):
     It edits the saved profiles in ``store``, and Apply runs one in ``session``, which it
     also tells what became of the running one. The display
     settings band and the perspective dialog work on a staged display layout,
-    which starts as the session's. ``get_settings()`` returns the general settings as they are now,
+    which starts as the detected ``layout``. ``get_settings()`` returns the general settings as they are now,
     ``update_settings(settings)`` saves them, ``refresh_displays()`` detects the
     displays again, for the session, ``rebind_hotkey(before, after)`` moves a saved
     profile's hotkey along with it, ``last_edited()`` and ``remember_edited(profile_id)``
@@ -135,6 +192,7 @@ class WallpaperSettingsPanel(wx.Panel):
         store,
         session,
         *,
+        layout,
         update_settings,
         refresh_displays,
         rebind_hotkey,
@@ -187,8 +245,8 @@ class WallpaperSettingsPanel(wx.Panel):
         self._settling = False
         # This is staged dialog state. Do not publish it until Apply/Save; live
         # field edits must not alter the layout used by background jobs. A Layout
-        # never changes, so starting from the session's needs no copy.
-        self.staged = StagedLayout(session.layout)
+        # never changes, so starting from the detected one needs no copy.
+        self.staged = StagedLayout(layout)
         self.wpprev_pnl = WallpaperPreviewPanel(
             self,
             self.staged,
@@ -254,6 +312,9 @@ class WallpaperSettingsPanel(wx.Panel):
 
         self.SetSizer(self.sizer_main)
         self.sizer_main.Fit(self.frame)
+        # Built into a window that is shown already, the preview has its size at once.
+        self.SetSize(self.frame.GetClientSize())
+        self.Layout()
 
         self.sizer_setting_sizers.Hide(self.sizer_setting_adv)
 
@@ -1071,7 +1132,7 @@ class WallpaperSettingsPanel(wx.Panel):
             num_wallpaper_area,
             "Group" if self.use_spangroups() else "Display",
         )
-        if dlg.ShowModal() == wx.ID_OK:
+        if show_modal(dlg) == wx.ID_OK:
             self.populate_lc_browse(dlg.path_list_data)
         dlg.Destroy()
 
@@ -1163,6 +1224,8 @@ class WallpaperSettingsPanel(wx.Panel):
         """Run the profile the fields describe, showing the image clicked in the sources, or
         else its current one: saved first if it has unsaved changes, and with the display
         layout saved too if the user says so."""
+        if not self._fix_vanished_sources():
+            return
         if self.loaded_profile is None or self.has_unsaved_profile_changes():
             if not self._save_profile():
                 return
@@ -1205,6 +1268,76 @@ class WallpaperSettingsPanel(wx.Panel):
         else:
             self.onCreateNewProfile(None)
 
+    def confirm_new_displays(self, layout):
+        """Whether to show ``layout`` of other displays in place of the staged one: asks
+        first if that drops unsaved display settings."""
+        if not self.display_band.has_unsaved_changes():
+            return True
+        message = "The displays changed. The unsaved display settings will be discarded. Continue?"
+        return show_message_dialog(message, "Displays changed", self.frame, style="YES_NO")
+
+    def carried_over(self, layout):
+        """What the editor for ``layout`` takes over from this one: the profile loaded, its
+        unsaved fields, fitted to the number of displays, and the clicked image. Per-display
+        sources stay as they are, also for displays that are gone."""
+        shown = self._read_form() if self.has_unsaved_profile_changes() else None
+        if shown is not None:
+            count = len(layout.displays)
+            shown = replace(
+                shown,
+                offsets=_fitted(shown.offsets, count, "0,0"),
+                spangroup_choices=_fitted(shown.spangroup_choices, count, 0),
+            )
+        return self.loaded_profile, shown, self._pick
+
+    def carry_over(self, loaded, shown, pick):
+        """Show again what ``carried_over`` took from the editor this one replaces."""
+        current = self.store.get(loaded.profile_id) if loaded is not None else None
+        if current is not None:
+            self._select_in_dropdown(current.profile.name)
+            self.populate_fields(current)
+        else:
+            self.onCreateNewProfile(None)
+        if shown is not None:
+            self._loading = True
+            self._write_form(shown)
+            self.refresh_layout_preview()
+            self._loading = False
+        self._pick = pick if current is not None or shown is not None else None
+        self._update_dirty_state()
+        if self._vanished_sources():
+            show_message_dialog(VANISHED_SOURCES_MESSAGE, "Displays changed", self.frame)
+
+    def _vanished_sources(self):
+        """The source rows of displays or groups that no longer exist."""
+        if not self.has_sources_per_target():
+            return []
+        targets = (
+            len(form.spangroups_of(self._spangroup_choices()))
+            if self.use_spangroups()
+            else len(self.staged.layout.displays)
+        )
+        return [
+            item
+            for item in range(self.path_listctrl.GetItemCount())
+            if int(self.path_listctrl.GetItemText(item, 0)) >= targets
+        ]
+
+    def _fix_vanished_sources(self):
+        """Before Save or Apply: if sources are listed for displays that are gone, ask whether
+        to remove them; returns whether to go on."""
+        vanished = self._vanished_sources()
+        if not vanished:
+            return True
+        if not show_message_dialog(
+            VANISHED_SOURCES_MESSAGE + "\n\nRemove them and go on?", "Displays changed", self.frame, style="YES_NO"
+        ):
+            return False
+        for item in reversed(vanished):
+            self.path_listctrl.DeleteItem(item)
+        self._update_dirty_state()
+        return True
+
     def _settle_displays_for_apply(self):
         """Detect the displays again for Apply and, if the display layout has unsaved
         changes, ask whether to save it first; returns whether to go on."""
@@ -1238,6 +1371,8 @@ class WallpaperSettingsPanel(wx.Panel):
     def _save_profile(self):
         """Save the profile the fields describe; tells the user and returns False if it
         can't be saved. The display layout is not saved with it, and the desktop doesn't change."""
+        if not self._fix_vanished_sources():
+            return False
         with wx.BusyCursor():
             current = self._read_form()
             result = save_profile(
@@ -1349,7 +1484,7 @@ class WallpaperSettingsPanel(wx.Panel):
             stage_perspectives=self.stage_perspectives,
             show_test_profile=self.show_test,
         )
-        dlg.ShowModal()
+        show_modal(dlg)
         dlg.Destroy()
         # Update perspective profile choices
         current_label = choice_label(self._selected_perspective())
