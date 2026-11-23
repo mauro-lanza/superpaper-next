@@ -4,7 +4,7 @@ import pytest
 
 
 def drafts(cache):
-    return {path: path.stat().st_mtime_ns for path in (cache / "preview").glob("draft-?.png")}
+    return {path: path.stat().st_mtime_ns for path in (cache / "preview").glob("draft-[0-9]*.png")}
 
 
 def bezels_with_first(editor, millimetres):

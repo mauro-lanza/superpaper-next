@@ -71,12 +71,17 @@ def appkit(monkeypatch, notification_center):
 
     def install(screens):
         set_images = []
+        options_set = []
         workspace = SimpleNamespace(
             setDesktopImageURL_forScreen_options_error_=lambda url, screen, options, error: (
-                set_images.append((screen.number, url)) or (True, None)
+                set_images.append((screen.number, url)) or options_set.append(options) or (True, None)
             )
         )
         appkit_module = ModuleType("AppKit")
+        appkit_module.options_set = options_set
+        appkit_module.NSImageScaleNone = "scale none"
+        appkit_module.NSWorkspaceDesktopImageScalingKey = "scaling key"
+        appkit_module.NSWorkspaceDesktopImageAllowClippingKey = "clipping key"
         appkit_module.NSScreen = SimpleNamespace(
             screens=lambda: [fake_screen(number, *screen) for number, screen in enumerate(screens, start=1)]
         )

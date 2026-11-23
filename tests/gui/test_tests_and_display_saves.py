@@ -15,7 +15,7 @@ def stage_bezels(editor, millimetres):
 
 
 def draft_signatures(cache):
-    return [path.read_text(encoding="utf-8") for path in (cache / "preview").glob("draft-?.png.sig")]
+    return [path.read_text(encoding="utf-8") for path in (cache / "preview").glob("draft-[0-9]*.png.sig")]
 
 
 def renders(cache, commands, start):
@@ -182,26 +182,29 @@ def restart(gui_env, superpaper):
 
 def test_a_restart_shows_the_last_render_again_while_it_is_right(gui_env, running_work):
     gui_env.settle(running_work)
-    render = str(gui_env.paths.cache / "Work-a.png")
+    (render,) = gui_env.paths.cache.glob("Work-[0-9]*.png")
 
     restarted = restart(gui_env, running_work)
 
-    assert renders(gui_env.paths.cache, gui_env.commands, 0) == [render]
+    assert renders(gui_env.paths.cache, gui_env.commands, 0) == [str(render)]
     assert restarted.session.running.profile.name == "Work"
 
 
 def test_a_restart_ignores_a_test_shown_after_the_last_render(gui_env, running_work, editor):
+    gui_env.settle(running_work)
+    (render,) = gui_env.paths.cache.glob("Work-[0-9]*.png")
     editor.onAlignTest(None)
     gui_env.settle(running_work)
     assert draft_signatures(gui_env.paths.cache)
 
     restart(gui_env, running_work)
 
-    assert renders(gui_env.paths.cache, gui_env.commands, 0) == [str(gui_env.paths.cache / "Work-a.png")]
+    assert renders(gui_env.paths.cache, gui_env.commands, 0) == [str(render)]
 
 
 def test_a_restart_renders_again_when_the_layout_was_saved_since(gui_env, running_work):
     gui_env.settle(running_work)
+    (earlier,) = gui_env.paths.cache.glob("Work-[0-9]*.png")
     gui_env.quit(running_work)
     layout = running_work.session.layout
     count = len(layout.displays)
@@ -213,11 +216,12 @@ def test_a_restart_renders_again_when_the_layout_was_saved_since(gui_env, runnin
     gui_env.settle(restarted)
 
     (shown,) = renders(gui_env.paths.cache, gui_env.commands, 0)
-    assert shown == str(gui_env.paths.cache / "Work-b.png")
+    assert shown != str(earlier)
 
 
 def test_a_restart_renders_again_when_the_profile_shows_other_images_now(gui_env, running_work):
     gui_env.settle(running_work)
+    (earlier,) = gui_env.paths.cache.glob("Work-[0-9]*.png")
     gui_env.quit(running_work)
     selected = running_work.session.running.selection.images
     other = next(str(path) for path in sorted(gui_env.images.glob("*.png")) if str(path) not in selected)
@@ -229,4 +233,5 @@ def test_a_restart_renders_again_when_the_profile_shows_other_images_now(gui_env
     gui_env.settle(restarted)
 
     assert restarted.session.running.selection.images == [other]
-    assert renders(gui_env.paths.cache, gui_env.commands, 0) == [str(gui_env.paths.cache / "Work-b.png")]
+    (shown,) = renders(gui_env.paths.cache, gui_env.commands, 0)
+    assert shown != str(earlier)

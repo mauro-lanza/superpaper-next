@@ -76,12 +76,13 @@ def test_work_runs_as_a_slideshow(running_work):
 
 def test_the_render_and_the_running_pointer_are_in_the_cache_directory(gui_env, running_work):
     cache = gui_env.paths.cache
-    assert (cache / "Work-a.png").is_file()
+    assert len(list(cache.glob("Work-[0-9]*.png"))) == 1
     assert (cache / "running_profile").read_text() == "Work"
 
 
 def test_the_custom_command_from_the_settings_set_the_wallpaper(gui_env, running_work):
-    assert ["true", str(gui_env.paths.cache / "Work-a.png")] in gui_env.commands
+    (render,) = gui_env.paths.cache.glob("Work-[0-9]*.png")
+    assert ["true", str(render)] in gui_env.commands
 
 
 def test_starting_another_profile_while_paused_runs_it(gui_env, running_work):

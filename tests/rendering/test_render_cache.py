@@ -1,6 +1,7 @@
 """Rendered wallpapers on disk: kept in turns, found by their exact names, and swept."""
 
 import os
+import re
 
 from PIL import Image
 
@@ -25,19 +26,18 @@ def touch(directory, *filenames, modified=None):
             os.utime(path, ns=(modified, modified))
 
 
-def test_renders_take_turns_so_the_one_on_screen_is_never_rewritten(tmp_path):
+def test_every_render_gets_a_new_path_and_the_older_ones_are_forgotten(tmp_path):
     work = profile_slot(tmp_path, "work")
     image = Image.new("RGB", (5, 3), (10, 20, 30))
 
     first = render_cache.save(work, image, extension="png", signature="s")
     second = render_cache.save(work, image, extension="png", signature="s")
-    assert names(tmp_path) == ["work-a.png", "work-a.png.sig", "work-b.png", "work-b.png.sig"]
     render_cache.forget_previous(second)
     third = render_cache.save(work, image, extension="png", signature="s")
     render_cache.forget_previous(third)
 
-    assert (first.name, second.name, third.name) == ("work-a.png", "work-b.png", "work-a.png")
-    assert names(tmp_path) == ["work-a.png", "work-a.png.sig"]
+    assert len({first, second, third}) == 3
+    assert names(tmp_path) == sorted([third.name, f"{third.name}.sig"])
     with Image.open(third) as saved:
         assert (saved.format, saved.size, saved.getpixel((4, 2))) == ("PNG", (5, 3), (10, 20, 30))
 
@@ -45,7 +45,7 @@ def test_renders_take_turns_so_the_one_on_screen_is_never_rewritten(tmp_path):
 def test_renders_are_saved_with_the_given_extension(tmp_path):
     saved = render_cache.save(profile_slot(tmp_path, "work"), Image.new("RGB", (5, 3)), extension="jpg", signature="s")
 
-    assert saved.name == "work-a.jpg"
+    assert saved.suffix == ".jpg"
     with Image.open(saved) as image:
         assert image.format == "JPEG"
 
@@ -55,7 +55,8 @@ def test_drafts_are_kept_apart_from_the_profiles(tmp_path):
         render_cache.draft_slot(tmp_path), Image.new("RGB", (5, 3)), extension="png", signature="s"
     )
 
-    assert saved == tmp_path / "preview" / "draft-a.png"
+    assert saved.parent == tmp_path / "preview"
+    assert re.fullmatch(r"draft-[0-9]+\.png", saved.name)
     assert names(tmp_path) == ["preview"]
 
 
@@ -105,13 +106,14 @@ def test_a_render_without_a_signature_has_none(tmp_path):
     assert render_cache.latest(profile_slot(tmp_path, "work")).signature is None
 
 
-def test_the_next_render_replaces_the_older_one(tmp_path):
-    touch(tmp_path, "work-a.png", modified=2_000_000_000)
-    touch(tmp_path, "work-b.png", modified=1_000_000_000)
-
+def test_older_renders_with_a_and_b_names_are_forgotten_and_swept(tmp_path):
+    touch(tmp_path, "work-a.png", "work-b.png", "work-b-crop-0.png", "gone-a.png")
     saved = render_cache.save(profile_slot(tmp_path, "work"), Image.new("RGB", (1, 1)), extension="png", signature="s")
 
-    assert saved.name == "work-b.png"
+    render_cache.forget_previous(saved)
+    render_cache.sweep(tmp_path, ["work"])
+
+    assert names(tmp_path) == sorted([saved.name, f"{saved.name}.sig"])
 
 
 def test_the_sweep_removes_only_renders_of_profiles_that_are_gone(tmp_path):

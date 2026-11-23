@@ -13,7 +13,7 @@ def slideshow_armed(superpaper):
 
 
 def drafts(cache):
-    return list((cache / "preview").glob("draft-?.png"))
+    return list((cache / "preview").glob("draft-[0-9]*.png"))
 
 
 def colour_at(bitmap, x, y):
@@ -33,11 +33,13 @@ def test_the_editor_has_one_offset_group_and_diagonal_field_per_display(running_
 
 
 def test_apply_runs_the_profile_and_renders_it_for_real(gui_env, running_work, editor):
+    (startup,) = gui_env.paths.cache.glob("Work-[0-9]*.png")
     editor.onApply(None)
     gui_env.settle(running_work)
     assert not drafts(gui_env.paths.cache)
-    # The renders take turns: the start-up one was a.
-    assert (gui_env.paths.cache / "Work-b.png").is_file()
+    # Every render has a new path, so the desktop never shows a cached older image.
+    (applied,) = gui_env.paths.cache.glob("Work-[0-9]*.png")
+    assert applied != startup
 
 
 @pytest.fixture
