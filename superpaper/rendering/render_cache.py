@@ -1,17 +1,18 @@
 """Rendered wallpapers on disk, in the cache directory.
 
-A saved profile's renders are named after its ProfileId's value. <id>-a.png and <id>-b.png
-(.jpg on Windows) take turns, because some desktops ignore a wallpaper file that is
-replaced in place, and <id>-a-crop-0.png and so on hold one image per display for the
-desktops that set one per display. Everything else rendered (the editor's Apply, the
-align test, the command line) is a draft, kept the same way in preview/ as draft-a.png
-and draft-b.png. Files are found by their exact names, never by a prefix.
+A saved profile's renders are named after its ProfileId's value: <id>-<number>.png (.jpg on
+Windows), and <id>-<number>-crop-0.png and so on for the desktops that set one image per
+display. Every render gets a number never used before, because macOS caches desktop images by
+path and some desktops ignore a wallpaper file that is replaced in place. Everything else
+rendered (the editor's Apply, the align test, the command line) is a draft, kept the same way
+in preview/ as draft-<number>.png. Files are found by their exact names, never by a prefix.
 """
 
 import io
 import logging
 import os
 import re
+import time
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
@@ -29,10 +30,11 @@ logger = logging.getLogger(__name__)
 _DRAFTS = "preview"
 """The cache subdirectory of the drafts."""
 
-# <stem>-<turn>[-crop-<display>].<extension>[.sig]. No file name can be read two ways, because
-# no ending of one of these names is itself one.
+# <stem>-<turn>[-crop-<display>].<extension>[.sig], where turn is a number, or a or b in the
+# names of older versions. No file name can be read two ways, because no ending of one of
+# these names is itself one.
 _RENDER_NAME = re.compile(
-    r"(?P<stem>.+)-(?P<turn>[ab])(?:-crop-(?P<piece>[0-9]+))?\.(?:png|jpg)(?P<signature>\.sig)?", re.DOTALL
+    r"(?P<stem>.+?)-(?P<turn>[ab]|[0-9]+)(?:-crop-(?P<piece>[0-9]+))?\.(?:png|jpg)(?P<signature>\.sig)?", re.DOTALL
 )
 
 
@@ -78,11 +80,11 @@ def save(slot: Slot, image: Image.Image, *, extension: str, signature: str) -> P
     """Write ``image`` as the slot's next render, as a ``jpg`` or ``png`` file, in one step,
     and return its path. ``signature`` is kept beside it, to tell later what it was made from.
 
-    The render that isn't the newest is replaced, so the one on screen stays as it is.
+    The name is new every time, so the render on screen is never rewritten.
     """
-    newest = latest(slot)
-    turn = "b" if newest is not None and newest.image.stem.endswith("-a") else "a"
-    path = slot.directory / f"{slot.stem}-{turn}.{extension}"
+    number = time.time_ns()
+    while (path := slot.directory / f"{slot.stem}-{number}.{extension}").exists():
+        number += 1
     slot.directory.mkdir(parents=True, exist_ok=True)
     write_atomically(path, _encode(image, "JPEG" if extension == "jpg" else "PNG"))
     write_atomically(_signature_path(path), signature.encode())
@@ -103,7 +105,7 @@ def cut_pieces(image: Path, layout: Layout) -> list[Path]:
 
 
 def forget_previous(image: Path) -> None:
-    """Delete the other render of ``image``'s slot, and its pieces, now that ``image`` is
+    """Delete the older renders of ``image``'s slot, and their pieces, now that ``image`` is
     on screen."""
     name = _parse(image.name)
     if name is None:

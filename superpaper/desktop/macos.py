@@ -7,8 +7,11 @@ from typing import Any
 
 from AppKit import (  # ty:ignore[unresolved-import]
     NSApplicationDidChangeScreenParametersNotification,  # ty:ignore[unresolved-import]
+    NSImageScaleNone,  # ty:ignore[unresolved-import]
     NSScreen,  # ty:ignore[unresolved-import]
     NSWorkspace,  # ty:ignore[unresolved-import]
+    NSWorkspaceDesktopImageAllowClippingKey,  # ty:ignore[unresolved-import]
+    NSWorkspaceDesktopImageScalingKey,  # ty:ignore[unresolved-import]
 )
 from Foundation import NSURL, NSNotificationCenter  # ty:ignore[unresolved-import]
 
@@ -177,9 +180,11 @@ def set_wallpaper(wallpaper: Wallpaper, *, set_command: str, profiles: ProfileWa
         return Result(f"There are {len(screens)} screens but {len(wallpaper.pieces)} wallpaper pieces.")
     workspace = NSWorkspace.sharedWorkspace()
     problems = []
+    # Without explicit options macOS picks the scaling itself and offsets the picture on some applies.
+    options = {NSWorkspaceDesktopImageScalingKey: NSImageScaleNone, NSWorkspaceDesktopImageAllowClippingKey: False}
     for screen, piece in zip(screens, wallpaper.pieces, strict=True):
         url = NSURL.fileURLWithPath_(piece)
-        _done, error = workspace.setDesktopImageURL_forScreen_options_error_(url, screen, {}, None)
+        _done, error = workspace.setDesktopImageURL_forScreen_options_error_(url, screen, options, None)
         if error:
             problems.append(f"setDesktopImageURL failed with error: {error}")
     return Result("; ".join(problems)) if problems else Result()

@@ -3,6 +3,7 @@ wrong is said, and the last wallpaper is shown again at startup."""
 
 import os
 from dataclasses import replace
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -68,10 +69,11 @@ def test_a_change_is_rendered_kept_and_shown(tmp_path, app_paths, display_layout
     assert change("simple", source, app_paths, layout, desktop) is None
     assert change("simple", source, app_paths, layout, desktop) is None
 
-    first, second = app_paths.cache / "simple-a.png", app_paths.cache / "simple-b.png"
+    first, second = (Path(handed.image) for handed in desktop.handed)
+    assert first != second
     assert desktop.handed == [Spanned(str(first)), Spanned(str(second))]
     # Once the desktop shows a render, the previous one goes.
-    assert cached(app_paths) == ["simple-b.png"]
+    assert cached(app_paths) == [second.name]
     with Image.open(second) as image:
         assert image.size == (5, 3)
     # KDE gives it to the activity named after the running profile.
@@ -86,7 +88,8 @@ def test_the_previous_render_stays_while_the_desktop_refuses_the_new_one(tmp_pat
     assert change("simple", source, app_paths, layout, desktop) == "Plasma did not take the wallpaper"
     change("simple", source, app_paths, layout, desktop)
 
-    assert cached(app_paths) == ["simple-a.png", "simple-b.png"]
+    assert cached(app_paths) == sorted(Path(handed.image).name for handed in desktop.handed)
+    assert len(desktop.handed) == 2
 
 
 def test_drafts_leave_the_profiles_renders_alone(tmp_path, app_paths, display_layout, desktop):
@@ -100,8 +103,10 @@ def test_drafts_leave_the_profiles_renders_alone(tmp_path, app_paths, display_la
         desktop,
     )
 
-    assert desktop.handed == [Spanned(str(app_paths.cache / "preview" / "draft-a.png"))]
-    assert cached(app_paths) == ["preview/draft-a.png", "simple-a.png"]
+    (handed,) = desktop.handed
+    assert Path(handed.image).parent == app_paths.cache / "preview"
+    assert Path(handed.image).name.startswith("draft-")
+    assert cached(app_paths) == sorted(["preview/" + Path(handed.image).name, "simple-a.png"])
 
 
 def test_nothing_is_shown_without_images(app_paths, display_layout, desktop, caplog):
@@ -303,6 +308,8 @@ def test_a_change_keeps_what_it_was_made_from_for_the_next_start(tmp_path, app_p
     source = [write_image(tmp_path / "source.png")]
     layout = display_layout(TINY_DISPLAYS)
     assert change("main", source, app_paths, layout, desktop) is None
+    (handed,) = desktop.handed
+    assert Path(handed.image).name.startswith("main-")
     desktop.handed.clear()
     main = SimpleNamespace(
         profile=settings("main"),
@@ -311,7 +318,7 @@ def test_a_change_keeps_what_it_was_made_from_for_the_next_start(tmp_path, app_p
     )
 
     assert wallpaper_change.show_again(main, app_paths, desktop=desktop, layout=layout, set_command="") is True
-    assert desktop.handed == [Spanned(str(app_paths.cache / "main-a.png"))]
+    assert desktop.handed == [handed]
 
 
 def test_startup_shows_the_pieces_in_display_order_where_the_desktop_takes_them(

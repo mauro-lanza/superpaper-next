@@ -13,6 +13,7 @@ def test_macos_shows_one_piece_per_screen_in_display_order(appkit):
 
     assert result.ok
     assert set_images == [(2, "/left.png"), (1, "/right.png")]
+    assert sys.modules["AppKit"].options_set == [{"scaling key": "scale none", "clipping key": False}] * 2
 
 
 def test_macos_reports_pieces_that_dont_match_the_screens(appkit):
