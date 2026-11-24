@@ -344,7 +344,7 @@ def test_startup_renders_again_what_was_made_with_other_render_settings(app_path
     assert restore(replace(settings("main"), zoom=1.5)) is False
     assert restore(replace(settings("main"), pan=(0.5, 0.0))) is False
     assert restore(replace(settings("main"), spanmode="advanced")) is False
-    assert restore(replace(settings("main"), delay=5.0, hotkey=("ctrl", "x"))) is True
+    assert restore(replace(settings("main"), delay=5.0)) is True
 
 
 def test_startup_renders_again_what_has_no_signature(app_paths, desktop, startup):

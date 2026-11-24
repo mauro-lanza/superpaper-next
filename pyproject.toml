@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "superpaper"
 dynamic = ["version"]
-description = "Cross-platform wallpaper manager that focuses on multi-monitor support. Features include ppi corrections, keyboard shortcuts, slideshow."
+description = "Cross-platform wallpaper manager that focuses on multi-monitor support. Features include ppi corrections, slideshow."
 readme = "README.md"
 requires-python = ">=3.14"
 license = "MIT"
@@ -22,14 +22,10 @@ classifiers = [
     "Programming Language :: Python :: 3.14",
     "Topic :: Utilities",
 ]
-# xcffib and xpybutil: system_hotkey imports them on Linux but does not declare them.
 dependencies = [
     "Pillow>=12.2.0",
     "screeninfo>=0.8.1",
     "numpy>=2.5.0",
-    "system_hotkey310>=1.0.5 ; sys_platform != 'darwin'",
-    "xcffib>=1.12.0 ; sys_platform == 'linux'",
-    "xpybutil>=0.0.6 ; sys_platform == 'linux'",
     "pywin32 ; sys_platform == 'win32'",
     "pyobjc-framework-Cocoa ; sys_platform == 'darwin'",
     "pyobjc-framework-Quartz ; sys_platform == 'darwin'",

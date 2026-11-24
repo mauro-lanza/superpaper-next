@@ -4,8 +4,6 @@ from dataclasses import replace
 
 import wx  # ty:ignore[unresolved-import]
 
-from superpaper.hotkey_keys import format_hotkey, parse_hotkey
-
 
 class SettingsFrame(wx.Frame):
     """The general settings window: see SettingsPanel."""
@@ -31,44 +29,29 @@ class SettingsPanel(wx.Panel):
         self._get_settings = get_settings
         self._save_settings = save_settings
         self.sizer_main = wx.BoxSizer(wx.VERTICAL)
-        self.sizer_grid_settings = wx.GridSizer(6, 2, 5, 5)
+        self.sizer_grid_settings = wx.GridSizer(3, 2, 5, 5)
         self.sizer_buttons = wx.BoxSizer(wx.HORIZONTAL)
         pnl = self
         st_logging = wx.StaticText(pnl, -1, "Logging")
-        st_usehotkeys = wx.StaticText(pnl, -1, "Use hotkeys")
         st_warn_large = wx.StaticText(pnl, -1, "Large image warning")
-        st_hk_next = wx.StaticText(pnl, -1, "Hotkey: Next wallpaper")
-        st_hk_pause = wx.StaticText(pnl, -1, "Hotkey: Pause slideshow")
         st_setcmd = wx.StaticText(pnl, -1, "Custom command")
         self.cb_logging = wx.CheckBox(pnl, -1, "")
-        self.cb_usehotkeys = wx.CheckBox(pnl, -1, "")
         self.cb_warn_large = wx.CheckBox(pnl, -1, "")
-        self.tc_hk_next = wx.TextCtrl(pnl, -1, size=wx.Size(200, -1))
-        self.tc_hk_pause = wx.TextCtrl(pnl, -1, size=wx.Size(200, -1))
         self.tc_setcmd = wx.TextCtrl(pnl, -1, size=wx.Size(200, -1))
 
         self.sizer_grid_settings.AddMany(
             [
                 (st_logging, 0, wx.ALIGN_RIGHT),
                 (self.cb_logging, 0, wx.ALIGN_LEFT),
-                (st_usehotkeys, 0, wx.ALIGN_RIGHT),
-                (self.cb_usehotkeys, 0, wx.ALIGN_LEFT),
                 (st_warn_large, 0, wx.ALIGN_RIGHT),
                 (self.cb_warn_large, 0, wx.ALIGN_LEFT),
-                (st_hk_next, 0, wx.ALIGN_RIGHT),
-                (self.tc_hk_next, 0, wx.ALIGN_LEFT),
-                (st_hk_pause, 0, wx.ALIGN_RIGHT),
-                (self.tc_hk_pause, 0, wx.ALIGN_LEFT),
                 (st_setcmd, 0, wx.ALIGN_RIGHT),
                 (self.tc_setcmd, 0, wx.ALIGN_LEFT),
             ]
         )
         g_settings = get_settings()
         self.cb_logging.SetValue(g_settings.logging)
-        self.cb_usehotkeys.SetValue(g_settings.use_hotkeys)
         self.cb_warn_large.SetValue(g_settings.warn_large_img)
-        self.tc_hk_next.ChangeValue(format_hotkey(g_settings.hk_binding_next))
-        self.tc_hk_pause.ChangeValue(format_hotkey(g_settings.hk_binding_pause))
         self.tc_setcmd.ChangeValue(g_settings.set_command)
         self.button_save = wx.Button(self, label="Save")
         self.button_close = wx.Button(self, label="Close")
@@ -88,10 +71,7 @@ class SettingsPanel(wx.Panel):
             replace(
                 self._get_settings(),
                 logging=self.cb_logging.GetValue(),
-                use_hotkeys=self.cb_usehotkeys.GetValue(),
                 warn_large_img=self.cb_warn_large.GetValue(),
-                hk_binding_next=parse_hotkey(self.tc_hk_next.GetLineText(0)),
-                hk_binding_pause=parse_hotkey(self.tc_hk_pause.GetLineText(0)),
                 set_command=self.tc_setcmd.GetLineText(0).strip(),
             )
         )

@@ -147,7 +147,6 @@ def _open_editor(app: Superpaper, open_frames: dict[str, wx.Frame]) -> None:
             refresh_displays=app.refresh_displays,
             watch_layout=app.watch_layout,
             layout=app.layout,
-            rebind_hotkey=app.rebind_hotkey,
             last_edited=lambda: app.last_edited,
             remember_edited=lambda profile_id: setattr(app, "last_edited", profile_id),
             watch_profiles=app.watch_profiles,

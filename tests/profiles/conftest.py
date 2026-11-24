@@ -10,8 +10,6 @@ def blank(**changes):
         "slideshow": False,
         "delay_minutes": "",
         "sort_label": None,
-        "hotkey_enabled": False,
-        "hotkey": "",
         "offsets_applied": False,
         "offsets": ("0,0", "0,0"),
         "spangroups_enabled": False,

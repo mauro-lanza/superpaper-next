@@ -1,6 +1,6 @@
 """The general_settings file: Superpaper's application-wide settings.
 
-Reading and writing have no side effects beyond the file itself. Logging, hotkeys and
+Reading and writing have no side effects beyond the file itself. Logging and
 the wallpaper setter are configured by their owners from the returned value.
 """
 
@@ -9,7 +9,6 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from superpaper.files import write_atomically
-from superpaper.hotkey_keys import format_hotkey, parse_hotkey
 
 SETTINGS_FILE = "general_settings"
 
@@ -19,22 +18,10 @@ class Settings:
     """Application-wide settings. A file that leaves a setting out gets these values."""
 
     logging: bool = False
-    use_hotkeys: bool = True
-    hk_binding_next: tuple[str, ...] | None = None
-    hk_binding_pause: tuple[str, ...] | None = None
     set_command: str = ""
     browse_default_dir: str = ""
     show_help: bool = True
     warn_large_img: bool = True
-
-
-def first_run_settings(*, hotkeys_by_default: bool) -> Settings:
-    """The settings a new installation starts with."""
-    return Settings(
-        use_hotkeys=hotkeys_by_default,
-        hk_binding_next=("control", "super", "w"),
-        hk_binding_pause=("control", "shift", "super", "p"),
-    )
 
 
 def read_settings(path: Path) -> Settings | None:
@@ -50,12 +37,6 @@ def read_settings(path: Path) -> Settings | None:
         match key:
             case "logging":
                 settings = replace(settings, logging=_read_flag(value, settings.logging))
-            case "use hotkeys":
-                settings = replace(settings, use_hotkeys=_read_flag(value, settings.use_hotkeys))
-            case "next wallpaper hotkey":
-                settings = replace(settings, hk_binding_next=parse_hotkey(value))
-            case "pause wallpaper hotkey":
-                settings = replace(settings, hk_binding_pause=parse_hotkey(value))
             case "set_command":
                 settings = replace(settings, set_command=value)
             case "browse_default_dir":
@@ -73,13 +54,6 @@ def write_settings(path: Path, settings: Settings) -> None:
     """Replace the file at ``path`` with ``settings``, in the format every version reads."""
     lines = [
         f"logging={_flag(settings.logging)}",
-        f"use hotkeys={_flag(settings.use_hotkeys)}",
-    ]
-    if settings.hk_binding_next:
-        lines.append("next wallpaper hotkey=" + format_hotkey(settings.hk_binding_next))
-    if settings.hk_binding_pause:
-        lines.append("pause wallpaper hotkey=" + format_hotkey(settings.hk_binding_pause))
-    lines += [
         f"show_help_at_start={_flag(settings.show_help)}",
         f"set_command={settings.set_command}",
         f"browse_default_dir={settings.browse_default_dir}",

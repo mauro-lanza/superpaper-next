@@ -142,13 +142,13 @@ def fake_tray(monkeypatch):
 
 
 def test_no_arguments_start_the_tray_after_spanning_the_desktop(monkeypatch, app_paths, desktop):
-    from superpaper.settings import first_run_settings
+    from superpaper.settings import Settings
 
     started = fake_tray(monkeypatch)
 
     assert cli.run([], app_paths, desktop) == 0
 
-    assert started == [(app_paths, first_run_settings(hotkeys_by_default=True), None)]
+    assert started == [(app_paths, Settings(), None)]
     assert desktop.spanned == [""]
 
 
@@ -172,13 +172,13 @@ def test_a_desktop_that_cant_span_is_reported_and_the_tray_still_starts(monkeypa
 
 
 def test_first_tray_start_writes_the_default_settings(monkeypatch, app_paths, desktop):
-    from superpaper.settings import first_run_settings, read_settings
+    from superpaper.settings import Settings, read_settings
 
     started = fake_tray(monkeypatch)
 
     assert cli.run([], app_paths, desktop) == 0
 
-    defaults = first_run_settings(hotkeys_by_default=True)
+    defaults = Settings()
     assert started == [(app_paths, defaults, None)]
     assert read_settings(app_paths.config / "general_settings") == defaults
 

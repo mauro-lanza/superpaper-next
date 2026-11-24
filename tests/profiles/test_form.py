@@ -85,13 +85,6 @@ def test_the_delay_and_sort_are_ignored_without_a_slideshow():
     assert (profile.delay, profile.sortmode, problems) == (600.0, "shuffle", [])
 
 
-def test_the_hotkey_is_split_at_pluses_only_when_enabled():
-    enabled = parse_form(blank(hotkey_enabled=True, hotkey=" control+super+x "))[0].hotkey
-    blanked = parse_form(blank(hotkey_enabled=True, hotkey="  "))[0].hotkey
-    disabled = parse_form(blank(hotkey_enabled=False, hotkey="control+x"))[0].hotkey
-    assert (enabled, blanked, disabled) == (("control", "super", "x"), None, None)
-
-
 def test_a_slideshow_renders_at_default_zoom_and_pan_whatever_the_sliders_say():
     slideshow = parse_form(blank(slideshow=True, delay_minutes="5", zoom_pct=150, pan_pct=(10, -20)))[0]
     fixed = parse_form(blank(zoom_pct=150, pan_pct=(10, -20)))[0]
@@ -182,7 +175,6 @@ def test_a_saved_profile_is_shown_in_the_form_as_typed(layout):
         delay=900.0,
         sortmode="date_seeded_shuffle",
         sources=(("/a",), ("/b", "/c")),
-        hotkey=("control", "x"),
         zoom=1.5,
         pan=(0.25, -0.5),
         corrections=(OffsetsCorrection(((3, 4),)),),
@@ -190,7 +182,6 @@ def test_a_saved_profile_is_shown_in_the_form_as_typed(layout):
     shown = form_from(profile, layout)
     assert shown.delay_minutes == "15.0"
     assert shown.sort_label == "Date seeded shuffle"
-    assert (shown.hotkey_enabled, shown.hotkey) == (True, "control+x")
     assert (shown.offsets_applied, shown.offsets) == (True, ("3,4", "0,0"))
     assert (shown.spangroups_enabled, shown.spangroup_choices) == (True, (1, 0))
     assert (shown.zoom_pct, shown.pan_pct) == (150, (25, -50))
@@ -215,7 +206,6 @@ def test_a_form_shown_from_a_profile_gives_the_profile_back(layout):
         spanmode="multi",
         slideshow=False,
         sources=(("/a",), ("/b",)),
-        hotkey=("alt", "z"),
         zoom=1.25,
         pan=(0.5, 0.0),
     )

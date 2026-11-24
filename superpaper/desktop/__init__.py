@@ -1,4 +1,4 @@
-"""Integration with the operating system: setting the wallpaper, the tray icon and menu, hotkeys.
+"""Integration with the operating system: setting the wallpaper, the tray icon and menu.
 
 desktop/ is the only place that runs host programs or talks to D-Bus, AppKit, the registry
 or win32. What goes wrong comes back as a Result, never as an exception, an exit or a dialog.

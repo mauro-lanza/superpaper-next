@@ -2,7 +2,7 @@
 
 A Session does all of it on one worker thread, one request at a time, in the order they
 were made: starting a profile, the next image, pause, a draft, a new display layout.
-Callers only post requests, so the tray, its menus, the hotkeys and the editor never wait
+Callers only post requests, so the tray, its menus and the editor never wait
 for a render. The slideshow's next change is the deadline of the worker's wait for the
 next request, so a slideshow that stopped has no timer left that could fire.
 

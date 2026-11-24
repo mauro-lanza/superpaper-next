@@ -1,5 +1,5 @@
 """Superpaper as it runs: the saved profiles, the session that runs them, the general
-settings, the hotkeys and the tray icon, and what connects them. The windows and dialogs
+settings and the tray icon, and what connects them. The windows and dialogs
 are the UI's; they come in as a ``Shell``."""
 
 import logging
@@ -9,9 +9,7 @@ from typing import Protocol
 
 import superpaper.geometry.display_detection as display_detection
 from superpaper.desktop.backend import Desktop
-from superpaper.desktop.hotkeys import Hotkeys
 from superpaper.geometry.displays import Layout
-from superpaper.hotkey_keys import clash_problem, format_hotkey, unparsable_problem
 from superpaper.paths import AppPaths
 from superpaper.profile_actions import carry_on_running
 from superpaper.profiles import profile_store
@@ -93,7 +91,6 @@ class Superpaper:
         if kept is not None:
             render_cache.sweep(paths.cache, [profile_id.value for profile_id in kept])
         self._run_at_startup(startup_profile)
-        self.hotkeys = self._start_hotkeys()
         # Without notifications, the displays are detected again on manual Next instead.
         self._watching_displays = shell.watch_displays(self.refresh_displays)
         self.tray = shell.make_tray(self)
@@ -148,27 +145,6 @@ class Superpaper:
         else:
             self.session.restore(previous)
 
-    def _start_hotkeys(self) -> Hotkeys | None:
-        """The system-wide hotkeys, bound; None while they are off or unavailable. Hotkeys
-        turned on or off in the settings apply after a restart."""
-        if not self.settings.use_hotkeys:
-            return None
-        try:
-            hotkeys = Hotkeys(
-                next_wallpaper=self.next_wallpaper,
-                pause=self.session.toggle_pause,
-                start_profile=self.start_profile_by_id,
-                call_soon=self._shell.call_soon,
-                report=lambda message: self._shell.notify(message, "Error"),
-                show_problems=self.desktop.hotkey_problems_in_dialog(),
-            )
-        except ImportError as error:
-            logger.warning("Could not import keyboard hotkey hook library, hotkeys will not work. Exception: %s", error)
-            return None
-        hotkeys.register_general(self.settings)
-        hotkeys.register_profiles(self.store.profiles)
-        return hotkeys
-
     def _show_at_start(self) -> None:
         """Open the help and the configuration if they are to be shown at start, and say
         once if wallpapers can't be set here or the displays' sizes aren't known."""
@@ -214,14 +190,6 @@ class Superpaper:
         if not self._watching_displays:
             self.refresh_displays()
         self.session.next()
-
-    def start_profile_by_id(self, profile_id: ProfileId) -> None:
-        """Start the profile currently loaded under ``profile_id``, if it still exists."""
-        stored = self.store.get(profile_id)
-        if stored is None:
-            logger.info("The profile bound to this hotkey, '%s', no longer exists.", profile_id.value)
-            return
-        self.start_profile(stored)
 
     def reload_profiles(self) -> None:
         """Load the profiles again and carry on running the profile that was running."""
@@ -292,12 +260,6 @@ class Superpaper:
             self._shell.call_soon(lambda: self._shell.notify(problem, "Error"))
         self._reported_layout_problem = problem
 
-    def rebind_hotkey(self, before: StoredProfile | None, after: StoredProfile | None) -> None:
-        """Rebind a profile's hotkey once it was saved, renamed or deleted: see
-        Hotkeys.profile_changed."""
-        if self.hotkeys is not None:
-            self.hotkeys.profile_changed(before, after)
-
     def update_settings(self, settings: Settings) -> bool:
         """Save ``settings`` as the general settings; windows and wallpaper changes use them
         from now on. If they can't be written the user is told and nothing changes; returns
@@ -312,44 +274,12 @@ class Superpaper:
         return True
 
     def apply_settings(self, settings: Settings) -> bool:
-        """Save the general settings from the settings window and apply them to the hotkeys;
-        returns whether they were saved. Hotkeys that can't be used are reported and nothing is saved."""
-        before = self.settings
-        if problems := self._hotkey_problems(before, settings):
-            self._shell.notify("\n".join(problems), "Error")
-            return False
+        """Save the general settings from the settings window; returns whether they were saved."""
         if not self.update_settings(settings):
             return False
-        if self.hotkeys is not None and settings.use_hotkeys:
-            self.hotkeys.register_general(settings)
-        if settings.use_hotkeys != before.use_hotkeys:
-            self._shell.notify("Hotkeys are turned on or off after an application restart.", "Info")
         if settings.logging:
             self._shell.notify("Logging is enabled after an application restart.", "Info")
         return True
-
-    def _hotkey_problems(self, before: Settings, settings: Settings) -> list[str]:
-        """What is wrong with the general hotkeys the user changed, or all of them when
-        hotkeys are turned on: a profile that already clashes doesn't block other settings."""
-        turned_on = settings.use_hotkeys and not before.use_hotkeys
-        next_keys, pause_keys = settings.hk_binding_next, settings.hk_binding_pause
-        check_next = turned_on or next_keys != before.hk_binding_next
-        check_pause = turned_on or pause_keys != before.hk_binding_pause
-        profile_keys = [
-            (f"the profile '{stored.profile.name}'", stored.profile.hotkey) for stored in self.store.profiles
-        ]
-        checks = []
-        if check_next:
-            checks.append((next_keys, [("the Pause hotkey", pause_keys), *profile_keys]))
-        if check_pause:
-            checks.append(
-                (pause_keys, [*([] if check_next else [("the Next wallpaper hotkey", next_keys)]), *profile_keys])
-            )
-        return [
-            problem
-            for keys, taken in checks
-            if (problem := unparsable_problem(format_hotkey(keys)) or clash_problem(keys, taken))
-        ]
 
     def quit(self) -> None:
         """Stop the session, take the tray icon away and close the application, unless the

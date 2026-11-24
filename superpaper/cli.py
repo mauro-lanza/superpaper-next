@@ -16,7 +16,7 @@ from superpaper.geometry.perspective import Named
 from superpaper.paths import AppPaths, ensure_dirs
 from superpaper.profiles import profile_file, profile_store
 from superpaper.profiles.profile_id import ProfileId, ProfileIdError
-from superpaper.settings import SETTINGS_FILE, first_run_settings, read_settings, write_settings
+from superpaper.settings import SETTINGS_FILE, Settings, read_settings, write_settings
 from superpaper.user_input import Offset, OffsetError
 from superpaper.wallpaper_change import show
 
@@ -244,7 +244,7 @@ def _start_tray(paths: AppPaths, desktop: Desktop, profile_id: ProfileId | None,
     settings_file = paths.config / SETTINGS_FILE
     settings = read_settings(settings_file)
     if settings is None:
-        settings = first_run_settings(hotkeys_by_default=desktop.hotkeys_by_default())
+        settings = Settings()
         write_settings(settings_file, settings)
     configure_logging(debug=debug or settings.logging, log_file=paths.cache / "log" if settings.logging else None)
     _span_desktop(desktop, settings.set_command)

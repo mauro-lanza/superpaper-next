@@ -17,7 +17,6 @@ from superpaper.profile_actions import (
 from superpaper.profiles.profile_file import OffsetsCorrection
 from superpaper.profiles.profile_id import NEW_PROFILE_LABEL, ProfileId
 from superpaper.profiles.profile_store import ProfileStore
-from superpaper.settings import Settings
 from superpaper.user_input import Problems
 from tests.profiles.conftest import blank
 
@@ -60,28 +59,15 @@ def session(store):
     return FakeSession(store)
 
 
-GENERAL = Settings()
+def save(store, session, form, *, loaded=None, picked=None):
+    return save_profile(form, picked=picked, loaded=loaded, store=store, session=session)
 
 
-def save(store, session, form, *, loaded=None, picked=None, rebinds=None, settings=GENERAL):
-    return save_profile(
-        form,
-        picked=picked,
-        loaded=loaded,
-        store=store,
-        session=session,
-        settings=settings,
-        rebind_hotkey=lambda before, after: rebinds.append((before, after)) if rebinds is not None else None,
-    )
-
-
-def test_a_valid_form_is_saved_as_a_new_profile_and_its_hotkey_bound(store, session, images):
-    rebinds = []
-    result = save(store, session, blank(sources=(("", str(images)),)), rebinds=rebinds)
+def test_a_valid_form_is_saved_as_a_new_profile(store, session, images):
+    result = save(store, session, blank(sources=(("", str(images)),)))
     assert isinstance(result, Saved)
     assert store.get(ProfileId.parse("Work", windows_names=False)) is result.stored
     assert result.stored.profile.sources == ((str(images),),)
-    assert rebinds == [(None, result.stored)]
     assert session.updates == []
 
 
@@ -102,39 +88,13 @@ def test_a_name_that_cant_be_used_comes_first_among_the_problems(store, session,
 def test_saving_over_a_loaded_profile_updates_the_session_and_follows_a_rename(store, session, images):
     first = save(store, session, blank(sources=(("", str(images)),)))
     session.running = first.stored
-    rebinds = []
-    renamed = save(
-        store, session, blank(name="Home", sources=(("", str(images)),)), loaded=first.stored, rebinds=rebinds
-    )
+    renamed = save(store, session, blank(name="Home", sources=(("", str(images)),)), loaded=first.stored)
     assert isinstance(renamed, Saved)
     assert (session.updates[0][0], session.updates[0][1]) == (
         ProfileId.parse("Work", windows_names=False),
         renamed.stored,
     )
-    assert rebinds == [(first.stored, renamed.stored)]
     assert store.get(ProfileId.parse("Work", windows_names=False)) is None
-
-
-def test_a_hotkey_that_is_unreadable_or_used_elsewhere_is_a_problem_when_saving(store, session, images):
-    sources = (("", str(images)),)
-    other = save(store, session, blank(name="Other", sources=sources, hotkey_enabled=True, hotkey="control+x"))
-    assert isinstance(other, Saved)
-    unreadable = save(store, session, blank(sources=sources, hotkey_enabled=True, hotkey="control++x"))
-    with_profile = save(store, session, blank(sources=sources, hotkey_enabled=True, hotkey="control+x"))
-    general = Settings(hk_binding_next=("control", "n"))
-    with_general = save(
-        store, session, blank(sources=sources, hotkey_enabled=True, hotkey="control+n"), settings=general
-    )
-    own = save(
-        store,
-        session,
-        blank(name="Other", sources=sources, hotkey_enabled=True, hotkey="control+x"),
-        loaded=other.stored,
-    )
-    assert "not valid" in unreadable.messages[0]
-    assert "the profile 'Other'" in with_profile.messages[0]
-    assert "Next wallpaper hotkey" in with_general.messages[0]
-    assert isinstance(own, Saved)
 
 
 def test_saving_chooses_the_picked_file_else_the_loaded_selection(store, session, images):
@@ -161,23 +121,19 @@ def test_reverting_without_a_saved_profile_gives_nothing(store, session):
     assert revert_profile("Nope", store=store, session=session) is None
 
 
-def test_deleting_forgets_the_profile_stops_it_and_frees_its_hotkey(store, session, images, app_paths):
+def test_deleting_forgets_the_profile_and_stops_it(store, session, images, app_paths):
     saved = save(store, session, blank(sources=(("", str(images)),))).stored
-    rebinds = []
-    problem = delete_profile(
-        saved, store=store, session=session, rebind_hotkey=lambda before, after: rebinds.append((before, after))
-    )
+    problem = delete_profile(saved, store=store, session=session)
     assert problem is None
     assert not (app_paths.profiles / "Work.profile").exists()
     assert session.updates == [(ProfileId.parse("Work", windows_names=False), None)]
-    assert rebinds == [(saved, None)]
 
 
 def test_a_profile_changed_on_disk_is_not_deleted(store, session, images, app_paths):
     saved = save(store, session, blank(sources=(("", str(images)),))).stored
     path = app_paths.profiles / "Work.profile"
     path.write_text(path.read_text(encoding="utf-8") + "zoom=1.75\n", encoding="utf-8")
-    problem = delete_profile(saved, store=store, session=session, rebind_hotkey=lambda *_: None)
+    problem = delete_profile(saved, store=store, session=session)
     assert isinstance(problem, Problems)
     assert path.exists()
     assert session.updates == []

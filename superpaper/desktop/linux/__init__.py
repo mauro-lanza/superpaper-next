@@ -94,11 +94,6 @@ def _xdg_home(environ: Mapping[str, str], variable: str, fallback: str) -> Path:
     return Path(environ.get("HOME") or os.path.expanduser("~")) / fallback
 
 
-def hotkeys_by_default() -> bool:
-    """Hotkeys are on."""
-    return True
-
-
 def render_extension() -> str:
     """Rendered wallpapers are PNG."""
     return "png"
@@ -145,11 +140,6 @@ def make_tray(
 
 def wx_tray_clickable() -> bool:
     """wx's tray icon renders but is dead on KDE Plasma 6."""
-    return not running_kde(os.environ)
-
-
-def hotkey_problems_in_dialog() -> bool:
-    """On KDE they are only logged."""
     return not running_kde(os.environ)
 
 

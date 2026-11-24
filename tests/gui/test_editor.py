@@ -239,11 +239,9 @@ def test_an_applied_profile_that_cant_be_shown_runs_and_the_tray_says_why(gui_en
 
 @pytest.fixture
 def home_panel(gui_env, running_work, editor):
-    """The editor on a new profile based on Home, hotkey off."""
+    """The editor on a new profile based on Home."""
     editor.populate_fields(gui_env.saved(running_work, "Home"))
     editor.loaded_profile = None
-    editor.cb_hotkey.SetValue(False)
-    editor.onCheckboxHotkey(None)
     return editor
 
 

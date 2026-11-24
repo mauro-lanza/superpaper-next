@@ -14,7 +14,6 @@ from typing import assert_never
 from superpaper.geometry.canvas import DisplayArea
 from superpaper.geometry.displays import Layout
 from superpaper.geometry.perspective import Default, PerspectiveChoice
-from superpaper.hotkey_keys import format_hotkey, parse_hotkey, unparsable_problem
 from superpaper.profiles import profile_file
 from superpaper.profiles.profile_file import Correction, OffsetsCorrection, Profile, SpanMode
 from superpaper.profiles.selection import SortMode
@@ -43,8 +42,6 @@ class ProfileForm:
     delay_minutes: str
     sort_label: str | None
     """One of the SORT_LABELS, or None while the dropdown has no choice."""
-    hotkey_enabled: bool
-    hotkey: str
     offsets_applied: bool
     offsets: tuple[str, ...]
     """The "x,y" field of each display."""
@@ -147,8 +144,6 @@ def blank_form(layout: Layout) -> ProfileForm:
         slideshow=False,
         delay_minutes="",
         sort_label=None,
-        hotkey_enabled=False,
-        hotkey="",
         offsets_applied=False,
         offsets=count * ("0,0",),
         spangroups_enabled=False,
@@ -186,8 +181,6 @@ def form_from(profile: Profile, layout: Layout) -> ProfileForm:
         slideshow=profile.slideshow,
         delay_minutes=str(profile.delay / 60) if profile.slideshow else "",
         sort_label=SORT_LABELS[profile.sortmode] if profile.slideshow else None,
-        hotkey_enabled=bool(profile.hotkey),
-        hotkey=format_hotkey(profile.hotkey),
         offsets_applied=bool(profile.offsets),
         offsets=offsets,
         spangroups_enabled=bool(spangroups),
@@ -222,9 +215,6 @@ def parse_form(form: ProfileForm) -> tuple[Profile, list[str]]:
                 delay = 60 * minutes  # minutes here, seconds in the file
         if form.sort_label is not None:
             sortmode = _SORT_MODE_OF_LABEL[form.sort_label]
-    hotkey = parse_hotkey(form.hotkey) if form.hotkey_enabled else None
-    if form.hotkey_enabled and (problem := unparsable_problem(form.hotkey)):
-        problems.append(problem)
     # manual offsets; an empty field means no offset
     corrections: tuple[Correction, ...] = ()
     if form.offsets_applied:
@@ -266,7 +256,6 @@ def parse_form(form: ProfileForm) -> tuple[Profile, list[str]]:
         delay=delay,
         sortmode=sortmode,
         sources=sources,
-        hotkey=hotkey,
         perspective=form.perspective,
         zoom=zoom,
         pan=pan,

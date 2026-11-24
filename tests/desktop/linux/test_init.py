@@ -239,12 +239,9 @@ def test_span_mode_reports_what_the_desktop_refused(monkeypatch):
 
 
 @pytest.mark.parametrize(("session", "on_kde"), [("plasma", True), ("kde", True), ("gnome", False)])
-def test_kde_sessions_keep_hotkey_problems_out_of_the_dialog_and_have_an_unclickable_wx_tray(
-    monkeypatch, session, on_kde
-):
+def test_kde_sessions_have_an_unclickable_wx_tray(monkeypatch, session, on_kde):
     monkeypatch.setenv("DESKTOP_SESSION", session)
 
-    assert linux.hotkey_problems_in_dialog() is not on_kde
     assert linux.wx_tray_clickable() is not on_kde
 
 

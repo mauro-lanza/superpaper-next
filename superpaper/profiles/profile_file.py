@@ -16,7 +16,6 @@ from typing import Literal, assert_never, get_args
 
 from superpaper.geometry.perspective import Default, Disabled, PerspectiveChoice, choice_label, parse_choice
 from superpaper.geometry.units import MM_PER_INCH
-from superpaper.hotkey_keys import format_hotkey, parse_hotkey
 from superpaper.profiles.selection import SORT_MODES, SortMode, is_supported_image
 from superpaper.user_input import Offset, parse_float
 
@@ -81,7 +80,6 @@ class Profile:
     sortmode: SortMode = "shuffle"
     sources: tuple[tuple[str, ...], ...] = ()
     """For each display (multi) or span group, the image files and folders to show."""
-    hotkey: tuple[str, ...] | None = None
     perspective: PerspectiveChoice = field(default_factory=Default)
     zoom: float = 1.0
     pan: tuple[float, float] = (0.0, 0.0)
@@ -214,7 +212,7 @@ def _with_setting(profile: Profile, key: str, value: str, line: str) -> Profile:
             raise ProfileFormatError(message)
         return replace(profile, corrections=(*profile.corrections, DiagonalCorrection(tuple(inches))))
     if key == "hotkey":
-        return replace(profile, hotkey=parse_hotkey(value))
+        return profile  # written by versions with global hotkeys; no longer used
     if key == "perspective":
         return replace(profile, perspective=parse_choice(value))
     if key == "zoom":
@@ -252,8 +250,6 @@ def serialize(profile: Profile) -> str:
                 assert_never(correction)
     if profile.bezels:
         lines.append("bezels=" + ";".join(map(str, profile.bezels)))
-    if profile.hotkey:
-        lines.append("hotkey=" + format_hotkey(profile.hotkey))
     lines.append(f"perspective={choice_label(profile.perspective)}")
     if profile.zoom != 1.0:
         lines.append(f"zoom={profile.zoom}")

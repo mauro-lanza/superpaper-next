@@ -163,22 +163,22 @@ def test_unicode_names_load_by_their_own_form(app_paths):
 
 
 def test_a_name_line_never_becomes_an_identity(app_paths, tmp_path):
-    (app_paths.profiles / "Original.profile").write_bytes(profile_bytes("../outside", b"hotkey=control+x\n"))
+    (app_paths.profiles / "Original.profile").write_bytes(profile_bytes("../outside", b"zoom=1.5\n"))
     outside = tmp_path / "outside.profile"
     outside.write_bytes(b"sentinel")
 
     (stored,) = loaded(app_paths)
 
     assert stored.profile_id == ProfileId.parse("Original", windows_names=False)
-    assert stored.profile.hotkey == ("control", "x")
+    assert stored.profile.zoom == 1.5
     ProfileStore(app_paths, windows_names=False).delete(stored)
     assert outside.read_bytes() == b"sentinel"
 
 
 def test_delete_uses_loaded_content_and_rejects_replacement(app_paths):
     path = app_paths.profiles / "Work.profile"
-    original = profile_bytes("Work", b"hotkey=control+x\n")
-    replacement = profile_bytes("Work", b"hotkey=control+y\n")
+    original = profile_bytes("Work", b"zoom=1.5\n")
+    replacement = profile_bytes("Work", b"zoom=2.0\n")
     path.write_bytes(original)
     original_stat = path.stat()
     stored = load_profile(app_paths, "Work")
@@ -235,7 +235,7 @@ def test_a_malformed_profile_is_deleted_only_as_it_was_diagnosed(app_paths, repl
     path = app_paths.profiles / "broken.profile"
     path.write_bytes(profile_bytes("broken", b"delay=not-a-number\n"))
     (diagnostic,) = ProfileStore(app_paths, windows_names=False).reload()
-    replacement = profile_bytes("broken", b"hotkey=control+x\n")
+    replacement = profile_bytes("broken", b"zoom=1.5\n")
     if replaced_meanwhile:
         path.write_bytes(replacement)
 
@@ -474,10 +474,16 @@ def test_resave_keeps_a_name_that_new_profiles_may_not_use(app_paths):
     assert profile_store.validate_managed_profile_id(app_paths.profiles, "Work: dual", current.profile_id) == (
         current.profile_id
     )
-    assert save_over(app_paths, current, edited("Work: dual", hotkey=("control", "x"))) == (
-        app_paths.profiles / "Work: dual.profile"
-    )
-    assert load_profile(app_paths, "Work: dual").profile.hotkey == ("control", "x")
+    assert save_over(app_paths, current, edited("Work: dual", zoom=1.5)) == (app_paths.profiles / "Work: dual.profile")
+    assert load_profile(app_paths, "Work: dual").profile.zoom == 1.5
+
+
+def test_a_legacy_hotkey_line_loads_and_is_dropped_on_resave(app_paths):
+    current = stored_profile(app_paths, "Work", "hotkey=control+x\n")
+
+    path = save_over(app_paths, current, current.profile)
+
+    assert "hotkey" not in path.read_text(encoding="utf-8")
 
 
 def test_create_then_resave(app_paths):
@@ -485,8 +491,8 @@ def test_create_then_resave(app_paths):
 
     assert save_new(app_paths, edited("Work")) == profiles / "Work.profile"
     current = load_profile(app_paths, "Work")
-    assert save_over(app_paths, current, edited("Work", hotkey=("control", "x"))) == profiles / "Work.profile"
-    assert load_profile(app_paths, "Work").profile.hotkey == ("control", "x")
+    assert save_over(app_paths, current, edited("Work", zoom=1.5)) == profiles / "Work.profile"
+    assert load_profile(app_paths, "Work").profile.zoom == 1.5
 
 
 def test_saving_a_symlinked_profile_writes_through_to_its_target(app_paths, tmp_path):
@@ -497,10 +503,10 @@ def test_saving_a_symlinked_profile_writes_through_to_its_target(app_paths, tmp_
     link.symlink_to(dotfile)
     current = load_profile(app_paths, "Work")
 
-    save_over(app_paths, current, edited("Work", hotkey=("control", "x")))
+    save_over(app_paths, current, edited("Work", zoom=1.5))
 
     assert link.is_symlink()
-    assert "hotkey=control+x" in dotfile.read_text(encoding="utf-8")
+    assert "zoom=1.5" in dotfile.read_text(encoding="utf-8")
 
 
 def test_directory_named_like_a_profile_is_never_replaced(app_paths):
@@ -537,7 +543,7 @@ def test_rename_rolls_back_destination_when_source_delete_fails(app_paths, monke
 def test_save_rejects_a_profile_changed_after_the_editor_loaded_it(app_paths):
     current = stored_profile(app_paths, "Work")
     source_path = app_paths.profiles / "Work.profile"
-    replacement = b"name=Work\nspanmode=single\nslideshow=false\nhotkey=control+x\n"
+    replacement = b"name=Work\nspanmode=single\nslideshow=false\nzoom=1.5\n"
     source_path.write_bytes(replacement)
 
     with pytest.raises(profile_store.ProfileTransactionError) as error:
@@ -578,10 +584,10 @@ def test_save_after_apply_succeeds(app_paths, tmp_path):
     current = stored_profile(app_paths, "Work", f"display0paths={tmp_path}\nselected={first}\n")
     current.selection.pin([str(second)])  # what Apply does
 
-    save_over(app_paths, current, edited("Work", hotkey=("control", "x")), selected=[str(second)])
+    save_over(app_paths, current, edited("Work", zoom=1.5), selected=[str(second)])
 
     reloaded = load_profile(app_paths, "Work")
-    assert reloaded.profile.hotkey == ("control", "x")
+    assert reloaded.profile.zoom == 1.5
     assert reloaded.selection.images == [str(second)]
 
 
@@ -655,10 +661,10 @@ def test_the_store_saves_and_hands_out_one_record_per_profile(app_paths):
     assert store.get(ProfileId.parse("Work", windows_names=False)) is saved
     assert store.profiles == [saved]
 
-    renamed = store.save(edited("Home", hotkey=("alt", "h")), current=saved)
+    renamed = store.save(edited("Home", zoom=1.5), current=saved)
     assert [stored.profile_id.value for stored in store.profiles] == ["Home"]
     assert store.get(ProfileId.parse("Home", windows_names=False)) is renamed
-    assert renamed.profile.hotkey == ("alt", "h")
+    assert renamed.profile.zoom == 1.5
 
     store.delete(renamed)
     assert store.profiles == []
@@ -677,10 +683,10 @@ def test_reloading_keeps_the_record_of_an_unchanged_profile(app_paths, tmp_path)
     work = store.get(ProfileId.parse("Work", windows_names=False))
     work.selection.advance()
 
-    (app_paths.profiles / "Home.profile").write_text("name=Home\nhotkey=alt+h\n", encoding="utf-8")
+    (app_paths.profiles / "Home.profile").write_text("name=Home\nzoom=1.5\n", encoding="utf-8")
     store.reload()
 
     # Work's slideshow goes on where it was; Home is loaded again, with its change.
     assert store.get(ProfileId.parse("Work", windows_names=False)) is work
     assert work.selection.advance() == [str(images / "b.png")]
-    assert store.get(ProfileId.parse("Home", windows_names=False)).profile.hotkey == ("alt", "h")
+    assert store.get(ProfileId.parse("Home", windows_names=False)).profile.zoom == 1.5

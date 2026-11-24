@@ -86,7 +86,6 @@ class ConfigFrame(wx.Frame):
         watch_layout,
         update_settings,
         refresh_displays,
-        rebind_hotkey,
         last_edited,
         remember_edited,
         watch_profiles,
@@ -102,7 +101,6 @@ class ConfigFrame(wx.Frame):
             session,
             update_settings=update_settings,
             refresh_displays=refresh_displays,
-            rebind_hotkey=rebind_hotkey,
             last_edited=last_edited,
             remember_edited=remember_edited,
             watch_profiles=watch_profiles,
@@ -175,8 +173,7 @@ class WallpaperSettingsPanel(wx.Panel):
     settings band and the perspective dialog work on a staged display layout,
     which starts as the detected ``layout``. ``get_settings()`` returns the general settings as they are now,
     ``update_settings(settings)`` saves them, ``refresh_displays()`` detects the
-    displays again, for the session, ``rebind_hotkey(before, after)`` moves a saved
-    profile's hotkey along with it, ``last_edited()`` and ``remember_edited(profile_id)``
+    displays again, for the session, ``last_edited()`` and ``remember_edited(profile_id)``
     keep, across editor windows, the profile the editor last loaded or saved, and
     ``watch_profiles(callback)`` calls back whenever the saved profiles or the running one
     change outside the editor, for the dropdown, and returns what stops it.
@@ -195,7 +192,6 @@ class WallpaperSettingsPanel(wx.Panel):
         layout,
         update_settings,
         refresh_displays,
-        rebind_hotkey,
         last_edited,
         remember_edited,
         watch_profiles,
@@ -208,7 +204,6 @@ class WallpaperSettingsPanel(wx.Panel):
         self.store = store
         self.session = session
         self.refresh_displays = refresh_displays
-        self._rebind_hotkey = rebind_hotkey
         self._remember_edited = remember_edited
         # The saved profile open in the editor: the store's record of it, the one the tray
         # menu offers and the session runs.
@@ -423,31 +418,6 @@ class WallpaperSettingsPanel(wx.Panel):
         sizer_sshow_subsettings.Add(self.ch_sshow_sort, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT | wx.ALIGN_LEFT, 5)
         self.sizer_setting_slideshow.Add(sizer_sshow_subsettings, 0, wx.ALIGN_LEFT | wx.LEFT | wx.BOTTOM, 10)
 
-        # hotkey sizer
-        self.sizer_setting_hotkey = wx.StaticBoxSizer(wx.VERTICAL, self, "Hotkey")
-        statbox_parent_hkey = self.sizer_setting_hotkey.GetStaticBox()
-        self.cb_hotkey = wx.CheckBox(statbox_parent_hkey, -1, "Bind a hotkey to this profile")
-        st_hotkey_bind = wx.StaticText(statbox_parent_hkey, -1, "Hotkey to bind:")
-        st_hotkey_bind.Disable()
-        self.tc_hotkey_bind = wx.TextCtrl(statbox_parent_hkey, -1, size=wx.Size(self.tc_width, -1))
-        self.tc_hotkey_bind.Disable()
-        self.tc_hotkey_bind.SetToolTip(wx.ToolTip("Modifiers: control, alt, shift, super.\nExample: control+super+x"))
-        self.hotkey_bind_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        self.hotkey_bind_sizer.Add(st_hotkey_bind, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 5)
-        self.hotkey_bind_sizer.Add(self.tc_hotkey_bind, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 5)
-        help_bmp = wx.ArtProvider.GetBitmap(wx.ART_QUESTION, wx.ART_BUTTON, wx.Size(20, 20))
-        self.button_help_hotkey = wx.BitmapButton(
-            statbox_parent_hkey, bitmap=wx.BitmapBundle(help_bmp), name="butt_help_hk"
-        )
-        self.button_help_hotkey.Bind(wx.EVT_BUTTON, self.onHelpHotkey)
-        self.hotkey_bind_sizer.Add(self.button_help_hotkey, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 5)
-        self.sizer_setting_hotkey.Add(self.cb_hotkey, 0, wx.ALIGN_LEFT | wx.ALL, 5)
-        self.sizer_setting_hotkey.Add(self.hotkey_bind_sizer, 0, wx.CENTER | wx.EXPAND | wx.ALL, 5)
-        self.st_hotkeys_off = wx.StaticText(statbox_parent_hkey, -1, "Hotkeys are off in Settings")
-        self.sizer_setting_hotkey.Add(self.st_hotkeys_off, 0, wx.ALIGN_LEFT | wx.ALL, 5)
-        self.st_hotkeys_off.Show(not self.settings.use_hotkeys)
-        self.cb_hotkey.Bind(wx.EVT_CHECKBOX, self.onCheckboxHotkey)
-
         # image scaling & position sizer
         self.sizer_setting_zoom = wx.StaticBoxSizer(wx.VERTICAL, self, "Image scaling & position")
         statbox_parent_zoom = self.sizer_setting_zoom.GetStaticBox()
@@ -497,7 +467,6 @@ class WallpaperSettingsPanel(wx.Panel):
         # Add subsizers to the left column sizer
         self.sizer_settings_left.Add(self.radiobox_spanmode, 0, wx.EXPAND, 5)
         self.sizer_settings_left.Add(self.sizer_setting_slideshow, 0, wx.EXPAND, 5)
-        self.sizer_settings_left.Add(self.sizer_setting_hotkey, 0, wx.EXPAND, 5)
         self.sizer_settings_left.Add(self.sizer_setting_zoom, 0, wx.EXPAND, 5)
 
     def _new_path_listctrl(self, multi_column, target_label="Display"):
@@ -708,15 +677,6 @@ class WallpaperSettingsPanel(wx.Panel):
             self.tc_sshow_delay.Clear()
             self.ch_sshow_sort.SetSelection(wx.NOT_FOUND)
 
-        if shown.hotkey_enabled:
-            self.cb_hotkey.SetValue(True)
-            self.tc_hotkey_bind.ChangeValue(shown.hotkey)
-        else:
-            self.cb_hotkey.SetValue(False)
-            self.tc_hotkey_bind.Clear()
-        wx.PostEvent(self.cb_hotkey, wx.CommandEvent(commandEventType=wx.EVT_CHECKBOX.typeId))
-        self._show_hotkeys_off_note()
-
         # Advanced settings
         self.show_adv_setting_sizer(self.span_mode == "advanced")
         self.cb_offsets.SetValue(shown.offsets_applied)
@@ -777,8 +737,6 @@ class WallpaperSettingsPanel(wx.Panel):
             delay_minutes=self.tc_sshow_delay.GetLineText(0),
             # GetString(-1) raises in wx, so only read the dropdown when a sort order is chosen.
             sort_label=self.ch_sshow_sort.GetString(sort_sel) if sort_sel != wx.NOT_FOUND else None,
-            hotkey_enabled=self.cb_hotkey.GetValue(),
-            hotkey=self.tc_hotkey_bind.GetLineText(0),
             offsets_applied=self.cb_offsets.GetValue(),
             offsets=tuple(self._offset_fields()),
             spangroups_enabled=self.cb_spangroups.GetValue(),
@@ -1048,17 +1006,6 @@ class WallpaperSettingsPanel(wx.Panel):
         self.sizer_toggle_children(self.sizer_setting_zoom, enable)
         for sld in (self.sld_zoom, self.sld_offx, self.sld_offy):
             sld.Enable(enable)
-
-    def onCheckboxHotkey(self, event):
-        cb_state = self.cb_hotkey.GetValue()
-        sizer = self.hotkey_bind_sizer
-        self.sizer_toggle_children(sizer, cb_state)
-        self._show_hotkeys_off_note()
-        self._update_dirty_state()
-
-    def _show_hotkeys_off_note(self):
-        self.st_hotkeys_off.Show(not self.settings.use_hotkeys)
-        self.sizer_setting_hotkey.Layout()
 
     def onCheckboxOffsets(self, event):
         cb_state = self.cb_offsets.GetValue() and self.cb_offsets.IsThisEnabled()
@@ -1449,8 +1396,6 @@ class WallpaperSettingsPanel(wx.Panel):
                 loaded=self.loaded_profile,
                 store=self.store,
                 session=self.session,
-                settings=self.settings,
-                rebind_hotkey=self._rebind_hotkey,
             )
             if isinstance(result, Problems):
                 self._show_problems(result)
@@ -1504,7 +1449,7 @@ class WallpaperSettingsPanel(wx.Panel):
             f"Do you want to delete profile: {selected_name}?", "Confirm Delete", style="YES_NO"
         ):
             return
-        problems = delete_profile(profile, store=self.store, session=self.session, rebind_hotkey=self._rebind_hotkey)
+        problems = delete_profile(profile, store=self.store, session=self.session)
         if problems is not None:
             self._show_problems(problems)
             return
@@ -1593,15 +1538,6 @@ class WallpaperSettingsPanel(wx.Panel):
             case _:
                 assert_never(self.span_mode)
         show_help_popup(self.wpprev_pnl, text, button, quality_text)
-
-    def onHelpHotkey(self, evt):
-        """Popup hotkey help."""
-        text = (
-            "Bind a hotkey to start this profile. Choose max 3\n"
-            "modifiers out of: control, alt, shift, super(=win).\n"
-            "Example: control+super+x"
-        )
-        show_help_popup(self, text, evt.GetEventObject())
 
     def onHelpSpanGroups(self, evt):
         """Popup span group config help."""

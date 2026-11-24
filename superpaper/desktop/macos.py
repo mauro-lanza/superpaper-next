@@ -44,11 +44,6 @@ def wx_tray_clickable() -> bool:
     return True
 
 
-def hotkey_problems_in_dialog() -> bool:
-    """A hotkey that can't be registered is shown to the user."""
-    return True
-
-
 def takes_pieces(set_command: str) -> bool:
     return True
 
@@ -65,11 +60,6 @@ def default_dirs(environ: Mapping[str, str], install: Path) -> tuple[Path, Path]
     """~/Library/Application Support/Superpaper and ~/Library/Caches/Superpaper."""
     library = Path(environ.get("HOME") or os.path.expanduser("~")) / "Library"
     return library / "Application Support" / "Superpaper", library / "Caches" / "Superpaper"
-
-
-def hotkeys_by_default() -> bool:
-    """Hotkeys are off."""
-    return False
 
 
 def render_extension() -> str:

@@ -44,11 +44,6 @@ def wx_tray_clickable() -> bool:
     return True
 
 
-def hotkey_problems_in_dialog() -> bool:
-    """A hotkey that can't be registered is shown to the user."""
-    return True
-
-
 def takes_pieces(set_command: str) -> bool:
     return False
 
@@ -84,11 +79,6 @@ def _writable(directory: Path) -> bool:
     except OSError:
         return False
     os.rmdir(probe)
-    return True
-
-
-def hotkeys_by_default() -> bool:
-    """Hotkeys are on."""
     return True
 
 

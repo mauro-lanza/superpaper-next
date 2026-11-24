@@ -3,22 +3,18 @@ revert and apply a profile. The rules of the form itself are in
 superpaper.profiles.form; these put them to use on a ProfileStore and a Session."""
 
 import logging
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from superpaper.geometry.perspective import PerspectiveChoice
-from superpaper.hotkey_keys import clash_problem
 from superpaper.profiles import profile_file
 from superpaper.profiles.form import ProfileForm, chosen_images, parse_form
 from superpaper.profiles.profile_id import NEW_PROFILE_LABEL, ProfileId, ProfileIdError
 from superpaper.profiles.profile_store import ProfileStore, StoredProfile, validate_managed_profile_id
 from superpaper.session import Session
-from superpaper.settings import Settings
 from superpaper.user_input import Offset, Problems
 
 logger = logging.getLogger(__name__)
-
-RebindHotkey = Callable[[StoredProfile | None, StoredProfile | None], None]
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,14 +45,11 @@ def save_profile(
     loaded: StoredProfile | None,
     store: ProfileStore,
     session: Session,
-    settings: Settings,
-    rebind_hotkey: RebindHotkey,
 ) -> Saved | Problems:
     """Save the profile ``form`` describes, over ``loaded`` or as a new one, if it is valid.
 
     The desktop and a running slideshow's countdown stay as they are: ``picked``, the image
-    clicked in the sources, becomes the selection, shown at the next change. Its hotkey
-    must not be one of the general ``settings``' or another profile's."""
+    clicked in the sources, becomes the selection, shown at the next change."""
     profile, problems = parse_form(form)
     logger.info("Saving profile: %s", profile)
     current_profile_id = loaded.profile_id if loaded is not None else None
@@ -66,14 +59,6 @@ def save_profile(
         except (OSError, ProfileIdError, ValueError) as error:
             problems.insert(0, str(error))
     problems += profile_file.validate(profile)
-    taken = [("the Next wallpaper hotkey", settings.hk_binding_next), ("the Pause hotkey", settings.hk_binding_pause)]
-    taken += [
-        (f"the profile '{other.profile.name}'", other.profile.hotkey)
-        for other in store.profiles
-        if other.profile_id != current_profile_id
-    ]
-    if clash := clash_problem(profile.hotkey, taken):
-        problems.append(clash)
     if problems:
         logger.info("The profile was not saved: %s", problems)
         return Problems(tuple(problems))
@@ -94,8 +79,6 @@ def save_profile(
         # below, which would otherwise find its old name gone.
         session.update(current_profile_id, stored)
     carry_on_running(store, session)
-    # Its hotkey follows it, also to a new name.
-    rebind_hotkey(loaded, stored)
     return Saved(stored)
 
 
@@ -109,17 +92,14 @@ def revert_profile(name: str, *, store: ProfileStore, session: Session) -> Store
     return saved_profile(store, name)
 
 
-def delete_profile(
-    stored: StoredProfile, *, store: ProfileStore, session: Session, rebind_hotkey: RebindHotkey
-) -> Problems | None:
+def delete_profile(stored: StoredProfile, *, store: ProfileStore, session: Session) -> Problems | None:
     """Delete the saved profile ``stored``; what went wrong, or None."""
     try:
         store.delete(stored)
     except (OSError, ValueError) as error:
         return Problems((str(error),))
-    # If it was running, its slideshow stops; its hotkey is free for other uses.
+    # If it was running, its slideshow stops.
     session.update(stored.profile_id, None)
-    rebind_hotkey(stored, None)
     return None
 
 

@@ -34,11 +34,6 @@ def wx_tray_clickable() -> bool:
     return True
 
 
-def hotkey_problems_in_dialog() -> bool:
-    """A hotkey that can't be registered is shown to the user."""
-    return True
-
-
 def takes_pieces(set_command: str) -> bool:
     return False
 
@@ -54,11 +49,6 @@ def setter_problem(set_command: str) -> str | None:
 def default_dirs(environ: Mapping[str, str], install: Path) -> tuple[Path, Path]:
     """Beside the installation."""
     return install, install / "temp"
-
-
-def hotkeys_by_default() -> bool:
-    """Hotkeys are on."""
-    return True
 
 
 def render_extension() -> str:

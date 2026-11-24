@@ -45,9 +45,8 @@ def test_a_startup_failure_is_reported_and_the_app_does_not_start(gui_env, monke
     assert [dialog[:2] for dialog in gui_env.shown()] == [("app", "Error")]
 
 
-def test_tray_starts_with_nothing_running_and_hotkeys_off(superpaper):
+def test_tray_starts_with_nothing_running(superpaper):
     assert superpaper.session.running is None
-    assert superpaper.hotkeys is None
 
 
 def test_tray_asks_once_about_a_profile_that_cant_be_loaded_and_yes_deletes_it(gui_env):
