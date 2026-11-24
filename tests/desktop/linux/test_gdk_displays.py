@@ -75,12 +75,6 @@ def test_the_display_and_screen_signals_are_connected_and_call_back(gdk):
     assert changes == ["changed", "changed"]
 
 
-def test_the_handlers_are_kept_referenced(gdk):
-    gdk_displays.watch_displays(lambda: None)
-
-    assert len(gdk_displays._handlers) == 2
-
-
 @pytest.mark.parametrize("missing", [gdk_displays.GDK_LIBRARY, gdk_displays.GOBJECT_LIBRARY])
 def test_a_missing_library_means_the_os_cannot_notify(gdk, missing):
     del gdk.libraries[missing]

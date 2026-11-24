@@ -62,15 +62,20 @@ def notification_center():
 
 
 @pytest.fixture
-def appkit(monkeypatch, notification_center):
-    """AppKit, as ``install(screens)`` gives it, with screens as (x, y, width, height[, scale]) in points.
+def set_images():
+    """The (screen number, image) pairs set through ``appkit``'s workspace; screen numbers count from 1."""
+    return []
 
-    The first screen is the primary one. ``install`` returns what was set where, as
-    (screen number, image) pairs; screen numbers count from 1 in the order given.
+
+@pytest.fixture
+def appkit(monkeypatch, notification_center, set_images):
+    """AppKit, as ``install(screens, sizes_mm)`` gives it, with screens as (x, y, width, height[, scale]) in points.
+
+    The first screen is the primary one; ``sizes_mm`` maps screen numbers to physical (width, height).
+    ``install`` returns the macos module imported on top of it.
     """
 
-    def install(screens):
-        set_images = []
+    def install(screens, sizes_mm=None):
         workspace = SimpleNamespace(
             setDesktopImageURL_forScreen_options_error_=lambda url, screen, options, error: (
                 set_images.append((screen.number, url)) or (True, None)
@@ -88,9 +93,14 @@ def appkit(monkeypatch, notification_center):
         monkeypatch.setitem(sys.modules, "AppKit", appkit_module)
         monkeypatch.setitem(sys.modules, "Foundation", foundation)
         quartz = ModuleType("Quartz")
-        quartz.CGDisplayScreenSize = lambda number: SimpleNamespace(width=0.0, height=0.0)
+        sizes_mm = sizes_mm or {}
+        quartz.CGDisplayScreenSize = lambda number: SimpleNamespace(
+            width=sizes_mm.get(number, (0.0, 0.0))[0], height=sizes_mm.get(number, (0.0, 0.0))[1]
+        )
         monkeypatch.setitem(sys.modules, "Quartz", quartz)
-        return set_images
+        from superpaper.desktop import macos
+
+        return macos
 
     yield install
     sys.modules.pop("superpaper.desktop.macos", None)
