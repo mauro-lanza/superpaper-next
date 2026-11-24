@@ -24,7 +24,7 @@ from superpaper.desktop.tray_menu import Submenu
 from superpaper.geometry import display_store
 from superpaper.geometry.perspective import Perspective, Swivel, SwivelAxis, Tilt
 from superpaper.profiles.profile_id import ProfileId
-from superpaper.settings import read_settings
+from superpaper.settings import first_run_settings, read_settings
 from superpaper.unsaved_changes import Answer, ApplyAnswer
 from tests.conftest import TWO_DISPLAYS
 from tests.gui.snapshots import Snapshots
@@ -131,7 +131,7 @@ class GuiEnv:
 
     def start(self, *, settings=None, startup_profile=None):
         """A running Superpaper, quit when the test ends."""
-        settings = settings or read_settings(self.settings_path, hotkeys_by_default=True)
+        settings = settings or read_settings(self.settings_path) or first_run_settings(hotkeys_by_default=True)
         superpaper = self.ui.app.start_superpaper(self.ui.wx.Frame(None), self.paths, settings, linux, startup_profile)
         self.started.append(superpaper)
         return superpaper

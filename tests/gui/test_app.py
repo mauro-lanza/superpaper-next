@@ -103,7 +103,9 @@ def test_an_unknown_desktop_is_reported_once_at_startup_and_nothing_is_run(gui_e
     gui_env.shown()
     gui_env.commands.clear()
     monkeypatch.setenv("DESKTOP_SESSION", "unknown")
-    no_command = replace(read_settings(gui_env.settings_path, hotkeys_by_default=True), set_command="")
+    saved = read_settings(gui_env.settings_path)
+    assert saved is not None
+    no_command = replace(saved, set_command="")
     second = gui_env.start(settings=no_command)
     gui_env.settle(second)
     assert gui_env.shown() == [("app", "Error", UNKNOWN_DESKTOP)]

@@ -531,7 +531,7 @@ def test_saved_general_settings_apply_from_now_on(tmp_path, use_hotkeys, registe
     # Hotkeys turned off apply after a restart; nothing new is bound meanwhile.
     assert superpaper.hotkeys.register_general.called is registered
     assert superpaper.settings == saved
-    assert read_settings(superpaper.settings_path, hotkeys_by_default=True) == saved
+    assert read_settings(superpaper.settings_path) == saved
     expected = [("Logging is enabled after an application restart.", "Info")]
     if not use_hotkeys:
         expected.insert(0, ("Hotkeys are turned on or off after an application restart.", "Info"))
@@ -603,7 +603,7 @@ def test_a_dialog_setting_is_written_and_kept_for_the_next_window(tmp_path):
 
     expected = Settings(browse_default_dir="/pictures", show_help=False)
     assert superpaper.settings == expected
-    assert read_settings(superpaper.settings_path, hotkeys_by_default=True) == expected
+    assert read_settings(superpaper.settings_path) == expected
 
 
 def test_hotkeys_are_bound_at_start_when_they_are_on(monkeypatch):

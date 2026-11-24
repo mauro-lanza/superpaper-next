@@ -37,21 +37,21 @@ def first_run_settings(*, hotkeys_by_default: bool) -> Settings:
     )
 
 
-def read_settings(path: Path, *, hotkeys_by_default: bool) -> Settings:
-    """The settings saved at ``path``, or the first-run settings if there is no file yet."""
+def read_settings(path: Path) -> Settings | None:
+    """The settings saved at ``path``, or None if there is no file yet."""
     try:
         content = path.read_bytes()
     except FileNotFoundError:
-        return first_run_settings(hotkeys_by_default=hotkeys_by_default)
+        return None
     settings = Settings()
     for line in content.decode(_encoding()).splitlines():
-        key, _, value = line.strip().partition("=")
+        key, _, value = line.partition("=")
         key, value = key.strip(), value.strip()
         match key:
             case "logging":
-                settings = replace(settings, logging=value.lower() == "true")
+                settings = replace(settings, logging=_read_flag(value, settings.logging))
             case "use hotkeys":
-                settings = replace(settings, use_hotkeys=value.lower() == "true")
+                settings = replace(settings, use_hotkeys=_read_flag(value, settings.use_hotkeys))
             case "next wallpaper hotkey":
                 settings = replace(settings, hk_binding_next=parse_hotkey(value))
             case "pause wallpaper hotkey":
@@ -61,9 +61,9 @@ def read_settings(path: Path, *, hotkeys_by_default: bool) -> Settings:
             case "browse_default_dir":
                 settings = replace(settings, browse_default_dir=value)
             case "show_help_at_start":
-                settings = replace(settings, show_help=value.lower() != "false")
+                settings = replace(settings, show_help=_read_flag(value, settings.show_help))
             case "warn_large_img":
-                settings = replace(settings, warn_large_img=value.lower() != "false")
+                settings = replace(settings, warn_large_img=_read_flag(value, settings.warn_large_img))
             case _:
                 pass  # blank lines, and settings of other versions
     return settings
@@ -90,6 +90,11 @@ def write_settings(path: Path, settings: Settings) -> None:
 
 def _flag(value: bool) -> str:
     return "true" if value else "false"
+
+
+def _read_flag(text: str, default: bool) -> bool:
+    """``text`` as true or false in any case; ``default`` if it is neither."""
+    return {"true": True, "false": False}.get(text.lower(), default)
 
 
 def _encoding() -> str:
