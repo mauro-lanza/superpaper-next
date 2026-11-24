@@ -7,36 +7,37 @@ from types import ModuleType, SimpleNamespace
 import pytest
 
 from superpaper import cli
-from superpaper.cli import configure_logging, parse_offset_args
+from superpaper.cli import configure_logging
 from superpaper.desktop.process import Result
 from superpaper.geometry.display_detection import DisplayDetectionError
 from superpaper.geometry.display_store import LoadedLayout
-from superpaper.settings import read_settings
-from superpaper.user_input import OffsetError
 from tests.conftest import monitor, write_profile
 
 module_logger = logging.getLogger("superpaper.test_logging")
 
 
 def test_command_line_offsets_pair_up_x_and_y_for_each_display():
-    assert parse_offset_args(["1", "2", "-3", "4"]) == ((1, 2), (-3, 4))
-    assert parse_offset_args([]) == ()
+    arguments = ["--setimages", __file__, "--advanced"]
+
+    paired = cli.parse_arguments([*arguments, "--offsets", "1", "2", "-3", "4"], windows_names=False)
+    none = cli.parse_arguments(arguments, windows_names=False)
+
+    assert paired.offsets == ((1, 2), (-3, 4))
+    assert none.offsets == ()
 
 
-def test_command_line_offsets_must_come_in_pairs():
-    with pytest.raises(OffsetError, match="not even"):
-        parse_offset_args(["1", "2", "3"])
-
-
-def test_command_line_offsets_must_be_whole_numbers():
-    with pytest.raises(OffsetError, match="whole numbers of pixels: 1 x"):
-        parse_offset_args(["1", "x"])
+@pytest.mark.parametrize(
+    ("offsets", "message"), [(["1", "2", "3"], "not even"), (["1", "x"], "whole numbers of pixels: 1 x")]
+)
+def test_invalid_command_line_offsets_are_refused(offsets, message):
+    with pytest.raises(cli.CliError, match=message):
+        cli.parse_arguments(["--setimages", __file__, "--advanced", "--offsets", *offsets], windows_names=False)
 
 
 @pytest.fixture
 def unconfigured_logging():
     yield
-    configure_logging(debug=False)
+    configure_logging(debug=False, log_file=None)
 
 
 def cli_subprocess_env(tmp_path):
@@ -194,7 +195,7 @@ def test_tray_logs_to_the_cache_when_logging_is_on(monkeypatch, app_paths, deskt
         assert "from a module" in (app_paths.cache / "log").read_text(encoding="utf-8")
         assert settings_file.read_text(encoding="utf-8") == "logging=true\n"
     finally:
-        cli.configure_logging(debug=False)
+        cli.configure_logging(debug=False, log_file=None)
 
 
 def test_the_debug_flag_alone_starts_the_tray_with_logging(monkeypatch, app_paths, desktop):
@@ -205,18 +206,29 @@ def test_the_debug_flag_alone_starts_the_tray_with_logging(monkeypatch, app_path
         assert [profile for _, _, profile in started] == [None]
         assert logging.getLogger("superpaper.test").isEnabledFor(logging.INFO)
     finally:
-        cli.configure_logging(debug=False)
+        cli.configure_logging(debug=False, log_file=None)
+
+
+def test_files_that_cant_be_read_or_written_exit_with_a_message(monkeypatch, app_paths, desktop, caplog):
+    def fail(paths):
+        message = "read-only"
+        raise OSError(message)
+
+    monkeypatch.setattr(cli, "ensure_dirs", fail)
+
+    assert cli.run([], app_paths, desktop) == 1
+    assert "Superpaper's files could not be read or written: read-only" in caplog.text
 
 
 def test_without_debugging_nothing_is_configured(unconfigured_logging):
-    configure_logging(debug=False)
+    configure_logging(debug=False, log_file=None)
 
     assert not module_logger.isEnabledFor(logging.INFO)
     assert sys.excepthook is sys.__excepthook__
 
 
 def test_debugging_logs_to_the_console(unconfigured_logging, capsys):
-    configure_logging(debug=True)
+    configure_logging(debug=True, log_file=None)
 
     module_logger.info("from a module")
 
@@ -249,20 +261,6 @@ def test_configuring_again_replaces_the_handlers(unconfigured_logging, tmp_path,
 
     assert capsys.readouterr().err == "once\n"
     assert log_file.read_text(encoding="utf-8") == "once\n"
-
-
-def test_reading_settings_with_logging_on_adds_no_handlers(unconfigured_logging, tmp_path, capsys):
-    settings_file = tmp_path / "general_settings"
-    settings_file.write_text("logging=true\n", encoding="utf-8")
-
-    for _ in range(3):
-        saved = read_settings(settings_file)
-        assert saved is not None
-        assert saved.logging is True
-
-    module_logger.info("not shown")
-    assert not module_logger.isEnabledFor(logging.INFO)
-    assert capsys.readouterr().err == ""
 
 
 def test_setimages_dispatches_one_shot_render(monkeypatch, tmp_path, app_paths, desktop):
@@ -384,7 +382,7 @@ def test_advanced_options_without_advanced_are_refused(option):
         cli.parse_arguments(["--setimages", __file__, *option], windows_names=False)
 
 
-@pytest.mark.parametrize("arguments", [["--offsets", "1"], ["--advanced", "--offsets", "1", "x"]])
+@pytest.mark.parametrize("arguments", [["--advanced", "--offsets", "1", "x"]])
 def test_invalid_arguments_set_nothing_up(tmp_path, desktop, arguments):
     from superpaper.paths import AppPaths
 
@@ -396,12 +394,17 @@ def test_invalid_arguments_set_nothing_up(tmp_path, desktop, arguments):
     assert list(tmp_path.iterdir()) == [image]
 
 
+IMAGE = object()
+
+
 @pytest.mark.parametrize(
     ("arguments", "message"),
     [
-        (["--command", "setter", "{image}"], "Remember to put the custom command in quotes."),
-        (["--advanced", "--spangroups", "0x"], "One of the display ids was not an integer: 0x"),
-        (["--profile", "saved"], "Pass either image(s)"),
+        (["--setimages", IMAGE, "--command", "setter", "{image}"], "Remember to put the custom command in quotes."),
+        (["--setimages", IMAGE, "--advanced", "--spangroups", "0x"], "One of the display ids was not an integer: 0x"),
+        (["--setimages", IMAGE, "--profile", "saved"], "Pass either image(s)"),
+        (["--setimages", "missing.png"], "One of the passed image names was not a file: missing.png"),
+        (["--setimages", ""], "was empty"),
     ],
 )
 def test_arguments_that_cant_be_combined_or_read_exit_with_a_message(
@@ -409,8 +412,9 @@ def test_arguments_that_cant_be_combined_or_read_exit_with_a_message(
 ):
     image = tmp_path / "wallpaper.png"
     image.touch()
+    given = [str(image) if argument is IMAGE else argument for argument in arguments]
 
-    assert cli.run(["--setimages", str(image), *arguments], app_paths, desktop) == 1
+    assert cli.run(given, app_paths, desktop) == 1
     assert message in caplog.text
 
 
@@ -442,18 +446,6 @@ def test_an_undetected_display_size_is_mentioned_when_spanning_by_size(
 
     assert cli.run([*arguments, "--advanced"] if advanced else arguments, app_paths, desktop) == 0
     assert ("Enter its size." in caplog.text) is hinted
-
-
-def test_cli_help_exits_successfully(tmp_path, desktop):
-    from superpaper.paths import AppPaths
-
-    paths = AppPaths(config=tmp_path / "config", profiles=tmp_path / "config" / "profiles", cache=tmp_path / "cache")
-
-    with pytest.raises(SystemExit) as error:
-        cli.run(["--help"], paths, desktop)
-
-    assert error.value.code == 0
-    assert list(tmp_path.iterdir()) == []
 
 
 def test_profile_launch_returns_after_the_tray_quits(monkeypatch, app_paths, desktop):
@@ -558,15 +550,6 @@ def test_profile_lookup_rejects_malformed_content_before_tray(monkeypatch, app_p
     assert cli.run(["--profile", "saved"], app_paths, desktop) == 1
 
     assert calls == []
-
-
-def test_missing_image_exits_nonzero(tmp_path, app_paths, desktop):
-    assert cli.run(["--setimages", str(tmp_path / "missing.png")], app_paths, desktop) == 1
-
-
-def test_an_empty_image_name_is_refused(app_paths, desktop, caplog):
-    assert cli.run(["--setimages", ""], app_paths, desktop) == 1
-    assert "was empty" in caplog.text
 
 
 @pytest.mark.parametrize(

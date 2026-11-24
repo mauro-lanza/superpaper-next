@@ -20,14 +20,14 @@ import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from functools import partial
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from superpaper.desktop.backend import Desktop
 from superpaper.paths import AppPaths
 from superpaper.profiles.profile_file import Profile
 from superpaper.profiles.profile_id import ProfileId
 from superpaper.profiles.profile_store import clear_active_profile, write_active_profile
-from superpaper.wallpaper_change import show, show_again
+from superpaper.wallpaper_change import NothingToRestore, Restored, show, show_again
 
 if TYPE_CHECKING:
     from superpaper.geometry.displays import Layout
@@ -37,6 +37,10 @@ logger = logging.getLogger(__name__)
 
 SHUTDOWN_TIMEOUT = 5.0
 """How long quitting waits for a wallpaper change under way, in seconds."""
+
+
+class ChangeReport(Protocol):
+    def __call__(self, problem: str | None, *, by_timer: bool) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -55,8 +59,9 @@ class Session:
     each other: a change under way keeps the layout it began with.
     ``set_command`` gives the user's own wallpaper setter command as currently set, so a
     changed setting applies from the next change on. ``clock`` times the slideshow.
-    ``on_change(problem)`` is called on the worker thread after each change of the running
-    profile (slideshow, next, start), with what went wrong, or None.
+    ``on_change(problem, by_timer=...)`` is called on the worker thread after each change of the
+    running profile (slideshow, next, start), with what went wrong, or None; ``by_timer`` is
+    True for the slideshow's own change, which no user action is waiting on.
     ``on_skipped(paths)`` is called on the worker thread with the images that had vanished
     and were skipped for the next ones.
     ``on_running_change()`` is called on the worker thread whenever the running profile
@@ -72,7 +77,7 @@ class Session:
         desktop: Desktop,
         layout: Layout,
         *,
-        on_change: Callable[[str | None], None],
+        on_change: ChangeReport,
         on_skipped: Callable[[list[str]], None],
         on_running_change: Callable[[], None],
         set_command: Callable[[], str] = lambda: "",
@@ -169,8 +174,8 @@ class Session:
         profile: Profile,
         images: Sequence[str],
         *,
-        layout: Layout | None = None,
-        on_done: Callable[[str | None], None] | None = None,
+        layout: Layout,
+        on_done: Callable[[str | None], None],
     ) -> None:
         """Show ``images`` with ``profile``'s settings, which aren't a running profile's,
         such as an align test's. The render is kept as a draft, and no slideshow moves on:
@@ -178,32 +183,32 @@ class Session:
         user unpauses, or with Next, Apply or a profile picked in the tray.
 
         ``layout`` renders for another layout than the session's, such as the
-        editor's unsaved one. ``on_done(problem)`` is called on the worker thread when the
+        editor's unsaved one. ``on_done(problem)`` is called once on the worker thread when the
         draft has been shown, with what went wrong, or None.
         """
         images = list(images)
 
         def draft():
-            problem = "The wallpaper could not be shown."  # if show() fails unexpectedly
             running = self._running
-            if running is not None and running.profile.slideshow:
-                self._paused = True
-                self._arm()
             try:
+                if running is not None and running.profile.slideshow:
+                    self._paused = True
+                    self._arm()
                 problem = show(
                     profile,
                     images,
                     self._paths,
                     desktop=self._desktop,
-                    layout=layout if layout is not None else self._layout,
+                    layout=layout,
                     set_command=self._set_command(),
-                    running=self._running.profile.name if self._running is not None else None,
+                    running=running.profile.name if running is not None else None,
                 )
-            finally:
-                if on_done is not None:
-                    on_done(problem)
+            except Exception as error:
+                logger.exception("A draft failed unexpectedly.")
+                problem = f"The wallpaper could not be shown: {error}"
+            on_done(problem)
 
-        if not self._post(draft) and on_done is not None:
+        if not self._post(draft):
             on_done("Superpaper is quitting.")
 
     def wait_until_handled(self, timeout: float) -> bool:
@@ -255,11 +260,11 @@ class Session:
                         carried = following
                         break
                     presses += 1
-                _handle(partial(self._change, steps=presses))
+                self._handle(partial(self._change, steps=presses))
             elif request is not None:
-                _handle(request)
+                self._handle(request)
             if not self._closed and self._deadline is not None and self._clock() >= self._deadline:
-                _handle(lambda: self._change(steps=1))
+                self._handle(lambda: self._change(steps=1, by_timer=True), by_timer=True)
 
     def _until_due(self) -> float | None:
         if self._deadline is None:
@@ -271,10 +276,16 @@ class Session:
         self._paused = False
         self._on_running_change()
         logger.info("Running profile: %s", stored.profile.name)
-        if show_again(stored, self._paths, desktop=self._desktop, layout=self._layout, set_command=self._set_command()):
-            self._arm()
-        else:
-            self._change(steps=0)
+        self._arm()
+        match show_again(
+            stored, self._paths, desktop=self._desktop, layout=self._layout, set_command=self._set_command()
+        ):
+            case Restored(problem=None):
+                pass
+            case Restored(problem=problem):
+                self._on_change(problem, by_timer=False)
+            case NothingToRestore():
+                self._change(steps=0)
 
     def _activate(self, stored: StoredProfile) -> None:
         running = self._running
@@ -306,7 +317,7 @@ class Session:
     def _redraw(self) -> None:
         self._change(steps=0, restart_countdown=False)
 
-    def _change(self, *, steps: int, restart_countdown: bool = True) -> None:
+    def _change(self, *, steps: int, restart_countdown: bool = True, by_timer: bool = False) -> None:
         """Show the running profile's current images, or with ``steps`` its images that many
         positions on, rendering only the last; its slideshow changes next one delay from now,
         unless ``restart_countdown`` is False."""
@@ -326,7 +337,7 @@ class Session:
         if not files:
             problem = f"profile '{stored.profile.name}' has no complete selection."
             logger.error("Wallpaper change skipped: %s", problem)
-            self._on_change(problem)
+            self._on_change(problem, by_timer=by_timer)
             return
         problem = show(
             stored.profile,
@@ -338,7 +349,7 @@ class Session:
             profile_id=stored.profile_id,
             running=stored.profile.name,
         )
-        self._on_change(problem)
+        self._on_change(problem, by_timer=by_timer)
 
     def _arm(self) -> None:
         """Set when the slideshow changes next: one delay from now, or never while it is
@@ -382,10 +393,10 @@ class Session:
     def _use_displays(self, layout: Layout) -> None:
         self._layout = layout
 
-
-def _handle(request: Callable[[], None]) -> None:
-    """Run one request; a bug in it is logged, and the worker carries on."""
-    try:
-        request()
-    except Exception:
-        logger.exception("A wallpaper change failed unexpectedly.")
+    def _handle(self, request: Callable[[], None], *, by_timer: bool = False) -> None:
+        """Run one request; a bug in it is logged and reported, and the worker carries on."""
+        try:
+            request()
+        except Exception as error:
+            logger.exception("A wallpaper change failed unexpectedly.")
+            self._on_change(f"The wallpaper could not be shown: {error}", by_timer=by_timer)

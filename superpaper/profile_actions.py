@@ -4,7 +4,6 @@ superpaper.profiles.form; these put them to use on a ProfileStore and a Session.
 
 import logging
 from collections.abc import Sequence
-from dataclasses import dataclass
 
 from superpaper.geometry.perspective import PerspectiveChoice
 from superpaper.profiles import profile_file
@@ -15,11 +14,6 @@ from superpaper.session import Session
 from superpaper.user_input import Offset, Problems
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass(frozen=True, slots=True)
-class Saved:
-    stored: StoredProfile
 
 
 def carry_on_running(store: ProfileStore, session: Session) -> None:
@@ -45,7 +39,7 @@ def save_profile(
     loaded: StoredProfile | None,
     store: ProfileStore,
     session: Session,
-) -> Saved | Problems:
+) -> StoredProfile | Problems:
     """Save the profile ``form`` describes, over ``loaded`` or as a new one, if it is valid.
 
     The desktop and a running slideshow's countdown stay as they are: ``picked``, the image
@@ -56,7 +50,7 @@ def save_profile(
     if profile.name.strip():
         try:
             validate_managed_profile_id(store.paths.profiles, profile.name, current_profile_id)
-        except (OSError, ProfileIdError, ValueError) as error:
+        except (OSError, ValueError) as error:
             problems.insert(0, str(error))
     problems += profile_file.validate(profile)
     if problems:
@@ -79,7 +73,7 @@ def save_profile(
         # below, which would otherwise find its old name gone.
         session.update(current_profile_id, stored)
     carry_on_running(store, session)
-    return Saved(stored)
+    return stored
 
 
 def revert_profile(name: str, *, store: ProfileStore, session: Session) -> StoredProfile | None:

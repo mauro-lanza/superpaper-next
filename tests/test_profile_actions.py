@@ -5,7 +5,6 @@ import pytest
 
 from superpaper.geometry.perspective import Disabled, Named
 from superpaper.profile_actions import (
-    Saved,
     align_test_profile,
     apply_profile,
     check_applicable,
@@ -65,9 +64,8 @@ def save(store, session, form, *, loaded=None, picked=None):
 
 def test_a_valid_form_is_saved_as_a_new_profile(store, session, images):
     result = save(store, session, blank(sources=(("", str(images)),)))
-    assert isinstance(result, Saved)
-    assert store.get(ProfileId.parse("Work", windows_names=False)) is result.stored
-    assert result.stored.profile.sources == ((str(images),),)
+    assert store.get(ProfileId.parse("Work", windows_names=False)) is result
+    assert result.profile.sources == ((str(images),),)
     assert session.updates == []
 
 
@@ -87,25 +85,21 @@ def test_a_name_that_cant_be_used_comes_first_among_the_problems(store, session,
 
 def test_saving_over_a_loaded_profile_updates_the_session_and_follows_a_rename(store, session, images):
     first = save(store, session, blank(sources=(("", str(images)),)))
-    session.running = first.stored
-    renamed = save(store, session, blank(name="Home", sources=(("", str(images)),)), loaded=first.stored)
-    assert isinstance(renamed, Saved)
-    assert (session.updates[0][0], session.updates[0][1]) == (
-        ProfileId.parse("Work", windows_names=False),
-        renamed.stored,
-    )
+    session.running = first
+    renamed = save(store, session, blank(name="Home", sources=(("", str(images)),)), loaded=first)
+    assert (session.updates[0][0], session.updates[0][1]) == (ProfileId.parse("Work", windows_names=False), renamed)
     assert store.get(ProfileId.parse("Work", windows_names=False)) is None
 
 
 def test_saving_chooses_the_picked_file_else_the_loaded_selection(store, session, images):
     first = save(store, session, blank(sources=(("", str(images)),)))
     picked = [str(images / "b.png")]
-    second = save(store, session, blank(zoom_pct=120, sources=(("", str(images)),)), loaded=first.stored, picked=picked)
-    assert second.stored.selection.images == picked
+    second = save(store, session, blank(zoom_pct=120, sources=(("", str(images)),)), loaded=first, picked=picked)
+    assert second.selection.images == picked
 
 
 def test_reverting_loads_the_file_again_and_carries_the_running_profile_on(store, session, images, app_paths):
-    saved = save(store, session, blank(sources=(("", str(images)),))).stored
+    saved = save(store, session, blank(sources=(("", str(images)),)))
     session.running = saved
     path = app_paths.profiles / "Work.profile"
     path.write_text(path.read_text(encoding="utf-8") + "zoom=1.75\n", encoding="utf-8")
@@ -122,7 +116,7 @@ def test_reverting_without_a_saved_profile_gives_nothing(store, session):
 
 
 def test_deleting_forgets_the_profile_and_stops_it(store, session, images, app_paths):
-    saved = save(store, session, blank(sources=(("", str(images)),))).stored
+    saved = save(store, session, blank(sources=(("", str(images)),)))
     problem = delete_profile(saved, store=store, session=session)
     assert problem is None
     assert not (app_paths.profiles / "Work.profile").exists()
@@ -130,7 +124,7 @@ def test_deleting_forgets_the_profile_and_stops_it(store, session, images, app_p
 
 
 def test_a_profile_changed_on_disk_is_not_deleted(store, session, images, app_paths):
-    saved = save(store, session, blank(sources=(("", str(images)),))).stored
+    saved = save(store, session, blank(sources=(("", str(images)),)))
     path = app_paths.profiles / "Work.profile"
     path.write_text(path.read_text(encoding="utf-8") + "zoom=1.75\n", encoding="utf-8")
     problem = delete_profile(saved, store=store, session=session)
@@ -140,13 +134,13 @@ def test_a_profile_changed_on_disk_is_not_deleted(store, session, images, app_pa
 
 
 def test_saved_profile_finds_by_name_and_not_by_a_name_no_profile_can_have(store, session, images):
-    saved = save(store, session, blank(sources=(("", str(images)),))).stored
+    saved = save(store, session, blank(sources=(("", str(images)),)))
     assert saved_profile(store, "Work") is saved
     assert saved_profile(store, "../x") is None
 
 
 def test_applying_runs_the_chosen_image_else_the_current_selection(store, session, images):
-    saved = save(store, session, blank(sources=(("", str(images)),))).stored
+    saved = save(store, session, blank(sources=(("", str(images)),)))
     picked = str(images / "b.png")
 
     apply_profile(saved, picked=[picked], session=session)
@@ -157,7 +151,7 @@ def test_applying_runs_the_chosen_image_else_the_current_selection(store, sessio
 
 def test_applying_a_multi_image_profile_shows_one_clicked_image_per_display(store, session, images):
     form = blank(span_mode="multi", per_target_sources=True, sources=(("0", str(images)), ("1", str(images))))
-    saved = save(store, session, form).stored
+    saved = save(store, session, form)
     picked = [str(images / "b.png"), str(images / "a.png")]
 
     apply_profile(saved, picked=picked, session=session)
@@ -167,7 +161,7 @@ def test_applying_a_multi_image_profile_shows_one_clicked_image_per_display(stor
 
 
 def test_a_saved_profile_whose_images_are_gone_cant_be_applied(store, session, images):
-    saved = save(store, session, blank(sources=(("", str(images)),))).stored
+    saved = save(store, session, blank(sources=(("", str(images)),)))
     assert check_applicable(saved) is None
 
     for path in images.iterdir():
@@ -180,7 +174,7 @@ def test_a_saved_profile_whose_images_are_gone_cant_be_applied(store, session, i
 
 def test_saving_never_runs_a_profile(store, session, images):
     first = save(store, session, blank(sources=(("", str(images)),)))
-    save(store, session, blank(zoom_pct=120, sources=(("", str(images)),)), loaded=first.stored)
+    save(store, session, blank(zoom_pct=120, sources=(("", str(images)),)), loaded=first)
 
     assert session.applied == []
 

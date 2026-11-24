@@ -8,6 +8,7 @@ The command line runs show() directly; the Session's worker runs it for the tray
 import hashlib
 import logging
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -29,6 +30,18 @@ if TYPE_CHECKING:
     from superpaper.profiles.profile_store import StoredProfile
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class Restored:
+    """The last wallpaper was shown again; ``problem`` is what the desktop said went wrong, or None."""
+
+    problem: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class NothingToRestore:
+    """There is no usable last wallpaper: the profile has to be rendered."""
 
 
 def show(
@@ -69,16 +82,15 @@ def show(
             else render_cache.Slot(paths.cache, profile_id.value)
         )
         output = render_cache.save(
-            slot, image, extension=desktop.render_extension(), signature=render_signature(layout, profile, files)
+            slot, image, extension=desktop.render_extension(), signature=_render_signature(layout, profile, files)
         )
     except OSError as error:
         return _skipped(f"The wallpaper could not be saved: {error}")
     try:
-        result = set_wallpaper(
-            desktop, output, files, layout=layout, paths=paths, set_command=set_command, running=running
-        )
-    except OSError as error:  # the per-display images could not be cut
+        wallpaper = _wallpaper(desktop, output, (), layout, set_command)
+    except OSError as error:
         return _skipped(f"The wallpaper could not be cut for the displays: {error}")
+    result = _set_wallpaper(desktop, wallpaper, files, paths=paths, set_command=set_command, running=running)
     if not result.ok:
         return result.problem
     # Until the desktop takes the new render, the previous one may still be on screen.
@@ -119,39 +131,40 @@ def _render(profile: Profile, files: Sequence[str], layout: Layout) -> Image.Ima
     )
 
 
-def set_wallpaper(
-    desktop: Desktop,
-    image: Path | str,
-    source_files: Sequence[str] = (),
-    *,
-    layout: Layout,
-    paths: AppPaths,
-    set_command: str = "",
-    running: str | None = None,
-) -> Result:
-    """Hand the rendered wallpaper ``image`` to the desktop, then run the user's
-    run-after-wp-change.py with it and its ``source_files``. Returns the desktop's answer;
-    problems are logged.
+def _wallpaper(
+    desktop: Desktop, image: Path, cached_pieces: Sequence[Path], layout: Layout, set_command: str
+) -> Wallpaper:
+    """What to hand the desktop for the render ``image``. Desktops that take one image per
+    display get the ``cached_pieces``, or else ``image`` cut for ``layout``, which raises
+    OSError if it can't be cut."""
+    if not desktop.takes_pieces(set_command):
+        return Spanned(str(image))
+    pieces = cached_pieces or render_cache.cut_pieces(image, layout)
+    return Pieces(str(image), tuple(str(piece) for piece in pieces))
 
-    Desktops that take one image per display get ``image`` cut for ``layout``.
-    """
-    wallpaper: Wallpaper
-    if desktop.takes_pieces(set_command):
-        pieces = tuple(str(piece) for piece in render_cache.cut_pieces(Path(image), layout))
-        wallpaper = Pieces(str(image), pieces)
-    else:
-        wallpaper = Spanned(str(image))
+
+def _set_wallpaper(
+    desktop: Desktop,
+    wallpaper: Wallpaper,
+    source_files: Sequence[str],
+    *,
+    paths: AppPaths,
+    set_command: str,
+    running: str | None,
+) -> Result:
+    """Hand ``wallpaper`` to the desktop, then run the user's run-after-wp-change.py with its
+    image and ``source_files``. Returns the desktop's answer; problems are logged."""
     result = desktop.set_wallpaper(
         wallpaper, set_command=set_command, profiles=_profile_wallpapers(paths, running, desktop)
     )
     _log_problem(result)
     script = paths.config / "run-after-wp-change.py"
     if script.is_file():
-        _log_problem(desktop.run_hook(script, str(image), list(source_files)))
+        _log_problem(desktop.run_hook(script, wallpaper.image, list(source_files)))
     return result
 
 
-def render_signature(layout: Layout, profile: Profile, files: Sequence[str]) -> str:
+def _render_signature(layout: Layout, profile: Profile, files: Sequence[str]) -> str:
     """What a render is made from: the display layout, the images and the profile's render
     settings, as a stable digest."""
     corrections = profile.display_corrections(layout.resolutions())
@@ -159,34 +172,34 @@ def render_signature(layout: Layout, profile: Profile, files: Sequence[str]) -> 
     return hashlib.sha256(repr((layout, list(files), settings)).encode()).hexdigest()
 
 
-def show_again(stored: StoredProfile, paths: AppPaths, *, desktop: Desktop, layout: Layout, set_command: str) -> bool:
+def show_again(
+    stored: StoredProfile, paths: AppPaths, *, desktop: Desktop, layout: Layout, set_command: str
+) -> Restored | NothingToRestore:
     """Show the last wallpaper of the profile ``stored`` again at startup, without rendering
-    anything. Returns False unless that render was made for ``layout``, the profile's
-    current images and its render settings, so that it can be rendered; drafts shown since are ignored.
+    anything. Returns NothingToRestore unless that render was made for ``layout``, the profile's
+    current images and its render settings, and can be read, so that it must be rendered;
+    drafts shown since are ignored.
     """
     rendered = render_cache.latest(render_cache.Slot(paths.cache, stored.profile_id.value))
     if rendered is None:
         logger.info("Profile '%s' has no earlier render to show.", stored.profile.name)
-        return False
+        return NothingToRestore()
     current = stored.selection.current()
-    if not current or rendered.signature != render_signature(layout, stored.profile, current):
+    if not current or rendered.signature != _render_signature(layout, stored.profile, current):
         logger.info("The last render of profile '%s' is not for its current images and displays.", stored.profile.name)
-        return False
-    image = str(rendered.image)
-    running = stored.profile.name
-    if desktop.takes_pieces(set_command) and rendered.pieces:
-        pieces = tuple(str(piece) for piece in rendered.pieces)
-        logger.info("Use wallpaper crop pieces: %s", pieces)
-        _log_problem(
-            desktop.set_wallpaper(
-                Pieces(image, pieces), set_command=set_command, profiles=_profile_wallpapers(paths, running, desktop)
-            )
-        )
-    elif desktop.keeps_wallpaper() and not _is_perspective_render(stored.profile, layout):
-        pass
-    else:
-        set_wallpaper(desktop, image, layout=layout, paths=paths, set_command=set_command, running=running)
-    return True
+        return NothingToRestore()
+    has_pieces = desktop.takes_pieces(set_command) and bool(rendered.pieces)
+    if not has_pieces and desktop.keeps_wallpaper() and not _is_perspective_render(stored.profile, layout):
+        return Restored(None)
+    try:
+        wallpaper = _wallpaper(desktop, rendered.image, rendered.pieces, layout, set_command)
+    except OSError as error:
+        logger.warning("The last render of profile '%s' can't be read: %s", stored.profile.name, error)
+        return NothingToRestore()
+    result = _set_wallpaper(
+        desktop, wallpaper, current, paths=paths, set_command=set_command, running=stored.profile.name
+    )
+    return Restored(None if result.ok else result.problem)
 
 
 def _is_perspective_render(profile: Profile, layout: Layout) -> bool:

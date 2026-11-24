@@ -7,7 +7,7 @@ from superpaper.geometry.perspective import Named
 from superpaper.paths import resource
 from superpaper.profile_actions import align_test_profile
 from superpaper.unsaved_changes import ApplyAnswer
-from superpaper.wallpaper_change import render_signature
+from superpaper.wallpaper_change import _render_signature as render_signature
 
 
 def stage_bezels(editor, millimetres):

@@ -1390,24 +1390,24 @@ class WallpaperSettingsPanel(wx.Panel):
             return False
         with wx.BusyCursor():
             current = self._read_form()
-            result = save_profile(
+            stored = save_profile(
                 current,
                 picked=self._picked_images(),
                 loaded=self.loaded_profile,
                 store=self.store,
                 session=self.session,
             )
-            if isinstance(result, Problems):
-                self._show_problems(result)
+            if isinstance(stored, Problems):
+                self._show_problems(stored)
                 return False
             self._clear_pick()
-            self._remember_edited(result.stored.profile_id)
+            self._remember_edited(stored.profile_id)
             self.update_choiceprofile()
             self._select_in_dropdown(current.name)
             # The editor goes on with the store's record of the saved profile.
-            self.loaded_profile = result.stored
+            self.loaded_profile = stored
             self.wpprev_pnl.preview_wallpaper(
-                result.stored.selection.current(),
+                stored.selection.current(),
                 self.span_mode,
                 self._display_areas(),
                 form.applied_spangroups(current),

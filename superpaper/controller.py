@@ -59,10 +59,7 @@ class Superpaper:
         self._shell = shell
         self.desktop = desktop
         self.paths = paths
-        self.settings_path = paths.config / SETTINGS_FILE
         self.settings = settings
-        # The running profile, its slideshow and every wallpaper change, starting with the
-        # displays as they are now. Wallpaper changes use the custom command as last saved.
         self.last_failure: str | None = None
         # The profile last loaded or saved in the editor, for it to open on when nothing runs.
         self.last_edited: ProfileId | None = None
@@ -96,12 +93,16 @@ class Superpaper:
         self.tray = shell.make_tray(self)
         self._show_at_start()
 
-    def _report_change(self, problem: str | None) -> None:
-        """Remember how the session's last change went, for the tray menu; called on the
-        session's worker thread, so it is handed to the UI's."""
+    def _report_change(self, problem: str | None, *, by_timer: bool) -> None:
+        """Remember how the session's last change went, for the tray menu, and tell the user
+        when the slideshow's own change fails with a new problem: no other surface shows it.
+        Called on the session's worker thread, so it is handed to the UI's."""
 
         def remember() -> None:
+            previous = self.last_failure
             self.last_failure = problem
+            if by_timer and problem is not None and problem != previous:
+                self._shell.notify(problem, "Error")
 
         self._shell.call_soon(remember)
 
@@ -172,7 +173,8 @@ class Superpaper:
         try:
             self._shell.open_editor(self)
         except Exception as error:
-            logger.error("Could not open the wallpaper configuration: %s", error, exc_info=True)
+            logger.exception("Could not open the wallpaper configuration")
+            self._shell.notify(f"The wallpaper configuration could not be opened: {error}", "Error")
 
     def open_settings(self) -> None:
         """Open the general settings."""
@@ -208,8 +210,12 @@ class Superpaper:
                 "Would you like to delete it? Choosing 'No' will just ignore the profile."
             )
             logger.info("%s %s", message, diagnostic.detail)
-            if self._shell.confirm(message):
-                profile_store.delete_malformed(diagnostic)
+            if self._shell.confirm(message) and not profile_store.delete_malformed(diagnostic):
+                self._shell.notify(
+                    f"Profile '{diagnostic.path.name}' was kept: it could not be deleted, "
+                    "or it changed while the question was open.",
+                    "Error",
+                )
 
     def watch_layout(self, watcher: Callable[[Layout], None]) -> Callable[[], None]:
         """Call ``watcher(layout)``, on the UI thread, after every detection with the layout in
@@ -265,7 +271,7 @@ class Superpaper:
         from now on. If they can't be written the user is told and nothing changes; returns
         whether they were saved. The one writer of the settings file while running."""
         try:
-            write_settings(self.settings_path, settings)
+            write_settings(self.paths.config / SETTINGS_FILE, settings)
         except OSError as error:
             logger.exception("Could not save the settings")
             self._shell.notify(f"The settings could not be saved: {error}", "Error")
@@ -275,10 +281,11 @@ class Superpaper:
 
     def apply_settings(self, settings: Settings) -> bool:
         """Save the general settings from the settings window; returns whether they were saved."""
+        logging_changed = settings.logging != self.settings.logging
         if not self.update_settings(settings):
             return False
-        if settings.logging:
-            self._shell.notify("Logging is enabled after an application restart.", "Info")
+        if logging_changed:
+            self._shell.notify("Logging changes take effect after a restart.", "Info")
         return True
 
     def quit(self) -> None:

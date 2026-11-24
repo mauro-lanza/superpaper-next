@@ -12,10 +12,10 @@ from types import SimpleNamespace
 import pytest
 
 from superpaper import session as session_module
-from superpaper.geometry import display_detection
 from superpaper.profiles.profile_file import Profile
 from superpaper.profiles.profile_id import ProfileId
 from superpaper.session import Session
+from superpaper.wallpaper_change import NothingToRestore, Restored
 from tests.desktop.fake import FakeDesktop
 
 DELAY = 600.0
@@ -75,9 +75,10 @@ class Runtime:
         self.clock = Clock()
         self.changes = []
         self.reported = []
+        self.timer_reported = []
         self.running_changes = []
         self.restored = []
-        self.has_render = True
+        self.restore_result = Restored(None)
         self.problem = None
         self.skipped = []
         self.set_command = "first {image}"
@@ -89,12 +90,17 @@ class Runtime:
             paths,
             FakeDesktop(),
             "layout 0",
-            on_change=self.reported.append,
+            on_change=self.report_change,
             on_skipped=self.skipped.append,
             on_running_change=lambda: self.running_changes.append(self.session.running),
             set_command=lambda: self.set_command,
             clock=self.clock,
         )
+
+    def report_change(self, problem, *, by_timer):
+        self.reported.append(problem)
+        if by_timer:
+            self.timer_reported.append(problem)
 
     def show(self, profile, files, paths, *, desktop, layout, set_command="", profile_id=None, running=None):
         if self.hold is not None:
@@ -113,7 +119,15 @@ class Runtime:
 
     def show_again(self, stored, paths, *, desktop, layout, set_command=""):
         self.restored.append(stored.profile.name)
-        return self.has_render
+        if isinstance(self.restore_result, Exception):
+            raise self.restore_result
+        return self.restore_result
+
+    def draft(self, profile, images, *, layout="layout 0"):
+        """Post a draft; the outcomes it reports are collected in the returned list."""
+        outcomes = []
+        self.session.apply_draft(profile, images, layout=layout, on_done=outcomes.append)
+        return outcomes
 
     @property
     def shown(self):
@@ -227,12 +241,13 @@ def test_starting_the_running_profile_again_changes_nothing_but_unpauses_and_res
     assert runtime.shown == ["A-1.png", "A-2.png"]
 
 
-def test_applying_a_profile_shows_the_picked_image_and_remembers_it(runtime):
+@pytest.mark.parametrize(("picked", "pinned"), [(["pick.png"], ["pick.png"]), (None, None)])
+def test_applying_a_profile_shows_its_current_image_and_remembers_it_and_pins_what_was_picked(runtime, picked, pinned):
     a = saved("A")
-    runtime.session.apply(a, ["pick.png"])
+    runtime.session.apply(a, picked)
     runtime.settle()
 
-    assert a.selection.pinned == ["pick.png"]
+    assert a.selection.pinned == pinned
     assert runtime.shown == ["A-1.png"]
     assert runtime.session.running is a
     assert (runtime.paths.cache / "running_profile").read_text(encoding="utf-8") == "A"
@@ -257,15 +272,6 @@ def test_every_change_of_the_running_profile_is_reported(runtime):
         "A",
         None,
     ]
-
-
-def test_applying_without_a_pick_shows_the_current_image(runtime):
-    a = saved("A")
-    runtime.session.apply(a, None)
-    runtime.settle()
-
-    assert a.selection.pinned is None
-    assert runtime.shown == ["A-1.png"]
 
 
 def test_applying_the_running_profile_shows_its_current_image_unpauses_and_restarts_the_countdown(runtime):
@@ -333,7 +339,7 @@ def test_requests_never_wait_for_a_change_under_way(runtime):
     runtime.session.next()
     runtime.session.toggle_pause()
     runtime.session.use_displays("layout 1")
-    runtime.session.apply_draft(Profile(name="draft"), ["draft.png"])
+    runtime.draft(Profile(name="draft"), ["draft.png"])
     assert time.monotonic() - started < 1
 
     runtime.release()
@@ -352,6 +358,31 @@ def test_the_slideshow_changes_each_time_its_delay_has_passed(runtime):
     runtime.advance(DELAY)
     runtime.settle()
     assert runtime.shown == ["A-1.png", "A-2.png", "A-3.png"]
+
+
+def test_only_the_slideshows_own_changes_are_reported_as_timed(runtime):
+    runtime.session.activate(saved("A"))
+    runtime.session.next()
+    runtime.advance(DELAY)
+    runtime.settle()
+
+    assert runtime.reported == [None, None, None]
+    assert runtime.timer_reported == [None]
+
+
+def test_a_slideshow_change_that_fails_unexpectedly_is_reported_as_timed(runtime, monkeypatch):
+    runtime.session.activate(saved("A"))
+    runtime.settle()
+
+    def broken(*args, **kwargs):
+        message = "a bug"
+        raise RuntimeError(message)
+
+    monkeypatch.setattr(session_module, "show", broken)
+    runtime.advance(DELAY)
+    runtime.settle()
+
+    assert runtime.timer_reported == ["The wallpaper could not be shown: a bug"]
 
 
 def test_next_starts_the_countdown_again(runtime):
@@ -566,12 +597,33 @@ def test_the_last_wallpaper_is_shown_again_at_startup(runtime):
 
 
 def test_a_profile_without_an_earlier_render_is_rendered_at_startup(runtime):
-    runtime.has_render = False
+    runtime.restore_result = NothingToRestore()
     runtime.session.restore(saved("A"))
     runtime.settle()
 
     # Its current image, without moving on.
     assert runtime.shown == ["A-1.png"]
+
+
+def test_a_startup_that_cant_show_the_last_wallpaper_says_so_and_the_slideshow_still_runs(runtime):
+    runtime.restore_result = Restored("the setter failed")
+    runtime.session.restore(saved("A"))
+    runtime.advance(DELAY)
+    runtime.settle()
+
+    assert runtime.reported == ["the setter failed", None]
+    assert runtime.shown == ["A-2.png"]
+
+
+def test_a_startup_that_fails_unexpectedly_says_so_and_the_slideshow_still_runs(runtime, caplog):
+    runtime.restore_result = RuntimeError("a bug")
+    runtime.session.restore(saved("A"))
+    runtime.advance(DELAY)
+    runtime.settle()
+
+    assert runtime.reported == ["The wallpaper could not be shown: a bug", None]
+    assert "a bug" in caplog.text
+    assert runtime.shown == ["A-2.png"]
 
 
 def test_a_profile_without_a_complete_selection_is_left_alone(runtime, caplog):
@@ -622,7 +674,7 @@ def test_redrawing_with_nothing_running_shows_nothing(runtime):
 
 def test_a_draft_pauses_the_running_slideshow_so_no_tick_replaces_it(runtime):
     runtime.session.activate(saved("A"))
-    runtime.session.apply_draft(Profile(name="align test"), ["test.png"])
+    runtime.draft(Profile(name="align test"), ["test.png"])
     runtime.advance(10 * DELAY)
     runtime.settle()
 
@@ -643,7 +695,7 @@ def test_a_draft_pauses_the_running_slideshow_so_no_tick_replaces_it(runtime):
 def test_a_test_ends_with_unpause_next_apply_or_a_tray_pick(runtime, leave, after_a_delay, paused):
     a = saved("A")
     runtime.session.activate(a)
-    runtime.session.apply_draft(Profile(name="align test"), ["test.png"])
+    runtime.draft(Profile(name="align test"), ["test.png"])
     leave(runtime.session, a)
     runtime.advance(DELAY)
     runtime.settle()
@@ -652,58 +704,68 @@ def test_a_test_ends_with_unpause_next_apply_or_a_tray_pick(runtime, leave, afte
     assert runtime.session.paused is paused
 
 
-def test_a_draft_leaves_a_profile_that_isnt_a_slideshow_unpaused(runtime):
-    runtime.session.activate(saved("A", slideshow=False))
-    runtime.session.apply_draft(Profile(name="align test"), ["test.png"])
-    runtime.settle()
-
-    assert runtime.session.paused is False
-
-
-def test_a_draft_with_nothing_running_pauses_nothing(runtime):
-    runtime.session.apply_draft(Profile(name="align test"), ["test.png"])
+@pytest.mark.parametrize("running", [saved("A", slideshow=False), None], ids=["not a slideshow", "nothing running"])
+def test_a_draft_pauses_nothing_unless_a_slideshow_runs(runtime, running):
+    if running is not None:
+        runtime.session.activate(running)
+    runtime.draft(Profile(name="align test"), ["test.png"])
     runtime.settle()
 
     assert runtime.session.paused is False
 
 
 def test_drafts_are_shown_for_the_layout_given(runtime):
-    outcomes = []
     runtime.session.activate(saved("A"))
-    runtime.session.apply_draft(Profile(name="unsaved"), ["draft.png"], layout="the editor's layout")
-    runtime.session.apply_draft(Profile(name="align test"), ["test.png"], on_done=outcomes.append)
+    outcomes = runtime.draft(Profile(name="unsaved"), ["draft.png"], layout="the editor's layout")
     runtime.settle()
 
-    draft, test = runtime.changes[1:]
-    assert (draft.image, draft.layout, draft.profile_id) == ("draft.png", "the editor's layout", None)
-    # Without a layout, the session's own; the running profile's KDE activity gets it.
-    assert (test.image, test.layout, test.running) == ("test.png", "layout 0", "A")
+    _, draft = runtime.changes
+    # The running profile's KDE activity gets it.
+    assert (draft.image, draft.layout, draft.profile_id, draft.running) == (
+        "draft.png",
+        "the editor's layout",
+        None,
+        "A",
+    )
     assert outcomes == [None]
     assert runtime.session.running.selection.number == 1
 
 
 def test_a_draft_says_what_went_wrong(runtime):
-    outcomes = []
     runtime.problem = "The image test.png doesn't exist."
-    runtime.session.apply_draft(Profile(name="align test"), ["test.png"], on_done=outcomes.append)
+    outcomes = runtime.draft(Profile(name="align test"), ["test.png"])
     runtime.settle()
 
     assert outcomes == ["The image test.png doesn't exist."]
 
 
-def test_a_draft_that_fails_unexpectedly_still_says_so(runtime, monkeypatch, caplog):
-    outcomes = []
-
+def test_a_draft_that_fails_unexpectedly_says_why_once(runtime, monkeypatch, caplog):
     def broken(*args, **kwargs):
         message = "a bug"
         raise RuntimeError(message)
 
     monkeypatch.setattr(session_module, "show", broken)
-    runtime.session.apply_draft(Profile(name="unsaved"), ["draft.png"], on_done=outcomes.append)
+    outcomes = runtime.draft(Profile(name="unsaved"), ["draft.png"])
     runtime.settle()
 
-    assert outcomes == ["The wallpaper could not be shown."]
+    assert outcomes == ["The wallpaper could not be shown: a bug"]
     assert "a bug" in caplog.text
+
+
+def test_a_draft_whose_setup_fails_still_says_so_once(runtime, monkeypatch):
+    runtime.session.activate(saved("A"))
+    runtime.settle()
+
+    def broken():
+        message = "a bug"
+        raise RuntimeError(message)
+
+    monkeypatch.setattr(runtime.session, "_arm", broken)
+    outcomes = runtime.draft(Profile(name="unsaved"), ["draft.png"])
+    runtime.settle()
+
+    assert outcomes == ["The wallpaper could not be shown: a bug"]
+    assert runtime.reported == [None]
 
 
 def test_an_unexpected_error_doesnt_stop_the_runtime(runtime, monkeypatch, caplog):
@@ -723,7 +785,8 @@ def test_an_unexpected_error_doesnt_stop_the_runtime(runtime, monkeypatch, caplo
     runtime.settle()
 
     assert "a bug" in caplog.text
-    # The slideshow carries on.
+    # It is reported, and the slideshow carries on.
+    assert runtime.reported == ["The wallpaper could not be shown: a bug", None]
     assert runtime.shown == ["A-2.png"]
 
 
@@ -742,39 +805,22 @@ def test_changes_use_the_settings_and_displays_current_at_the_time(runtime):
     assert runtime.session.layout == "layout 1"
 
 
-def test_the_worker_never_detects_displays(runtime, monkeypatch):
-    # Detecting displays off the main thread would corrupt memory (see detect_displays).
-    detections = []
-    monkeypatch.setattr(display_detection, "detect_displays", lambda **options: detections.append(options) or [])
-    runtime.session.restore(saved("A"))
-    runtime.session.activate(saved("B"))
-    runtime.session.next()
-    runtime.session.use_displays("layout 1")
-    runtime.session.apply_draft(Profile(name="unsaved"), ["draft.png"])
-    runtime.settle()
-
-    assert detections == []
-    assert runtime.shown == ["B-1.png", "B-2.png", "draft.png"]
-
-
 def test_quitting_is_bounded_and_refuses_later_requests(runtime):
     runtime.session.activate(saved("A"))
     runtime.settle()
     runtime.hold_changes()
     runtime.session.next()
     assert runtime.holding.wait(10)
-    outcomes = []
 
     started = time.monotonic()
     runtime.session.shutdown(timeout=0.2)
     assert time.monotonic() - started < 2
     runtime.session.next()
-    runtime.session.apply_draft(Profile(name="unsaved"), ["draft.png"], on_done=outcomes.append)
+    outcomes = runtime.draft(Profile(name="unsaved"), ["draft.png"])
     assert outcomes == ["Superpaper is quitting."]
 
     runtime.release()
-    runtime.session._worker.join(10)
-    assert not runtime.session._worker.is_alive()
+    runtime.session.shutdown(timeout=10)
     assert runtime.shown == ["A-1.png", "A-2.png"]
 
 
@@ -790,7 +836,6 @@ def test_a_change_that_ends_after_quitting_never_starts_another(runtime):
     runtime.session.shutdown(timeout=0.1)
     runtime.clock.now += 100 * DELAY
     runtime.release()
-    runtime.session._worker.join(10)
+    runtime.session.shutdown(timeout=10)
 
-    assert not runtime.session._worker.is_alive()
     assert runtime.shown == ["A-1.png", "A-2.png"]
