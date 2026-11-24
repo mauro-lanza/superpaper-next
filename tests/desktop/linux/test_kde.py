@@ -4,6 +4,7 @@ import json
 import shutil
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -14,9 +15,6 @@ from superpaper.desktop.wallpaper import ProfileWallpapers
 PIECES = ["/cache/home-a-crop-0.png", "/cache/home-a-crop-1.png"]
 WORK_PIECES = ["/cache/work-b-crop-0.png", "/cache/work-b-crop-1.png"]
 ACTIVITIES = {"act-home": "home", "act-work": "work", "act-play": "play"}
-# Two displays, showing desktops 1 and 2 of the current activity; the other activities'
-# desktops are on no screen (-1), as before Plasma 6.8.
-DESKTOPS = "1,0,1;2,1,1;3,-1,0;4,-1,0;5,-1,0;6,-1,0"
 
 
 def declared(script, name):
@@ -27,7 +25,7 @@ def declared(script, name):
 
 
 def urls(paths):
-    return ["file://" + path for path in paths]
+    return [Path(path).as_uri() for path in paths]
 
 
 def running(profile, state_dir, cached=None):
@@ -36,30 +34,6 @@ def running(profile, state_dir, cached=None):
     return ProfileWallpapers(
         current_profile=profile, cached_pieces=lambda name: cached.get(name, []), state_dir=state_dir
     )
-
-
-class FakePlasma:
-    """Plasma's scripting interface: it lists the desktops and records the wallpaper scripts."""
-
-    def __init__(self):
-        self.scripts = []
-        self.failure = None
-        self.desktops = DESKTOPS
-
-    def evaluateScript(self, script):
-        if script == kde.DESKTOPS_SCRIPT:
-            return self.desktops
-        if self.failure:
-            raise self.failure
-        self.scripts.append(script)
-        return ""
-
-
-@pytest.fixture
-def plasma(monkeypatch):
-    shell = FakePlasma()
-    monkeypatch.setattr(kde, "_plasma_shell", lambda: shell)
-    return shell
 
 
 @pytest.fixture
@@ -163,16 +137,12 @@ def test_a_wallpaper_plasma_refuses_is_reported_not_raised(plasma, activity_mana
     assert result.problem == "Plasma did not take the wallpaper: org.freedesktop.DBus.Error.ServiceUnknown"
 
 
-def test_without_dbus_python_the_reason_is_reported(monkeypatch, tmp_path):
-    monkeypatch.setattr(kde.shutil, "which", lambda program: None)  # and no qdbus either
-    monkeypatch.setitem(sys.modules, "dbus", None)
-
-    result = kde.set_wallpaper(PIECES, running("home", tmp_path))
-
-    assert "needs dbus-python" in result.problem
-
-
-def test_without_dbus_python_the_reason_is_reported_with_activities(monkeypatch, activity_manager, tmp_path):
+@pytest.mark.parametrize("with_activities", [False, True])
+def test_without_dbus_python_the_reason_is_reported(monkeypatch, request, tmp_path, with_activities):
+    if with_activities:
+        request.getfixturevalue("activity_manager")
+    else:
+        monkeypatch.setattr(kde.shutil, "which", lambda program: None)
     monkeypatch.setitem(sys.modules, "dbus", None)
 
     result = kde.set_wallpaper(PIECES, running("home", tmp_path))
@@ -185,7 +155,7 @@ def test_image_paths_reach_plasma_as_data_not_code():
 
     script = kde.wallpaper_script({7: [awkward]}, None)
 
-    assert declared(script, "imagesByDesktop") == {"7": ["file://" + awkward]}
+    assert declared(script, "imagesByDesktop") == {"7": urls([awkward])}
     assert len(script.splitlines()) == len(kde.WALLPAPER_SCRIPT.template.splitlines())
 
 
@@ -208,13 +178,6 @@ def test_a_desktop_on_a_removed_screen_is_not_active(plasma, activity_manager, t
 
     assert desktops[1] == "act-home"
     assert 9 not in desktops
-
-
-def test_the_wallpaper_script_picks_screens_by_the_current_activity():
-    script = kde.wallpaper_script({}, ["/a.png"])
-
-    assert "desktopForScreen" in script
-    assert "screen != -1" not in script
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="needs node to run the script")

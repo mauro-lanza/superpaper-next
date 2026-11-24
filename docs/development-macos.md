@@ -20,11 +20,6 @@ Runtime dependencies (Pillow, screeninfo, numpy, and PyObjC's Cocoa and Quartz
 frameworks on macOS) come from `pyproject.toml`; there is no separate requirements
 file. The `gui` extra pulls in wxPython, which installs from PyPI on macOS.
 
-## Known gaps
-
-- **Hotkeys are unsupported.** system_hotkey has no macOS backend, so it is not
-  installed on macOS and hotkeys stay off.
-
 ## Where files live
 
 On macOS settings and profiles live in `~/Library/Application Support/Superpaper`

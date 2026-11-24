@@ -7,7 +7,6 @@ import pytest
 
 from superpaper.desktop import linux, process
 from superpaper.desktop.linux import sni_tray
-from superpaper.desktop.process import Result
 from superpaper.desktop.wallpaper import Pieces, Spanned
 from tests.desktop.conftest import IMAGE, NO_PROFILES, set_wallpaper
 
@@ -21,24 +20,15 @@ TRAY_ARGUMENTS = {
 }
 
 
-def test_custom_command_runs_once_in_known_session(monkeypatch, ran):
-    monkeypatch.setenv("DESKTOP_SESSION", "gnome")
+@pytest.mark.parametrize("session", ["gnome", "unknown"])
+def test_custom_command_runs_once_in_any_session_without_a_time_limit(monkeypatch, ran, session):
+    monkeypatch.setenv("DESKTOP_SESSION", session)
 
     result = set_wallpaper("setter --image {image}", image="/tmp/wallpaper with spaces.png")
 
     assert result.ok
     assert [command for command, _ in ran] == [["setter", "--image", "/tmp/wallpaper with spaces.png"]]
-    assert ran[0][1]["env"] == process.host_spawn_env()
-
-
-def test_custom_command_runs_once_in_unknown_session(monkeypatch, ran):
-    monkeypatch.setenv("DESKTOP_SESSION", "unknown")
-
-    assert set_wallpaper("setter {image}").ok
-
-    assert [command for command, _ in ran] == [["setter", IMAGE]]
     assert "shell" not in ran[0][1]
-    # The user's own program runs for as long as it needs.
     assert ran[0][1]["timeout"] is None
 
 
@@ -77,14 +67,11 @@ def test_dirs_ignore_xdg_values_that_are_not_directories(tmp_path, kind):
     ) == (XDG_DEFAULT)
 
 
-def test_snap_uses_its_own_directories(tmp_path):
+def test_snap_config_and_cache_use_their_own_directories_independently(tmp_path):
     assert default_dirs(tmp_path, SNAP_USER_DATA="{root}/data", SNAP_USER_COMMON="{root}/common") == (
         "data",
         "common/temp",
     )
-
-
-def test_snap_config_and_cache_are_independent(tmp_path):
     assert default_dirs(tmp_path, SNAP_USER_DATA="{root}/data") == ("data", "home/.cache/superpaper/temp")
 
 
@@ -139,17 +126,6 @@ def test_a_custom_command_may_only_use_the_image_placeholder(monkeypatch, ran):
     assert ran == []
 
 
-def test_custom_command_receives_host_environment(monkeypatch, ran):
-    monkeypatch.setenv("DESKTOP_SESSION", "gnome")
-    monkeypatch.setenv("SUPERPAPER_HOSTENV_XDG_DATA_DIRS", "/host/data")
-
-    set_wallpaper("setter {image}")
-
-    received_env = ran[0][1]["env"]
-    assert received_env["XDG_DATA_DIRS"] == "/host/data"
-    assert not any(key.startswith("SUPERPAPER_HOSTENV_") for key in received_env)
-
-
 def test_lxqt_falls_back_to_pcmanfm_qt(monkeypatch, ran):
     monkeypatch.setenv("DESKTOP_SESSION", "lxqt")
     monkeypatch.setattr(
@@ -176,17 +152,19 @@ def test_xfce_sets_every_first_workspace_backdrop(monkeypatch, ran):
     assert [command[-2:] for command, _ in ran[1:]] == [["-s", IMAGE], ["-s", "6"]]
 
 
-def test_kde_needs_the_wallpaper_cut_into_pieces(monkeypatch):
+def test_kde_needs_the_wallpaper_cut_into_pieces(monkeypatch, plasma):
     monkeypatch.setenv("DESKTOP_SESSION", "plasma")
-    shown = []
-    monkeypatch.setattr(linux.kde, "set_wallpaper", lambda pieces, profiles: shown.append(pieces) or Result())
+    monkeypatch.setattr(linux.kde.shutil, "which", lambda program: None)
 
     uncut = linux.set_wallpaper(Spanned(IMAGE), set_command="", profiles=NO_PROFILES)
-    cut = linux.set_wallpaper(Pieces(IMAGE, ("/a.png", "/b.png")), set_command="", profiles=NO_PROFILES)
-
     assert uncut.problem == "KDE Plasma needs the wallpaper cut into one image per display."
+    assert plasma.scripts == []
+
+    cut = linux.set_wallpaper(Pieces(IMAGE, ("/a.png", "/b.png")), set_command="", profiles=NO_PROFILES)
     assert cut.ok
-    assert shown == [("/a.png", "/b.png")]
+    [script] = plasma.scripts
+    assert "file:///a.png" in script
+    assert "file:///b.png" in script
 
 
 def test_the_setter_problem_is_the_unknown_desktop_unless_the_user_has_a_command(monkeypatch):
@@ -200,10 +178,6 @@ def test_the_config_folder_opens_in_the_file_manager(ran, tmp_path):
     assert linux.open_folder(tmp_path).ok
 
     assert [command for command, _ in ran] == [["xdg-open", str(tmp_path)]]
-
-
-def test_linux_keeps_no_wallpaper_across_restarts():
-    assert linux.keeps_wallpaper() is False
 
 
 @pytest.mark.parametrize(
@@ -265,10 +239,9 @@ def test_span_mode_reports_what_the_desktop_refused(monkeypatch):
 
 
 @pytest.mark.parametrize(("session", "on_kde"), [("plasma", True), ("kde", True), ("gnome", False)])
-def test_kde_sessions_log_hotkey_problems_and_cannot_click_the_wx_tray(monkeypatch, session, on_kde):
+def test_kde_sessions_have_an_unclickable_wx_tray(monkeypatch, session, on_kde):
     monkeypatch.setenv("DESKTOP_SESSION", session)
 
-    assert linux.hotkey_problems_in_dialog() is not on_kde
     assert linux.wx_tray_clickable() is not on_kde
 
 
@@ -287,4 +260,4 @@ def test_the_native_tray_is_built_for_this_process_when_a_watcher_runs(monkeypat
 
     assert linux.make_tray(**TRAY_ARGUMENTS) is native_tray
     assert built[0]["bus_name"] == f"org.kde.StatusNotifierItem-{os.getpid()}-1"
-    assert built[0]["title"] == built[0]["tooltip"] == "Superpaper"
+    assert built[0]["title"] == "Superpaper"

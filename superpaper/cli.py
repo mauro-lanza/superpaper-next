@@ -7,6 +7,7 @@ import sys
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from types import TracebackType
 from typing import assert_never
 
 from superpaper.desktop.backend import Desktop
@@ -16,7 +17,7 @@ from superpaper.geometry.perspective import Named
 from superpaper.paths import AppPaths, ensure_dirs
 from superpaper.profiles import profile_file, profile_store
 from superpaper.profiles.profile_id import ProfileId, ProfileIdError
-from superpaper.settings import SETTINGS_FILE, read_settings, write_settings
+from superpaper.settings import SETTINGS_FILE, Settings, read_settings, write_settings
 from superpaper.user_input import Offset, OffsetError
 from superpaper.wallpaper_change import show
 
@@ -24,7 +25,7 @@ logger = logging.getLogger(__name__)
 _PACKAGE_LOGGER = logging.getLogger("superpaper")
 
 
-def parse_offset_args(args: Sequence[str]) -> tuple[Offset, ...]:
+def _parse_offsets(args: Sequence[str]) -> tuple[Offset, ...]:
     """The offsets of command line ``args``: an x and a y in pixels for each display."""
     if len(args) % 2:
         message = (
@@ -84,6 +85,9 @@ def run(argv: Sequence[str], paths: AppPaths, desktop: Desktop) -> int:
                 assert_never(request)
     except CliError as error:
         logger.error("%s", error)  # noqa: TRY400  # the message is the whole report
+        return 1
+    except OSError as error:
+        logger.error("Superpaper's files could not be read or written: %s", error)  # noqa: TRY400
         return 1
 
 
@@ -149,15 +153,18 @@ def parse_arguments(argv: Sequence[str], *, windows_names: bool) -> Request:
     parser.add_argument("-d", "--debug", action="store_true", help="Run the full application with debugging.")
     args = parser.parse_args(argv)
 
-    if args.debug and len(argv) == 1:
+    is_debug_only = args.debug and len(argv) == 1
+    if is_debug_only:
         return StartTray(profile_id=None, debug=True)
-    if args.profile and not args.setimages:
+    has_images = bool(args.setimages)
+    if args.profile and not has_images:
         try:
             return StartTray(profile_id=ProfileId.parse(args.profile, windows_names=windows_names), debug=args.debug)
         except ProfileIdError as error:
             message = f"Invalid profile name: {error}"
             raise CliError(message) from error
-    if not args.setimages or args.profile:
+    asks_for_both_or_neither = not has_images or args.profile
+    if asks_for_both_or_neither:
         message = (
             "Pass either image(s) to set as the wallpaper with '-s' or '--setimages', "
             "or a profile to start Superpaper with using '-p' or '--profile'."
@@ -184,7 +191,7 @@ def parse_arguments(argv: Sequence[str], *, windows_names: bool) -> Request:
     except ValueError as error:
         raise CliError(str(error)) from error
     try:
-        offsets = parse_offset_args(args.offsets or [])
+        offsets = _parse_offsets(args.offsets or [])
     except OffsetError as error:
         raise CliError(str(error)) from error
     if args.command and len(args.command) > 1:
@@ -201,7 +208,7 @@ def parse_arguments(argv: Sequence[str], *, windows_names: bool) -> Request:
     )
 
 
-def configure_logging(*, debug: bool, log_file: Path | None = None) -> None:
+def configure_logging(*, debug: bool, log_file: Path | None) -> None:
     """Log to the console when debugging, and to ``log_file`` (which also means debugging).
 
     Nothing is configured at import; this runs once, before any work starts. Without either
@@ -220,7 +227,9 @@ def configure_logging(*, debug: bool, log_file: Path | None = None) -> None:
     sys.excepthook = _log_uncaught_exception if log_file is not None else sys.__excepthook__
 
 
-def _log_uncaught_exception(exception_type, exception, traceback) -> None:
+def _log_uncaught_exception(
+    exception_type: type[BaseException], exception: BaseException, traceback: TracebackType | None
+) -> None:
     _PACKAGE_LOGGER.critical("Uncaught exception", exc_info=(exception_type, exception, traceback))
 
 
@@ -242,8 +251,9 @@ def _start_tray(paths: AppPaths, desktop: Desktop, profile_id: ProfileId | None,
         )
         raise CliError(message) from error
     settings_file = paths.config / SETTINGS_FILE
-    settings = read_settings(settings_file, hotkeys_by_default=desktop.hotkeys_by_default())
-    if not settings_file.exists():
+    settings = read_settings(settings_file)
+    if settings is None:
+        settings = Settings()
         write_settings(settings_file, settings)
     configure_logging(debug=debug or settings.logging, log_file=paths.cache / "log" if settings.logging else None)
     _span_desktop(desktop, settings.set_command)
@@ -262,9 +272,6 @@ def _detect_displays(paths: AppPaths, desktop: Desktop) -> Layout:
     except DisplayDetectionError as error:
         message = f"No displays could be detected: {error}"
         raise CliError(message) from error
-    except OSError as error:
-        message = f"Superpaper's files could not be read or written: {error}"
-        raise CliError(message) from error
     if loaded.problem is not None:
         print(f"Warning: {' '.join(loaded.problem.split())}", file=sys.stderr)
     return loaded.layout
@@ -281,14 +288,12 @@ def _check_profile_exists(paths: AppPaths, desktop: Desktop, profile_id: Profile
 
 
 def _set_images(request: SetImages, paths: AppPaths, desktop: Desktop) -> int:
-    configure_logging(debug=request.debug)
+    configure_logging(debug=request.debug, log_file=None)
     if request.debug:
         logger.info("Command line request: %s", request)
     ensure_dirs(paths)
-    set_command = (
-        request.set_command
-        or read_settings(paths.config / SETTINGS_FILE, hotkeys_by_default=desktop.hotkeys_by_default()).set_command
-    )
+    saved = read_settings(paths.config / SETTINGS_FILE)
+    set_command = request.set_command or (saved.set_command if saved else "")
     layout = None
     if request.perspective:
         layout = _detect_displays(paths, desktop)

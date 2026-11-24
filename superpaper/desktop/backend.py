@@ -37,11 +37,6 @@ class Desktop(Protocol):
         ...
 
     @staticmethod
-    def hotkey_problems_in_dialog() -> bool:
-        """Whether a hotkey that can't be registered is shown to the user, rather than only logged."""
-        ...
-
-    @staticmethod
     def takes_pieces(set_command: str) -> bool:
         """Whether the desktop sets one image per display, so a wallpaper is cut into pieces."""
         ...
@@ -89,11 +84,6 @@ class Desktop(Protocol):
     @staticmethod
     def default_dirs(environ: Mapping[str, str], install: Path) -> tuple[Path, Path]:
         """Where this OS keeps Superpaper's files unless told otherwise: the config and the cache directory."""
-        ...
-
-    @staticmethod
-    def hotkeys_by_default() -> bool:
-        """Whether global hotkeys are on in a new installation's settings."""
         ...
 
     @staticmethod

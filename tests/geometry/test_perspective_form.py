@@ -1,6 +1,5 @@
 """Staging a perspective from the dialog's fields."""
 
-import re
 from dataclasses import astuple
 
 import pytest
@@ -12,11 +11,7 @@ from superpaper.geometry.perspective_form import (
     PerspectiveForm,
     Staged,
     blank_form,
-    check_new_perspective_name,
     form_from,
-    parse_rotations_mm,
-    parse_viewer_offsets_mm,
-    perspective_from_mm,
     stage_perspective,
 )
 from superpaper.user_input import Problems
@@ -69,19 +64,44 @@ def test_a_form_without_a_name_is_a_problem(layout):
     assert stage(layout, form(name="")) == Problems(("Profile name is required.",))
 
 
-def test_a_new_perspective_cannot_take_a_reserved_name(layout):
-    result = stage(layout, form(name="Default"))
+@pytest.mark.parametrize(
+    ("name", "reserved"),
+    [
+        *((name, True) for name in ["default", "DEFAULT", "Default", "disabled", "Disabled", "None", "none", "NONE"]),
+        *((name, False) for name in ["desk", "defaults", "none of them", "My default"]),
+    ],
+)
+def test_a_new_perspective_cannot_take_a_reserved_name(layout, name, reserved):
+    result = stage(layout, form(name=name))
 
-    assert isinstance(result, Problems)
-    assert "reserved" in result.messages[0]
+    if reserved:
+        assert result == Problems((f"'{name}' is reserved; choose another perspective name.",))
+    else:
+        assert isinstance(result, Staged)
 
 
 @pytest.mark.parametrize(
     ("changes", "message"),
     [
-        ({"viewer_offsets": ("0", "x", "600")}, "Viewer offsets"),
-        ({"viewer_offsets": ("0", "0", "0")}, "Viewer distance"),
-        ({"rotation_cells": (ZEROS, ("0", "0", "0", "oops", "0", "0"))}, "Display 1, 'Tilt angle'"),
+        ({"viewer_offsets": ("0", "x", "600")}, "Viewer offsets should be lengths in millimetres"),
+        ({"viewer_offsets": ("0", "0", "0")}, "Viewer distance must be entered and positive"),
+        ({"viewer_offsets": ("0", "0", "-1")}, "Viewer distance must be entered and positive"),
+        *(
+            (
+                {"rotation_cells": (ZEROS, tuple("1,5" if cell == column else "0" for cell in range(6)))},
+                f"Display 1, '{name}': '1,5' is not a number; separate decimals with a point.",
+            )
+            for column, name in enumerate(
+                [
+                    "Swivel angle",
+                    "Sw. ax. lat. off.",
+                    "Sw. ax. dep. off.",
+                    "Tilt angle",
+                    "Ti. ax. ver. off.",
+                    "Ti. ax. dep. off.",
+                ]
+            )
+        ),
     ],
 )
 def test_fields_that_are_not_numbers_are_a_problem(layout, changes, message):
@@ -89,6 +109,20 @@ def test_fields_that_are_not_numbers_are_a_problem(layout, changes, message):
 
     assert isinstance(result, Problems)
     assert message in result.messages[0]
+
+
+@pytest.mark.parametrize(
+    "rotations",
+    [
+        ("0", "0", "0", "90", "0", "0"),
+        ("0", "0", "0", "270", "0", "0"),
+    ],
+)
+def test_a_display_turned_edge_on_is_a_problem_not_an_error(layout, rotations):
+    result = stage(layout, form(rotation_cells=(ZEROS, rotations)))
+
+    assert isinstance(result, Problems)
+    assert "edge-on" in result.messages[0]
 
 
 def test_a_large_intermediate_image_needs_confirming_before_it_is_staged(layout, monkeypatch):
@@ -120,10 +154,6 @@ def test_a_blank_form_is_neutral_for_every_display(layout):
     assert blank.rotation_cells == (("0.0",) * 6, ("0.0",) * 6)
     assert blank.viewer_offsets == ("0", "0", "0")
     assert blank.use_perspective == layout.use_perspective
-
-
-def test_a_blank_form_is_not_a_stageable_perspective_until_named_and_given_a_distance(layout):
-    assert isinstance(stage(layout, blank_form(layout)), Problems)
 
 
 def test_a_stored_perspective_is_shown_in_millimetres(layout):
@@ -167,88 +197,22 @@ def test_showing_a_perspective_and_staging_it_again_gives_the_same_perspective(l
     assert flatten(result.layout.perspective("desk")) == pytest.approx(flatten(stored))
 
 
-@pytest.mark.parametrize("name", ["default", "DEFAULT", "Default", "disabled", "Disabled", "None", "none", "NONE"])
-def test_reserved_perspective_names_are_rejected(name):
-    with pytest.raises(ValueError, match="reserved"):
-        check_new_perspective_name(name)
+def test_lengths_are_staged_from_millimetres_to_pixels_and_angles_are_kept(layout):
+    ppm = layout.max_ppi() / 25.4
 
-
-@pytest.mark.parametrize("name", ["desk", "defaults", "none of them", "My default"])
-def test_other_perspective_names_are_accepted(name):
-    check_new_perspective_name(name)
-
-
-def test_lengths_convert_millimetres_to_pixels_and_keep_angles():
-    perspective = perspective_from_mm(
-        "desk",
-        163.0,
-        1,
-        [0.0, -30.5, 500.0],
-        [(SwivelAxis.LEFT, 12.0, 7.25, -3.0)],
-        [(-4.5, 12.0, 40.0)],
+    result = stage(
+        layout,
+        form(
+            central_display=1,
+            viewer_offsets=("0", "-30.5", "500"),
+            swivel_axes=(1, 0),
+            rotation_cells=(("10", "1.5", "-2", "-4.5", "12", "40"), ZEROS),
+        ),
     )
 
-    assert perspective.viewer_pos == pytest.approx((0.0, -195.72834645669292, 3208.6614173228345))
-    assert perspective == Perspective(
-        "desk",
-        1,
-        perspective.viewer_pos,
-        (Swivel(SwivelAxis.LEFT, 12.0, 46.525590551181104, -19.251968503937007),),
-        (Tilt(-4.5, 77.00787401574803, 256.6929133858268),),
+    expected_display_0 = [1, 10.0, 1.5 * ppm, -2 * ppm, -4.5, 12 * ppm, 40 * ppm]
+    expected_display_1 = [0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    assert isinstance(result, Staged)
+    assert flatten(result.layout.perspective("desk")) == pytest.approx(
+        [1, 0.0, -30.5 * ppm, 500 * ppm, *expected_display_0, *expected_display_1]
     )
-
-
-def test_no_displays_rows_give_empty_swivels_and_tilts():
-    perspective = perspective_from_mm("desk", 96.0, 0, [0.0, 0.0, 1.0], [], [])
-
-    assert (perspective.swivels, perspective.tilts) == ((), ())
-
-
-def test_the_grid_cells_become_swivels_and_tilts_per_display():
-    swivels, tilts = parse_rotations_mm(
-        [1, 0],
-        [["10", "1.5", "-2", "-4.5", "12", "40"], ["0", "0", "0", "0", "0", "0"]],
-    )
-
-    assert swivels == [(SwivelAxis.LEFT, 10.0, 1.5, -2.0), (SwivelAxis.NONE, 0.0, 0.0, 0.0)]
-    assert tilts == [(-4.5, 12.0, 40.0), (0.0, 0.0, 0.0)]
-
-
-def test_a_grid_without_displays_gives_nothing():
-    assert parse_rotations_mm([], []) == ([], [])
-
-
-@pytest.mark.parametrize(
-    ("column", "name"),
-    [
-        (0, "Swivel angle"),
-        (1, "Sw. ax. lat. off."),
-        (2, "Sw. ax. dep. off."),
-        (3, "Tilt angle"),
-        (4, "Ti. ax. ver. off."),
-        (5, "Ti. ax. dep. off."),
-    ],
-)
-def test_a_grid_cell_that_is_not_a_number_is_named_by_display_and_column(column, name):
-    row = ["0"] * 6
-    row[column] = "1,5"
-
-    with pytest.raises(ValueError, match=rf"Display 1, '{re.escape(name)}': '1,5' is not a number") as error:
-        parse_rotations_mm([0, 0], [["0"] * 6, row])
-
-    assert "separate decimals with a point" in str(error.value)
-
-
-def test_viewer_offsets_are_read_in_millimetres():
-    assert parse_viewer_offsets_mm(["0", "-30.5", "500"]) == [0.0, -30.5, 500.0]
-
-
-def test_a_viewer_offset_that_is_not_a_number_is_an_error():
-    with pytest.raises(ValueError, match="lengths in millimetres"):
-        parse_viewer_offsets_mm(["0", "x", "500"])
-
-
-@pytest.mark.parametrize("distance", ["0", "-1"])
-def test_the_viewer_distance_must_be_positive(distance):
-    with pytest.raises(ValueError, match="Viewer distance must be entered and positive"):
-        parse_viewer_offsets_mm(["0", "0", distance])

@@ -334,9 +334,9 @@ class Layout:
         """The layout with ``perspective`` added, or replacing the one of its name, and
         whether it is the default."""
         default = self.default_perspective
-        if is_default and default != perspective.name:
+        if is_default:
             default = perspective.name
-        elif not is_default and default == perspective.name:
+        elif default == perspective.name:
             default = None
         if self.perspective(perspective.name) is None:
             perspectives = (*self.perspectives, perspective)
@@ -369,7 +369,9 @@ class Layout:
                 name = chosen
             case _:
                 assert_never(choice)
-        return None if not name else self.perspective(name)
+        if not name:
+            return None
+        return self.perspective(name)
 
     def _phys_sizes_mm(self) -> list[Point]:
         if self.user_diagonal_inches is None:

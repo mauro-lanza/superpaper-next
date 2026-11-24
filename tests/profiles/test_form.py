@@ -1,18 +1,21 @@
 """The profile editor's rules, without a UI: what a form means as a profile and when it counts
 as changed."""
 
-from types import SimpleNamespace
-
 import pytest
 
+from superpaper.geometry import canvas
+from superpaper.geometry.perspective import Disabled, Named, Perspective, Swivel, SwivelAxis, Tilt
 from superpaper.profiles import form as profile_form
+from superpaper.profiles import profile_file
 from superpaper.profiles.form import (
     applied_offsets,
     fingerprint,
+    fit_to_displays,
     form_from,
     parse_form,
     parse_offsets,
     preview_spangroups,
+    source_quality_size,
     sources_per_target,
     spangroups_of,
 )
@@ -84,13 +87,6 @@ def test_a_slideshow_delay_must_be_positive(text):
 def test_the_delay_and_sort_are_ignored_without_a_slideshow():
     profile, problems = parse_form(blank(delay_minutes="soon", sort_label="Alphabetical"))
     assert (profile.delay, profile.sortmode, problems) == (600.0, "shuffle", [])
-
-
-def test_the_hotkey_is_split_at_pluses_only_when_enabled():
-    enabled = parse_form(blank(hotkey_enabled=True, hotkey=" control+super+x "))[0].hotkey
-    blanked = parse_form(blank(hotkey_enabled=True, hotkey="  "))[0].hotkey
-    disabled = parse_form(blank(hotkey_enabled=False, hotkey="control+x"))[0].hotkey
-    assert (enabled, blanked, disabled) == (("control", "super", "x"), None, None)
 
 
 def test_a_slideshow_renders_at_default_zoom_and_pan_whatever_the_sliders_say():
@@ -183,7 +179,6 @@ def test_a_saved_profile_is_shown_in_the_form_as_typed(layout):
         delay=900.0,
         sortmode="date_seeded_shuffle",
         sources=(("/a",), ("/b", "/c")),
-        hotkey=("control", "x"),
         zoom=1.5,
         pan=(0.25, -0.5),
         corrections=(OffsetsCorrection(((3, 4),)),),
@@ -191,7 +186,6 @@ def test_a_saved_profile_is_shown_in_the_form_as_typed(layout):
     shown = form_from(profile, layout)
     assert shown.delay_minutes == "15.0"
     assert shown.sort_label == "Date seeded shuffle"
-    assert (shown.hotkey_enabled, shown.hotkey) == (True, "control+x")
     assert (shown.offsets_applied, shown.offsets) == (True, ("3,4", "0,0"))
     assert (shown.spangroups_enabled, shown.spangroup_choices) == (True, (1, 0))
     assert (shown.zoom_pct, shown.pan_pct) == (150, (25, -50))
@@ -216,7 +210,6 @@ def test_a_form_shown_from_a_profile_gives_the_profile_back(layout):
         spanmode="multi",
         slideshow=False,
         sources=(("/a",), ("/b",)),
-        hotkey=("alt", "z"),
         zoom=1.25,
         pan=(0.5, 0.0),
     )
@@ -249,7 +242,7 @@ def images(tmp_path):
 
 
 def test_chosen_images_for_one_image_per_display_are_none_without_a_click(images):
-    loaded = SimpleNamespace(selection=SimpleNamespace(images=["/x.png"]))
+    loaded = ["/x.png"]
     multi = Profile(name="m", spanmode="multi")
     single = Profile(name="s")
     both = [str(images / "a.png"), str(images / "b.png")]
@@ -258,6 +251,25 @@ def test_chosen_images_for_one_image_per_display_are_none_without_a_click(images
     assert profile_form.chosen_images(single, [str(images / "a.png")], loaded) == [str(images / "a.png")]
     assert profile_form.chosen_images(single, [str(images)], loaded) == ["/x.png"]
     assert profile_form.chosen_images(single, None, None) is None
+
+
+def test_span_groups_of_displays_past_the_ninth_cannot_be_saved():
+    choices = (*(10 * (0,)), 1)
+
+    profile, problems = parse_form(blank(span_mode="advanced", spangroups_enabled=True, spangroup_choices=choices))
+
+    assert profile.spangroups == ((*range(10),), (10,))
+    assert any("displays 0 to 9" in problem for problem in problems)
+    assert not parse_form(blank(span_mode="advanced", spangroups_enabled=True, spangroup_choices=(0, 1)))[1]
+
+
+def test_a_profile_with_empty_spangroups_round_trips_through_the_form(layout):
+    profile = profile_file.parse("name=Work\nslideshow=false\nspangroups=\ndisplay0paths=/a\n")
+
+    saved, problems = parse_form(form_from(profile, layout))
+
+    assert problems == []
+    assert saved.spangroups is None
 
 
 def test_a_new_profile_starts_blank_with_a_field_for_every_display(layout):
@@ -285,3 +297,39 @@ def test_display_areas_follow_the_span_mode(layout):
     assert profile_form.display_areas(layout, "advanced") == layout.ppi_norm_areas()
     assert profile_form.display_areas(layout, "single") == layout.real_areas()
     assert profile_form.display_areas(layout, "multi") == layout.real_areas()
+
+
+@pytest.fixture
+def layout_with_edge_on_perspective(layout):
+    count = len(layout.displays)
+    edge_on = Perspective(
+        "edge-on",
+        0,
+        (0.0, 0.0, 1000.0),
+        (Swivel(SwivelAxis.NONE, 0.0, 0.0, 0.0),) * count,
+        (Tilt(90.0, 0.0, 0.0),) * count,
+    )
+    return layout.with_perspective(edge_on, use_perspective=True, is_default=False)
+
+
+def test_the_source_quality_size_is_the_desktop_without_a_perspective(layout_with_edge_on_perspective):
+    layout = layout_with_edge_on_perspective
+    offsets = len(layout.displays) * ((0, 0),)
+    size = source_quality_size(layout, Disabled(), offsets)
+    assert size == canvas.source_size(layout.ppi_norm_crops(offsets), None)
+
+
+def test_a_perspective_that_turns_a_display_edge_on_gives_no_source_quality_size(layout_with_edge_on_perspective):
+    layout = layout_with_edge_on_perspective
+    assert source_quality_size(layout, Named("edge-on"), len(layout.displays) * ((0, 0),)) is None
+
+
+def test_the_form_is_cut_or_filled_up_to_the_number_of_displays():
+    shown = blank(offsets=("1,2", "3,4"), spangroup_choices=(0, 1), sources=(("5", "/pics"),))
+
+    fewer = fit_to_displays(shown, 1)
+    more = fit_to_displays(shown, 3)
+
+    assert (fewer.offsets, fewer.spangroup_choices) == (("1,2",), (0,))
+    assert (more.offsets, more.spangroup_choices) == (("1,2", "3,4", "0,0"), (0, 1, 0))
+    assert more.sources == shown.sources

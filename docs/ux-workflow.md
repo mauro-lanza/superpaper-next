@@ -9,7 +9,7 @@ Every decision in §4 is decided; body text applies the chosen option, reference
 ### 1.1 Terms
 
 - **Render**: compose a profile's image(s) for a layout and set them on the desktop. Desktops that take one image per display (macOS, KDE, and any custom set command containing a per-display placeholder) get one piece per display; others get one spanned image. The user sees the same result either way.
-- **Re-detect**: query the OS for the connected displays (count, resolution, physical size, order) and load LAY saved for that display set (its *key*). Happens at: app start, editor open, tray profile pick, profile hotkey, Apply, band Save, tests, and when the OS reports a display change (added, removed, resolution, arrangement) (D17). Not before every Next or slideshow tick. Where an OS cannot report changes, it also happens on manual Next.
+- **Re-detect**: query the OS for the connected displays (count, resolution, physical size, order) and load LAY saved for that display set (its *key*). Happens at: app start, editor open, tray profile pick, Apply, band Save, tests, and when the OS reports a display change (added, removed, resolution, arrangement) (D17). Not before every Next or slideshow tick. Where an OS cannot report changes, it also happens on manual Next.
 - **Hot update**: the running profile's stored settings are replaced (Save, rename, Reload Profiles); RUN keeps running with the new settings without re-rendering (D13).
 - **Running** = in RUN. **Active** = in ACT. **Loaded** (editor) = the profile in FORM.
 - **Slideshow profile**: advances SEL every *delay* while running and not paused. A non-slideshow profile never advances on its own.
@@ -19,9 +19,9 @@ Every decision in §4 is decided; body text applies the chosen option, reference
 
 | ID | State | Lives in | Changed only by |
 | --- | --- | --- | --- |
-| **PROF** | Stored profile: name, span mode, sources, slideshow (on, delay, sort), zoom/pan, manual offsets, span groups, perspective choice, hotkey | `<name>.profile` | Editor Save, Apply (implicit save, D1), Delete, Reload Profiles after outside edits |
+| **PROF** | Stored profile: name, span mode, sources, slideshow (on, delay, sort), zoom/pan, manual offsets, span groups, perspective choice | `<name>.profile` | Editor Save, Apply (implicit save, D1), Delete, Reload Profiles after outside edits |
 | **SEL** | Profile selection: the ordered image list and the current position in it. Simple/advanced mode: one image for all displays (or one per span group). Multi-image mode: one current image **per display** (per source list). One SEL per stored profile | Profile cache, persisted | Apply (PICK), Next, slideshow change, Save with a PICK (D13), Delete (removed) |
-| **RUN** | Running profile, slideshow deadline, *paused* | Memory | Apply, tray pick, profile hotkey, startup, Next/tick (deadline), Pause, hot update, Delete of running, Reload (file gone), Quit |
+| **RUN** | Running profile, slideshow deadline, *paused* | Memory | Apply, tray pick, startup, Next/tick (deadline), Pause, hot update, Delete of running, Reload (file gone), Quit |
 | **ACT** | Active profile: what runs at next start | Cache file | Every change of which profile runs, rename of the running profile, Delete of running |
 | **LAY** | Saved layout for the current display set: positions, bezels, hand-entered diagonals, perspective definitions, perspectives on/off, default perspective | `display_systems.dat`, `<key>.persp` | Band Save (including staged perspective changes, D19), Apply "save displays" (D4) |
 | **STG** | Staged layout: editor's copy of LAY with unsaved band edits | Editor memory | Band edits; reset to LAY on editor open, band Revert, band Save, display set change |
@@ -30,17 +30,17 @@ Every decision in §4 is decided; body text applies the chosen option, reference
 | **PREV** | In-dialog preview of FORM + STG + (PICK or SEL) | Editor | Follows FORM, STG, PICK |
 | **DESK** | What the desktop shows | OS | Renders of RUN, Apply, tests, CLI `--setimages` |
 | **CACHE** | Last render per profile and per-display pieces | Render cache | Every render; read by startup restore |
-| **GEN** | General settings: logging, hotkeys on/off, Next/Pause hotkeys, custom set command, large-image warning, help at start, browse start folder | `general_settings` | Settings Save, Help "show at start", Browse "Save/Clear as browse start" |
+| **GEN** | General settings: logging, custom set command, large-image warning, help at start, browse start folder | `general_settings` | Settings Save, Help "show at start", Browse "Save/Clear as browse start" |
 
 ### 1.3 Invariants
 
 1. RUN is empty or a stored profile; an unsaved form never runs.
 2. ACT = RUN whenever RUN is non-empty; ACT is cleared when the running profile is deleted.
-3. Every render of RUN (Apply, Next, tick, tray pick, hotkey, startup) uses LAY for the displays detected at that moment. STG reaches the desktop only through tests (D7), never through RUN.
+3. Every render of RUN (Apply, Next, tick, tray pick, startup) uses LAY for the displays detected at that moment. STG reaches the desktop only through tests (D7), never through RUN.
 4. DESK shows RUN's SEL rendered with LAY, except after an explicit test or CLI `--setimages`. A test pauses RUN while shown (D8); the user leaves it with Next, Apply, unpause or tray pick.
 5. Saving LAY while a profile runs re-renders RUN's current SEL (no advance), so DESK satisfies invariant 3 at once.
 6. **Profile Save never changes DESK** (D13). Changes saved to the running profile appear at its next change (Next, tick) or immediately with Apply. The display band's Save is different: it re-renders the running profile's current image (B6).
-7. Saving FORM never changes which profile runs; only Apply, tray pick, hotkey and startup do.
+7. Saving FORM never changes which profile runs; only Apply, tray pick and startup do.
 8. SEL survives Next, editor close, Reload Profiles and restart.
 9. Editor state (FORM, STG, PICK, PREV) is discarded when the editor closes; only what was saved remains.
 10. An invalid layout is never saved, rendered or kept as loaded: band edits that would overlap are rejected or rearranged (D20); a saved layout that loads invalid (corrupt, or displays changed size) is replaced in memory by the default arrangement with a one-time message, and LAY on disk is untouched until the user saves (D22).
@@ -69,15 +69,14 @@ Unlisted state is unchanged. Unlisted errors show one modal naming the problem; 
 Same prompt as E2; FORM := blank defaults, clean; PICK cleared; PREV outlines.
 
 #### E4 Profile fields
-Name; span mode radio (simple / advanced / multi-image); slideshow checkbox, delay (minimum 5 s), sort; zoom slider, pan X/Y sliders, zoom Reset; manual offsets checkbox and per-display x/y fields; span groups checkbox and per-display group combos; perspective combo; hotkey checkbox and binding field.
+Name; span mode radio (simple / advanced / multi-image); slideshow checkbox, delay (minimum 5 s), sort; zoom slider, pan X/Y sliders, zoom Reset; manual offsets checkbox and per-display x/y fields; span groups checkbox and per-display group combos; perspective combo.
 - FORM dirty iff values differ from loaded (editing back clears it). Save/Revert enabled only while dirty. PREV updates live.
 - Slideshow on: zoom/pan reset and disabled; a sort is selected if none. Off: zoom/pan enabled.
 - Advanced-only controls (offsets, span groups, perspective, Positions) shown only in advanced mode.
 - Span mode change converts sources (one list ↔ one per display); if sources would be lost, confirm; Cancel keeps the old mode.
 - Span groups: each display's combo assigns it to a group; source lists follow the group count. Single display: span groups and per-display controls disabled (one entry).
 - Perspective combo lists "default", LAY's named perspectives, "disabled"; the combo is disabled when LAY has perspectives off.
-- Hotkey field: when GEN hotkeys are off (default on macOS), the field stays editable and saved but shows "Hotkeys are off in Settings" (D24).
-- Invalid values (delay < 5 s / non-number, non-integer offsets, unparsable or clashing hotkey) are reported on Save/Apply, all at once.
+- Invalid values (delay < 5 s / non-number, non-integer offsets) are reported on Save/Apply, all at once.
 
 #### E5 Sources: Browse dialog and Remove selected source
 Browse dialog (modal):
@@ -106,10 +105,10 @@ Apply shows the selected image on the desktop and makes this profile the running
 Field edits, clicks, band edits only change FORM, PICK, STG, PREV. Close with Discard leaves PROF, SEL, RUN, ACT, LAY, DESK as before the editor opened.
 
 #### E9 Save (profile)
-- Valid FORM: non-empty name, unique (case-insensitive where the OS requires), legal file name; at least one source; every source exists and yields ≥ 1 image (empty folder → error naming it); E4 values valid; hotkey not used elsewhere.
+- Valid FORM: non-empty name, unique (case-insensitive where the OS requires), legal file name; at least one source; every source exists and yields ≥ 1 image (empty folder → error naming it); E4 values valid.
 - PROF := form. SEL: unchanged; with a PICK, SEL := PICK (stored, shown at the next change) (D13). New profile: SEL at the first image of the sort order.
 - Running: hot update; DESK unchanged (inv. 6); timer and pause unchanged.
-- Rename: file renamed, SEL/hotkey/RUN/ACT follow; no copy left (D14).
+- Rename: file renamed, SEL/RUN/ACT follow; no copy left (D14).
 - STG ≠ LAY: Save does not save the layout; the band keeps its unsaved marker (D25).
 - FORM clean, PICK cleared, PREV shows the saved SEL.
 - Write fails → error, FORM stays dirty.
@@ -118,7 +117,7 @@ Field edits, clicks, band edits only change FORM, PICK, STG, PREV. Close with Di
 Enabled while dirty. FORM := stored version reloaded from disk; *new* → blank. PICK cleared.
 
 #### E11 Delete
-Stored profile only; confirm. PROF, SEL, CACHE entry removed; hotkey unbound. Running: RUN empty, ACT cleared (D6), DESK keeps the last wallpaper. FORM := *new*.
+Stored profile only; confirm. PROF, SEL, CACHE entry removed. Running: RUN empty, ACT cleared (D6), DESK keeps the last wallpaper. FORM := *new*.
 
 #### E12 Close (button or window close)
 - FORM dirty and/or STG ≠ LAY → one prompt listing what is unsaved: Save / Discard / Cancel (D5). Save saves both; any failure (invalid form, invalid layout, write error) keeps the editor open with the error shown.
@@ -138,7 +137,7 @@ Controls: perspective combo (stored perspectives + New), name field, New / Save 
 - Single display: dialog shows one row; perspectives still allowed.
 
 #### E15 Help
-Editor Help (bottom row), preview Help, hotkey/span-group/bezel/position Help: popups or the Help window only. Help window "Show this help at start" changes GEN.
+Editor Help (bottom row), preview Help, span-group/bezel/position Help: popups or the Help window only. Help window "Show this help at start" changes GEN.
 
 ### 2.2 Display band ("Display system settings (apply to all profiles)")
 
@@ -173,13 +172,10 @@ Band edits change STG and PREV only. Band Save/Revert enabled while STG ≠ LAY;
 | ID | Interaction | Expected effect |
 | --- | --- | --- |
 | S1 | Open | Shows GEN; one instance. |
-| S2 | Save | Invalid hotkey → error, nothing saved. GEN := fields. Next/Pause hotkeys rebound now if on. Hotkeys on/off and logging: after restart (message says so). Set command / large-image warning: used from the next render; DESK not re-rendered. |
+| S2 | Save | GEN := fields. Logging: after restart (message says so). Set command / large-image warning: used from the next render; DESK not re-rendered. |
 | S3 | Close | Discards unsaved fields. |
 
-### 2.5 Hotkeys
-H1 Next = T4. H2 Pause = T5. H3 profile hotkey = T2/T3; deleted profile → nothing. All inactive while GEN hotkeys are off.
-
-### 2.6 Startup, quit, CLI
+### 2.5 Startup, quit, CLI
 
 | ID | Interaction | Expected effect |
 | --- | --- | --- |
@@ -190,7 +186,7 @@ H1 Next = T4. H2 Pause = T5. H3 profile hotkey = T2/T3; deleted profile → noth
 | C1 | `-s IMG… [-a] [--perspective P] [--spangroups G…] [-o X Y…] [-c CMD] [-d]` | Sets those images once with LAY (re-detected), exits 0; no tray; PROF/RUN/ACT unchanged; a running tray app is unaffected until its next change. Errors (exit 1, message): odd or non-integer offsets, offsets/perspective/spangroups without `-a`, unknown perspective, bad span groups, missing image, no displays, unreadable layout. |
 | C2 | `--help` / unknown option | Usage / argparse error; nothing created or changed. |
 
-### 2.7 Display changes and render failures
+### 2.6 Display changes and render failures
 
 | ID | Event | Expected effect |
 | --- | --- | --- |
@@ -240,7 +236,7 @@ H1 Next = T4. H2 Pause = T5. H3 profile hotkey = T2/T3; deleted profile → noth
 - Variant 5‴: Close → Discard → LAY unchanged; Next renders the old layout.
 
 **J6 Rename**
-1. Running A, name → C, Save → dropdown C (running); tray C checked, A gone; DESK unchanged; hotkey works.
+1. Running A, name → C, Save → dropdown C (running); tray C checked, A gone; DESK unchanged.
 2. Restart → C runs. 3. Rename to an existing name → error, nothing changes.
 
 **J7 Delete running**
@@ -293,5 +289,4 @@ H1 Next = T4. H2 Pause = T5. H3 profile hotkey = T2/T3; deleted profile → noth
 | D21 | Source file missing at render | Skip to next image with tray notice; stop only if no image is left |
 | D22 | Corrupt or invalid saved layout on load | Default arrangement in memory + message; file untouched until Save |
 | D23 | Re-detect on dropdown switch | No |
-| D24 | Profile hotkey field while hotkeys are off | Editable + note |
 | D25 | Profile Save while the band is unsaved | Saves the profile only; band marker stays |

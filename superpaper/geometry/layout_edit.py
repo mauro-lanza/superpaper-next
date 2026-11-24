@@ -5,6 +5,7 @@ Each transition takes the state and the layout and returns the new state and lay
 caller keeps both and does the drawing.
 """
 
+import configparser
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -13,7 +14,6 @@ from typing import assert_never
 
 from superpaper.geometry import display_store
 from superpaper.geometry.canvas import Point
-from superpaper.geometry.display_store import SaveFailed
 from superpaper.geometry.displays import Layout
 from superpaper.user_input import Problems, parse_float
 
@@ -40,12 +40,27 @@ class ConfiguringBezels:
 
 EditState = Idle | ConfiguringPositions | ConfiguringBezels
 
+
+class WrongState(ValueError):
+    """A transition was asked of a state it doesn't apply to."""
+
+    def __init__(self, state: EditState, expected: type[EditState]):
+        super().__init__(f"Expected {expected.__name__}, got {state}")
+
+
 MIN_DIAGONAL_INCHES = 1
 MAX_DIAGONAL_INCHES = 1000
 _DIAGONAL = re.compile(r"[0-9]+(?:[.,][0-9]+)?")
 OVERLAP_MESSAGE = "The displays overlap. Move them apart before pressing Done."
 TEST_OVERLAP_MESSAGE = "The displays overlap. Move them apart in Display system settings before running a test."
 REARRANGED_MESSAGE = "The displays could not be kept where they were without overlapping, so they were arranged afresh."
+
+
+@dataclass(frozen=True, slots=True)
+class SaveFailed:
+    """Settings that couldn't be written to disk, and why."""
+
+    message: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -121,7 +136,11 @@ def cancel_bezels(state: EditState, layout: Layout) -> tuple[Idle, Layout]:
 
 def save_display_settings(config_dir: Path, layout: Layout) -> SaveFailed | None:
     """Write the display settings of ``layout`` to ``config_dir``; why that failed, or None."""
-    return display_store.save_or_failure(display_store.save_layout, config_dir, layout, "display settings")
+    try:
+        display_store.save_layout(config_dir, layout)
+    except (OSError, configparser.Error, ValueError) as error:
+        return SaveFailed(f"The display settings could not be saved: {error}")
+    return None
 
 
 def with_entered_diagonals(layout: Layout, texts: Sequence[str]) -> Resized | None:
@@ -154,7 +173,7 @@ def parse_diagonal(text: str) -> float | None:
 def parse_diagonals(texts: Sequence[str]) -> list[float] | None:
     """The diagonal sizes in inches ``texts`` spell, or None unless every one is valid."""
     inches = [parse_diagonal(text) for text in texts]
-    return [inch for inch in inches if inch is not None] if inches and None not in inches else None
+    return [inch for inch in inches if inch is not None] if None not in inches else None
 
 
 def parse_bezel(text: str) -> float | None:
@@ -179,10 +198,5 @@ def with_entered_bezels(layout: Layout, entered: Sequence[tuple[str, str]]) -> L
 
 
 def _require_idle(state: EditState) -> None:
-    if state != Idle():
+    if not isinstance(state, Idle):
         raise WrongState(state, Idle)
-
-
-class WrongState(ValueError):
-    def __init__(self, state: EditState, expected: type[EditState]):
-        super().__init__(f"Expected {expected.__name__}, got {state}")

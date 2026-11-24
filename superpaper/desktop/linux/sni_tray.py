@@ -13,7 +13,7 @@ from typing import Any, assert_never
 
 from PIL import Image
 
-from superpaper.desktop.tray_menu import Check, Item, MenuEntry, Notice, Separator, Submenu
+from superpaper.desktop.tray_menu import Check, Item, MenuEntry, Notice, Separator, Submenu, TrayHandle
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +49,16 @@ def sni_supported() -> bool:
         return False
 
 
+def _argb_bytes(rgba: bytes) -> bytes:
+    """RGBA pixels as ARGB, the byte order SNI icon pixmaps use."""
+    argb = bytearray(len(rgba))
+    argb[0::4] = rgba[3::4]
+    argb[1::4] = rgba[0::4]
+    argb[2::4] = rgba[1::4]
+    argb[3::4] = rgba[2::4]
+    return bytes(argb)
+
+
 def _load_icon_pixmap(path: str) -> list[tuple[int, int, Any]]:
     """The PNG at ``path`` as a one-entry SNI IconPixmap (width, height, big-endian ARGB32); empty if unreadable."""
     try:
@@ -57,13 +67,7 @@ def _load_icon_pixmap(path: str) -> list[tuple[int, int, Any]]:
     except (OSError, ValueError) as error:
         logger.info("Failed to load the icon %s: %s", path, error)
         return []
-    raw = rgba.tobytes("raw", "RGBA")
-    argb = bytearray(len(raw))
-    argb[0::4] = raw[3::4]
-    argb[1::4] = raw[0::4]
-    argb[2::4] = raw[1::4]
-    argb[3::4] = raw[2::4]
-    return [(*rgba.size, dbus.ByteArray(bytes(argb)))]
+    return [(*rgba.size, dbus.ByteArray(_argb_bytes(rgba.tobytes("raw", "RGBA"))))]
 
 
 def _variant(key: str, value: str | int | bool) -> Any:
@@ -169,8 +173,7 @@ def build_tray(
     bus_name: str,
     icon_path: str,
     title: str,
-    tooltip: str,
-):
+) -> TrayHandle | None:
     """Create and register the SNI tray. Returns the SNITray or None on failure.
 
     ``menu`` gives the entries of the context menu as they are now, whose actions run
@@ -180,11 +183,14 @@ def build_tray(
     if dbus is None:
         logger.info("dbus-python not available; cannot use native SNI tray.")
         return None
+    tray = None
     try:
-        tray = SNITray(menu, call_soon, activate, secondary_activate, bus_name, icon_path, title, tooltip)
+        tray = SNITray(menu, call_soon, activate, secondary_activate, bus_name, icon_path, title)
         tray.register()
     except Exception as exc:
         logger.info("Failed to start native SNI tray: %s", exc)
+        if tray is not None:
+            tray.remove()
         return None
     return tray
 
@@ -299,14 +305,13 @@ if dbus is not None:
     class SNITray(dbus.service.Object):
         """``org.kde.StatusNotifierItem`` implementation."""
 
-        def __init__(self, menu, call_soon, activate, secondary_activate, bus_name, icon_path, title, tooltip):
+        def __init__(self, menu, call_soon, activate, secondary_activate, bus_name, icon_path, title):
             self.bus = dbus.SessionBus()
             self._bus_name = dbus.service.BusName(bus_name, self.bus)
             super().__init__(self.bus, SNI_OBJECT_PATH)
             self._on_activate = activate
             self._on_secondary_activate = secondary_activate
             self.title = title
-            self.tooltip = tooltip
             self.icon_pixmap = _load_icon_pixmap(icon_path)
             self.model = MenuModel(menu, call_soon)
             self.menu = _DBusMenu(self.bus, self.model)
@@ -355,7 +360,7 @@ if dbus is not None:
         @dbus.service.method(PROPS_IFACE, in_signature="s", out_signature="a{sv}")
         def GetAll(self, interface):
             tooltip = dbus.Struct(
-                (dbus.String(""), dbus.Array([], signature="(iiay)"), dbus.String(self.tooltip), dbus.String("")),
+                (dbus.String(""), dbus.Array([], signature="(iiay)"), dbus.String(self.title), dbus.String("")),
                 signature="sa(iiay)ss",
             )
             return dbus.Dictionary(

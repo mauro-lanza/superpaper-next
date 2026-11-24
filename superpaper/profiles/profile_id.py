@@ -1,7 +1,7 @@
 """Profile identity: which filenames are profiles, and where their files may live."""
 
 import unicodedata
-from dataclasses import InitVar, dataclass, field
+from dataclasses import dataclass
 from pathlib import Path, PureWindowsPath
 
 
@@ -32,25 +32,25 @@ class ProfileId:
     portable; use it for names Superpaper is about to create.
     """
 
-    raw: InitVar[object]
-    windows_names: InitVar[bool]
-    _value: str = field(init=False, repr=False)
+    value: str
 
-    def __post_init__(self, raw: object, windows_names: bool) -> None:
-        object.__setattr__(self, "_value", _validate_profile_id(raw, new=False, windows_names=windows_names))
+    def __post_init__(self) -> None:
+        _raise_if_problem(_path_safety_problem(self.value))
 
     @classmethod
-    def parse(cls, raw: object, *, windows_names: bool) -> ProfileId:
-        return cls(raw, windows_names)
+    def parse(cls, raw: str, *, windows_names: bool) -> ProfileId:
+        profile_id = cls(raw)
+        if windows_names:
+            _raise_if_problem(_windows_problem(raw))
+        return profile_id
 
     @classmethod
-    def parse_new(cls, raw: object) -> ProfileId:
-        _validate_profile_id(raw, new=True, windows_names=False)
-        return cls(raw, windows_names=False)
-
-    @property
-    def value(self) -> str:
-        return self._value
+    def parse_new(cls, raw: str) -> ProfileId:
+        # Windows rejects or silently aliases some names. New names avoid them on
+        # every platform so that profiles can move between systems.
+        profile_id = cls(raw)
+        _raise_if_problem(_windows_problem(raw) or _superpaper_conventions_problem(raw))
+        return profile_id
 
     @property
     def collision_key(self) -> str:
@@ -62,20 +62,14 @@ def collision_key(name: str) -> str:
     return unicodedata.normalize("NFC", name).casefold()
 
 
-def _validate_profile_id(raw: object, *, new: bool, windows_names: bool) -> str:
-    if not isinstance(raw, str):
-        message = "Profile names must be strings."
-        raise ProfileIdError(message)
-    problem = _problem(raw, new=new, windows_names=windows_names)
+def _raise_if_problem(problem: str | None) -> None:
     if problem is not None:
         raise ProfileIdError(problem)
-    return raw
 
 
-def _problem(raw: str, *, new: bool, windows_names: bool) -> str | None:
-    """Why ``raw`` can't identify a profile, or None if it can."""
-    # Rules for every name, whatever its origin: a single safe path component that
-    # survives the profile's "name=" line and doesn't shadow an entry of the UI.
+def _path_safety_problem(raw: str) -> str | None:
+    """Why ``raw`` isn't a single safe path component that survives the profile's
+    "name=" line and doesn't shadow an entry of the UI, or None."""
     if not raw:
         return "Profile names cannot be empty."
     if "\0" in raw:
@@ -90,14 +84,6 @@ def _problem(raw: str, *, new: bool, windows_names: bool) -> str | None:
         return "Profile names cannot contain path separators."
     if raw.casefold() in _RESERVED_APPLICATION_NAMES:
         return f"'{raw}' is reserved by Superpaper."
-    if new or windows_names:
-        # Windows rejects or silently aliases these names. New names avoid them on
-        # every platform so that profiles can move between systems.
-        problem = _windows_problem(raw)
-        if problem is not None:
-            return problem
-    if new:
-        return _superpaper_conventions_problem(raw)
     return None
 
 
@@ -130,15 +116,20 @@ class ManagedPathError(ValueError):
     """A managed profile path escaped its root or is not a regular file."""
 
 
-def profile_path(root: Path, profile_id: ProfileId, *, allow_missing: bool = True) -> Path:
-    """The path of a profile's file in ``root``, which must be a regular file if it exists
-    (or must exist, unless ``allow_missing``). A symlinked file is accepted: dotfile managers
-    link profiles into place."""
+def profile_path(root: Path, profile_id: ProfileId) -> Path:
+    """The path of a profile's file in ``root``, which must be a regular file if it exists.
+    A symlinked file is accepted: dotfile managers link profiles into place."""
     path = root.resolve() / f"{profile_id.value}.profile"
-    if allow_missing and path.exists() and not path.is_file():
+    if path.exists() and not path.is_file():
         message = f"Managed profile paths must be regular files: {path}"
         raise ManagedPathError(message)
-    if not allow_missing and not path.is_file():
+    return path
+
+
+def existing_profile_path(root: Path, profile_id: ProfileId) -> Path:
+    """The path of a profile's file in ``root``, which must exist as a regular file."""
+    path = root.resolve() / f"{profile_id.value}.profile"
+    if not path.is_file():
         message = f"Managed profile file does not exist: {path}"
         raise ManagedPathError(message)
     return path

@@ -49,9 +49,7 @@ class Rendered:
     """A render on disk: the desktop image, and one image per display if it was cut up."""
 
     image: Path
-    pieces: list[Path]
-    modified: int
-    """When the image was written, in nanoseconds since the epoch."""
+    pieces: tuple[Path, ...]
     signature: str | None
     """What the render was made from, as given to save(); None if it wasn't kept."""
 
@@ -64,11 +62,6 @@ class _Name:
     signature: bool
 
 
-def slot(cache_dir: Path, profile_id_value: str) -> Slot:
-    """The renders of the saved profile; ``profile_id_value`` must be a ProfileId.value."""
-    return Slot(cache_dir, profile_id_value)
-
-
 def draft_slot(cache_dir: Path) -> Slot:
     """The drafts' renders."""
     return Slot(cache_dir / _DRAFTS, "draft")
@@ -78,11 +71,16 @@ def save(slot: Slot, image: Image.Image, *, extension: str, signature: str) -> P
     """Write ``image`` as the slot's next render, as a ``jpg`` or ``png`` file, in one step,
     and return its path. ``signature`` is kept beside it, to tell later what it was made from.
 
-    The render that isn't the newest is replaced, so the one on screen stays as it is.
+    The render that isn't the newest is replaced, so the one on screen stays as it is. Its old
+    pieces and signature go first: a kill before the new signature is written must leave the
+    image reading as unknown, not as the old render.
     """
     newest = latest(slot)
     turn = "b" if newest is not None and newest.image.stem.endswith("-a") else "a"
     path = slot.directory / f"{slot.stem}-{turn}.{extension}"
+    for old, name in _renders(slot):
+        if name.turn == turn and (name.piece is not None or name.signature):
+            _remove(old)
     slot.directory.mkdir(parents=True, exist_ok=True)
     write_atomically(path, _encode(image, "JPEG" if extension == "jpg" else "PNG"))
     write_atomically(_signature_path(path), signature.encode())
@@ -125,9 +123,9 @@ def latest(slot: Slot) -> Rendered | None:
                 continue
     if not images:
         return None
-    modified, image, turn = max(images)
+    _, image, turn = max(images)
     pieces = sorted((name.piece, path) for path, name in renders if name.turn == turn and name.piece is not None)
-    return Rendered(image, [path for _, path in pieces], modified, _read_signature(image))
+    return Rendered(image, tuple(path for _, path in pieces), _read_signature(image))
 
 
 def sweep(cache_dir: Path, keep: Iterable[str]) -> None:

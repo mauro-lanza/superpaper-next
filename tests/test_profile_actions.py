@@ -5,11 +5,11 @@ import pytest
 
 from superpaper.geometry.perspective import Disabled, Named
 from superpaper.profile_actions import (
-    Saved,
     align_test_profile,
     apply_profile,
     check_applicable,
     delete_profile,
+    find_test_image,
     revert_profile,
     save_profile,
     saved_profile,
@@ -17,7 +17,6 @@ from superpaper.profile_actions import (
 from superpaper.profiles.profile_file import OffsetsCorrection
 from superpaper.profiles.profile_id import NEW_PROFILE_LABEL, ProfileId
 from superpaper.profiles.profile_store import ProfileStore
-from superpaper.settings import Settings
 from superpaper.user_input import Problems
 from tests.profiles.conftest import blank
 
@@ -60,28 +59,14 @@ def session(store):
     return FakeSession(store)
 
 
-GENERAL = Settings()
+def save(store, session, form, *, loaded=None, picked=None):
+    return save_profile(form, picked=picked, loaded=loaded, store=store, session=session)
 
 
-def save(store, session, form, *, loaded=None, picked=None, rebinds=None, settings=GENERAL):
-    return save_profile(
-        form,
-        picked=picked,
-        loaded=loaded,
-        store=store,
-        session=session,
-        settings=settings,
-        rebind_hotkey=lambda before, after: rebinds.append((before, after)) if rebinds is not None else None,
-    )
-
-
-def test_a_valid_form_is_saved_as_a_new_profile_and_its_hotkey_bound(store, session, images):
-    rebinds = []
-    result = save(store, session, blank(sources=(("", str(images)),)), rebinds=rebinds)
-    assert isinstance(result, Saved)
-    assert store.get(ProfileId.parse("Work", windows_names=False)) is result.stored
-    assert result.stored.profile.sources == ((str(images),),)
-    assert rebinds == [(None, result.stored)]
+def test_a_valid_form_is_saved_as_a_new_profile(store, session, images):
+    result = save(store, session, blank(sources=(("", str(images)),)))
+    assert store.get(ProfileId.parse("Work", windows_names=False)) is result
+    assert result.profile.sources == ((str(images),),)
     assert session.updates == []
 
 
@@ -101,51 +86,21 @@ def test_a_name_that_cant_be_used_comes_first_among_the_problems(store, session,
 
 def test_saving_over_a_loaded_profile_updates_the_session_and_follows_a_rename(store, session, images):
     first = save(store, session, blank(sources=(("", str(images)),)))
-    session.running = first.stored
-    rebinds = []
-    renamed = save(
-        store, session, blank(name="Home", sources=(("", str(images)),)), loaded=first.stored, rebinds=rebinds
-    )
-    assert isinstance(renamed, Saved)
-    assert (session.updates[0][0], session.updates[0][1]) == (
-        ProfileId.parse("Work", windows_names=False),
-        renamed.stored,
-    )
-    assert rebinds == [(first.stored, renamed.stored)]
+    session.running = first
+    renamed = save(store, session, blank(name="Home", sources=(("", str(images)),)), loaded=first)
+    assert (session.updates[0][0], session.updates[0][1]) == (ProfileId.parse("Work", windows_names=False), renamed)
     assert store.get(ProfileId.parse("Work", windows_names=False)) is None
-
-
-def test_a_hotkey_that_is_unreadable_or_used_elsewhere_is_a_problem_when_saving(store, session, images):
-    sources = (("", str(images)),)
-    other = save(store, session, blank(name="Other", sources=sources, hotkey_enabled=True, hotkey="control+x"))
-    assert isinstance(other, Saved)
-    unreadable = save(store, session, blank(sources=sources, hotkey_enabled=True, hotkey="control++x"))
-    with_profile = save(store, session, blank(sources=sources, hotkey_enabled=True, hotkey="control+x"))
-    general = Settings(hk_binding_next=("control", "n"))
-    with_general = save(
-        store, session, blank(sources=sources, hotkey_enabled=True, hotkey="control+n"), settings=general
-    )
-    own = save(
-        store,
-        session,
-        blank(name="Other", sources=sources, hotkey_enabled=True, hotkey="control+x"),
-        loaded=other.stored,
-    )
-    assert "not valid" in unreadable.messages[0]
-    assert "the profile 'Other'" in with_profile.messages[0]
-    assert "Next wallpaper hotkey" in with_general.messages[0]
-    assert isinstance(own, Saved)
 
 
 def test_saving_chooses_the_picked_file_else_the_loaded_selection(store, session, images):
     first = save(store, session, blank(sources=(("", str(images)),)))
     picked = [str(images / "b.png")]
-    second = save(store, session, blank(zoom_pct=120, sources=(("", str(images)),)), loaded=first.stored, picked=picked)
-    assert second.stored.selection.images == picked
+    second = save(store, session, blank(zoom_pct=120, sources=(("", str(images)),)), loaded=first, picked=picked)
+    assert second.selection.images == picked
 
 
 def test_reverting_loads_the_file_again_and_carries_the_running_profile_on(store, session, images, app_paths):
-    saved = save(store, session, blank(sources=(("", str(images)),))).stored
+    saved = save(store, session, blank(sources=(("", str(images)),)))
     session.running = saved
     path = app_paths.profiles / "Work.profile"
     path.write_text(path.read_text(encoding="utf-8") + "zoom=1.75\n", encoding="utf-8")
@@ -161,36 +116,32 @@ def test_reverting_without_a_saved_profile_gives_nothing(store, session):
     assert revert_profile("Nope", store=store, session=session) is None
 
 
-def test_deleting_forgets_the_profile_stops_it_and_frees_its_hotkey(store, session, images, app_paths):
-    saved = save(store, session, blank(sources=(("", str(images)),))).stored
-    rebinds = []
-    problem = delete_profile(
-        saved, store=store, session=session, rebind_hotkey=lambda before, after: rebinds.append((before, after))
-    )
+def test_deleting_forgets_the_profile_and_stops_it(store, session, images, app_paths):
+    saved = save(store, session, blank(sources=(("", str(images)),)))
+    problem = delete_profile(saved, store=store, session=session)
     assert problem is None
     assert not (app_paths.profiles / "Work.profile").exists()
     assert session.updates == [(ProfileId.parse("Work", windows_names=False), None)]
-    assert rebinds == [(saved, None)]
 
 
 def test_a_profile_changed_on_disk_is_not_deleted(store, session, images, app_paths):
-    saved = save(store, session, blank(sources=(("", str(images)),))).stored
+    saved = save(store, session, blank(sources=(("", str(images)),)))
     path = app_paths.profiles / "Work.profile"
     path.write_text(path.read_text(encoding="utf-8") + "zoom=1.75\n", encoding="utf-8")
-    problem = delete_profile(saved, store=store, session=session, rebind_hotkey=lambda *_: None)
+    problem = delete_profile(saved, store=store, session=session)
     assert isinstance(problem, Problems)
     assert path.exists()
     assert session.updates == []
 
 
 def test_saved_profile_finds_by_name_and_not_by_a_name_no_profile_can_have(store, session, images):
-    saved = save(store, session, blank(sources=(("", str(images)),))).stored
+    saved = save(store, session, blank(sources=(("", str(images)),)))
     assert saved_profile(store, "Work") is saved
     assert saved_profile(store, "../x") is None
 
 
 def test_applying_runs_the_chosen_image_else_the_current_selection(store, session, images):
-    saved = save(store, session, blank(sources=(("", str(images)),))).stored
+    saved = save(store, session, blank(sources=(("", str(images)),)))
     picked = str(images / "b.png")
 
     apply_profile(saved, picked=[picked], session=session)
@@ -201,7 +152,7 @@ def test_applying_runs_the_chosen_image_else_the_current_selection(store, sessio
 
 def test_applying_a_multi_image_profile_shows_one_clicked_image_per_display(store, session, images):
     form = blank(span_mode="multi", per_target_sources=True, sources=(("0", str(images)), ("1", str(images))))
-    saved = save(store, session, form).stored
+    saved = save(store, session, form)
     picked = [str(images / "b.png"), str(images / "a.png")]
 
     apply_profile(saved, picked=picked, session=session)
@@ -211,7 +162,7 @@ def test_applying_a_multi_image_profile_shows_one_clicked_image_per_display(stor
 
 
 def test_a_saved_profile_whose_images_are_gone_cant_be_applied(store, session, images):
-    saved = save(store, session, blank(sources=(("", str(images)),))).stored
+    saved = save(store, session, blank(sources=(("", str(images)),)))
     assert check_applicable(saved) is None
 
     for path in images.iterdir():
@@ -224,7 +175,7 @@ def test_a_saved_profile_whose_images_are_gone_cant_be_applied(store, session, i
 
 def test_saving_never_runs_a_profile(store, session, images):
     first = save(store, session, blank(sources=(("", str(images)),)))
-    save(store, session, blank(zoom_pct=120, sources=(("", str(images)),)), loaded=first.stored)
+    save(store, session, blank(zoom_pct=120, sources=(("", str(images)),)), loaded=first)
 
     assert session.applied == []
 
@@ -242,3 +193,20 @@ def test_the_align_test_without_offsets_has_no_correction():
     profile = align_test_profile("test.png", Disabled(), ())
     assert profile.perspective == Disabled()
     assert profile.corrections == ()
+
+
+def test_the_test_image_is_the_chosen_one_resolved_or_else_the_default(tmp_path):
+    chosen = tmp_path / "chosen.png"
+    chosen.write_bytes(b"")
+    default = tmp_path / "default.png"
+    default.write_bytes(b"")
+    assert find_test_image(str(chosen), str(default)) == str(chosen.resolve())
+    assert find_test_image(None, str(default)) == str(default.resolve())
+
+
+def test_a_missing_test_image_is_reported_by_the_path_asked_for(tmp_path):
+    default = tmp_path / "default.png"
+    default.write_bytes(b"")
+    missing = str(tmp_path / "gone.png")
+    assert find_test_image(missing, str(default)) == Problems((f"Test image not found in {[missing]}.",))
+    assert find_test_image(None, missing) == Problems((f"Test image not found in {[missing]}.",))

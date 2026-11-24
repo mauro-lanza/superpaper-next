@@ -34,3 +34,11 @@ def write_atomically(path: Path, content: bytes) -> None:
     except BaseException:
         temporary.unlink(missing_ok=True)
         raise
+    # The rename only survives a crash once the directory entry is on disk. Windows
+    # cannot open a directory, and NTFS journals the rename itself.
+    if os.name == "posix":
+        directory = os.open(target.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)

@@ -11,11 +11,21 @@ from PIL import Image
 import superpaper.wallpaper_change as wallpaper_change
 from superpaper.desktop.process import Result
 from superpaper.desktop.wallpaper import Pieces, Spanned
-from superpaper.geometry.perspective import Default, Disabled, Named, Perspective, Swivel, SwivelAxis, Tilt
+from superpaper.geometry.perspective import (
+    Default,
+    DegeneratePerspective,
+    Disabled,
+    Named,
+    Perspective,
+    Swivel,
+    SwivelAxis,
+    Tilt,
+)
 from superpaper.paths import AppPaths
 from superpaper.profiles.profile_file import OffsetsCorrection, Profile
 from superpaper.profiles.profile_id import ProfileId
 from superpaper.rendering import render
+from superpaper.wallpaper_change import NothingToRestore, Restored
 from tests.conftest import TINY_DISPLAYS, monitor
 
 
@@ -59,6 +69,11 @@ def cached(paths):
 
 def errors(caplog):
     return [record.getMessage() for record in caplog.records if record.levelname == "ERROR"]
+
+
+DESK = Perspective(
+    "desk", 0, (0.0, 0.0, 1000.0), (Swivel(SwivelAxis.NONE, 0.0, 0.0, 0.0),) * 2, (Tilt(0.0, 0.0, 0.0),) * 2
+)
 
 
 def test_a_change_is_rendered_kept_and_shown(tmp_path, app_paths, display_layout, desktop):
@@ -180,38 +195,63 @@ def test_a_render_that_cant_be_kept_isnt_shown(tmp_path, app_paths, display_layo
     assert desktop.handed == []
 
 
-def test_a_wallpaper_goes_to_the_desktop_and_then_to_the_hook(app_paths, display_layout, desktop, caplog):
+def test_a_perspective_that_cant_be_solved_skips_the_change(app_paths, display_layout, desktop, monkeypatch, caplog):
+    def edge_on(*args, **kwargs):
+        message = "a display is edge-on"
+        raise DegeneratePerspective(message)
+
+    monkeypatch.setattr(render, "advanced", edge_on)
+    profile = replace(settings("p", spanmode="advanced"), perspective=Named("desk"))
+    layout = replace(display_layout(TINY_DISPLAYS), use_perspective=True, perspectives=(DESK,))
+
+    problem = draft(profile, ["one.png"], app_paths, layout, desktop)
+
+    assert problem is not None
+    assert "'p'" in problem
+    assert "desk" in problem
+    assert "edge-on" in problem
+    assert errors(caplog) == [f"Wallpaper change skipped: {problem}"]
+    assert desktop.handed == []
+
+
+def test_a_render_that_cant_be_cut_for_the_displays_isnt_shown(tmp_path, app_paths, display_layout, desktop):
+    desktop.pieces_taken = True
+    (app_paths.cache / "simple-a-crop-0.png").mkdir(parents=True)
+
+    problem = change(
+        "simple", [write_image(tmp_path / "source.png")], app_paths, display_layout(TINY_DISPLAYS), desktop
+    )
+
+    assert problem is not None
+    assert problem.startswith("The wallpaper could not be cut for the displays: ")
+    assert desktop.handed == []
+
+
+def test_a_wallpaper_goes_to_the_desktop_and_then_to_the_hook(tmp_path, app_paths, display_layout, desktop, caplog):
     desktop.hook_answer = Result("python3 is missing")
     desktop.answer = Result("the setter failed")
     script = app_paths.config / "run-after-wp-change.py"
     script.touch()
-    image = app_paths.cache / "p-a.png"
+    sources = [write_image(tmp_path / "a.png"), write_image(tmp_path / "b c.png")]
 
-    taken = wallpaper_change.set_wallpaper(
-        desktop,
-        image,
-        ["/a.png", "/b c.png"],
-        layout=display_layout(),
-        paths=app_paths,
-        set_command="setter {image}",
-    )
+    problem = draft(settings("p", spanmode="multi"), sources, app_paths, display_layout(TINY_DISPLAYS), desktop)
 
-    assert taken.problem == "the setter failed"
-    assert desktop.handed == [Spanned(str(image))]
-    assert desktop.hooks == [(script, str(image), ["/a.png", "/b c.png"])]
+    image = str(app_paths.cache / "preview" / "draft-a.png")
+    assert problem == "the setter failed"
+    assert desktop.handed == [Spanned(image)]
+    assert desktop.hooks == [(script, image, sources)]
     # Failures are logged, not raised.
     assert errors(caplog) == ["the setter failed", "python3 is missing"]
 
 
-def test_a_desktop_that_takes_pieces_gets_one_per_display(app_paths, display_layout, desktop):
+def test_a_desktop_that_takes_pieces_gets_one_per_display(tmp_path, app_paths, display_layout, desktop):
     desktop.pieces_taken = True
-    image = app_paths.cache / "p-a.png"
-    write_image(image)
+    source = [write_image(tmp_path / "source.png")]
 
-    assert wallpaper_change.set_wallpaper(desktop, image, [], layout=display_layout(TINY_DISPLAYS), paths=app_paths).ok
+    assert change("p", source, app_paths, display_layout(TINY_DISPLAYS), desktop) is None
 
     pieces = (str(app_paths.cache / "p-a-crop-0.png"), str(app_paths.cache / "p-a-crop-1.png"))
-    assert desktop.handed == [Pieces(str(image), pieces)]
+    assert desktop.handed == [Pieces(str(app_paths.cache / "p-a.png"), pieces)]
     # KDE finds them again for an activity named after the profile, by its exact name.
     write_image(app_paths.cache / "homework-a.png")
     write_image(app_paths.cache / "homework-a-crop-0.png")
@@ -223,27 +263,24 @@ def test_a_desktop_that_takes_pieces_gets_one_per_display(app_paths, display_lay
 CURRENT = ["/current.png"]
 
 
-def write_render(cache, name, layout, files=CURRENT, **kwargs):
-    """A render in ``cache`` made for ``layout`` and ``files``, with its signature."""
+def write_render(cache, name, layout, files=CURRENT, *, profile=None, **kwargs):
+    """A render in ``cache`` made for ``layout``, ``files`` and ``profile`` (profile "main" by default), with its signature."""
     path = cache / name
     write_image(path, **kwargs)
-    (cache / f"{name}.sig").write_text(wallpaper_change.render_signature(layout, files), encoding="utf-8")
-
-
-def selection_showing(*files):
-    return SimpleNamespace(current=lambda: list(files))
+    signature = wallpaper_change._render_signature(layout, profile or settings("main"), files)
+    (cache / f"{name}.sig").write_text(signature, encoding="utf-8")
 
 
 @pytest.fixture
 def startup(app_paths, display_layout, desktop):
     """Show the last wallpaper of profile "main" again, as the tray does when it starts."""
-    main = SimpleNamespace(
-        profile=settings("main"),
-        profile_id=ProfileId.parse("main", windows_names=False),
-        selection=selection_showing(*CURRENT),
-    )
 
-    def restore(layout=None):
+    def restore(*, layout=None, profile=None, files=CURRENT):
+        main = SimpleNamespace(
+            profile=profile or settings("main"),
+            profile_id=ProfileId.parse("main", windows_names=False),
+            selection=SimpleNamespace(current=lambda: list(files)),
+        )
         return wallpaper_change.show_again(
             main, app_paths, desktop=desktop, layout=layout or display_layout(TINY_DISPLAYS), set_command=""
         )
@@ -254,23 +291,30 @@ def startup(app_paths, display_layout, desktop):
 def test_startup_shows_the_last_render_again(app_paths, display_layout, desktop, startup):
     write_render(app_paths.cache, "main-a.png", display_layout(TINY_DISPLAYS), modified=2_000_000_000)
 
-    assert startup() is True
+    assert startup() == Restored(None)
     assert desktop.handed == [Spanned(str(app_paths.cache / "main-a.png"))]
     assert desktop.profiles.current_profile == "main"
+
+
+def test_startup_reports_what_the_desktop_says_went_wrong(app_paths, display_layout, desktop, startup):
+    desktop.answer = Result("the setter failed")
+    write_render(app_paths.cache, "main-a.png", display_layout(TINY_DISPLAYS))
+
+    assert startup() == Restored("the setter failed")
 
 
 def test_startup_ignores_a_draft_that_was_shown_after_it(app_paths, display_layout, desktop, startup):
     write_render(app_paths.cache, "main-a.png", display_layout(TINY_DISPLAYS), modified=1_000_000_000)
     write_render(app_paths.cache, "preview/draft-b.png", display_layout(TINY_DISPLAYS), modified=2_000_000_000)
 
-    assert startup() is True
+    assert startup() == Restored(None)
     assert desktop.handed == [Spanned(str(app_paths.cache / "main-a.png"))]
 
 
 def test_startup_renders_again_what_was_made_for_other_images(app_paths, display_layout, desktop, startup):
     write_render(app_paths.cache, "main-a.png", display_layout(TINY_DISPLAYS), files=["/earlier.png"])
 
-    assert startup() is False
+    assert startup() == NothingToRestore()
     assert desktop.handed == []
 
 
@@ -278,39 +322,55 @@ def test_startup_renders_again_what_was_made_for_another_layout(app_paths, displ
     write_render(app_paths.cache, "main-a.png", display_layout(TINY_DISPLAYS))
     other = replace(display_layout(TINY_DISPLAYS), bezels_mm=((1.0, 1.0), (1.0, 1.0)))
 
-    assert startup(other) is False
+    assert startup(layout=other) == NothingToRestore()
     assert desktop.handed == []
+
+
+@pytest.mark.parametrize(
+    ("changed", "restored"),
+    [
+        ({"zoom": 1.5}, False),
+        ({"pan": (0.5, 0.0)}, False),
+        ({"spanmode": "advanced"}, False),
+        ({"delay": 5.0}, True),
+    ],
+)
+def test_startup_renders_again_what_was_made_with_other_render_settings(
+    app_paths, display_layout, startup, changed, restored
+):
+    write_render(app_paths.cache, "main-a.png", display_layout(TINY_DISPLAYS))
+
+    result = startup(profile=replace(settings("main"), **changed))
+
+    assert (result == Restored(None)) is restored
 
 
 def test_startup_renders_again_what_has_no_signature(app_paths, desktop, startup):
     write_image(app_paths.cache / "main-a.png")
 
-    assert startup() is False
+    assert startup() == NothingToRestore()
     assert desktop.handed == []
 
 
-def test_startup_renders_when_the_profile_has_no_images(app_paths, display_layout, desktop):
+def test_startup_renders_when_the_profile_has_no_images(app_paths, display_layout, desktop, startup):
     write_render(app_paths.cache, "main-a.png", display_layout(TINY_DISPLAYS))
-    main = SimpleNamespace(
-        profile=settings("main"), profile_id=ProfileId.parse("main", windows_names=False), selection=selection_showing()
-    )
 
-    layout = display_layout(TINY_DISPLAYS)
-    assert wallpaper_change.show_again(main, app_paths, desktop=desktop, layout=layout, set_command="") is False
+    assert startup(files=[]) == NothingToRestore()
 
 
-def test_a_change_keeps_what_it_was_made_from_for_the_next_start(tmp_path, app_paths, display_layout, desktop):
+def test_startup_renders_when_there_is_only_a_draft(app_paths, display_layout, desktop, startup):
+    write_render(app_paths.cache, "preview/draft-a.png", display_layout(TINY_DISPLAYS))
+
+    assert startup() == NothingToRestore()
+    assert desktop.handed == []
+
+
+def test_a_change_keeps_what_it_was_made_from_for_the_next_start(tmp_path, app_paths, display_layout, desktop, startup):
     source = [write_image(tmp_path / "source.png")]
-    layout = display_layout(TINY_DISPLAYS)
-    assert change("main", source, app_paths, layout, desktop) is None
+    assert change("main", source, app_paths, display_layout(TINY_DISPLAYS), desktop) is None
     desktop.handed.clear()
-    main = SimpleNamespace(
-        profile=settings("main"),
-        profile_id=ProfileId.parse("main", windows_names=False),
-        selection=selection_showing(*source),
-    )
 
-    assert wallpaper_change.show_again(main, app_paths, desktop=desktop, layout=layout, set_command="") is True
+    assert startup(files=source) == Restored(None)
     assert desktop.handed == [Spanned(str(app_paths.cache / "main-a.png"))]
 
 
@@ -322,16 +382,47 @@ def test_startup_shows_the_pieces_in_display_order_where_the_desktop_takes_them(
     for name in ("main-b-crop-1.png", "main-b-crop-0.png"):
         write_image(app_paths.cache / name)
 
-    assert startup() is True
+    assert startup() == Restored(None)
     pieces = (str(app_paths.cache / "main-b-crop-0.png"), str(app_paths.cache / "main-b-crop-1.png"))
     assert desktop.handed == [Pieces(str(app_paths.cache / "main-b.png"), pieces)]
+
+
+def test_startup_cuts_the_pieces_again_when_the_render_has_none(app_paths, display_layout, desktop, startup):
+    desktop.pieces_taken = True
+    write_render(app_paths.cache, "main-a.png", display_layout(TINY_DISPLAYS))
+
+    assert startup() == Restored(None)
+    pieces = (str(app_paths.cache / "main-a-crop-0.png"), str(app_paths.cache / "main-a-crop-1.png"))
+    assert desktop.handed == [Pieces(str(app_paths.cache / "main-a.png"), pieces)]
+
+
+def test_startup_renders_again_what_cant_be_read_to_cut_the_pieces(app_paths, display_layout, desktop, startup):
+    desktop.pieces_taken = True
+    write_render(app_paths.cache, "main-a.png", display_layout(TINY_DISPLAYS))
+    (app_paths.cache / "main-a.png").write_bytes(b"not an image")
+
+    assert startup() == NothingToRestore()
+    assert desktop.handed == []
+
+
+@pytest.mark.parametrize("pieces_taken", [False, True])
+def test_startup_runs_the_hook_with_the_images_shown(app_paths, display_layout, desktop, startup, pieces_taken):
+    desktop.pieces_taken = pieces_taken
+    script = app_paths.config / "run-after-wp-change.py"
+    script.touch()
+    write_render(app_paths.cache, "main-a.png", display_layout(TINY_DISPLAYS))
+    if pieces_taken:
+        write_image(app_paths.cache / "main-a-crop-0.png")
+
+    assert startup() == Restored(None)
+    assert desktop.hooks == [(script, str(app_paths.cache / "main-a.png"), CURRENT)]
 
 
 def test_a_desktop_that_keeps_its_wallpaper_isnt_given_it_again_at_startup(app_paths, display_layout, desktop, startup):
     desktop.wallpaper_kept = True
     write_render(app_paths.cache, "main-a.png", display_layout(TINY_DISPLAYS))
 
-    assert startup() is True
+    assert startup() == Restored(None)
     assert desktop.handed == []
 
 
@@ -347,28 +438,14 @@ def test_a_desktop_that_keeps_its_wallpaper_isnt_given_it_again_at_startup(app_p
     ],
 )
 def test_a_perspective_that_no_longer_exists_isnt_rendered_again_at_startup(
-    app_paths, display_layout, desktop, perspective, default, rendered_again
+    app_paths, display_layout, desktop, startup, perspective, default, rendered_again
 ):
     desktop.wallpaper_kept = True
-    desk = Perspective(
-        "desk", 0, (0.0, 0.0, 1000.0), (Swivel(SwivelAxis.NONE, 0.0, 0.0, 0.0),) * 2, (Tilt(0.0, 0.0, 0.0),) * 2
-    )
     layout = replace(
-        display_layout(TINY_DISPLAYS), use_perspective=True, default_perspective=default, perspectives=(desk,)
+        display_layout(TINY_DISPLAYS), use_perspective=True, default_perspective=default, perspectives=(DESK,)
     )
-    write_render(app_paths.cache, "main-a.png", layout)
-    main = SimpleNamespace(
-        profile=replace(settings("main", spanmode="advanced"), perspective=perspective),
-        profile_id=ProfileId.parse("main", windows_names=False),
-        selection=selection_showing(*CURRENT),
-    )
+    profile = replace(settings("main", spanmode="advanced"), perspective=perspective)
+    write_render(app_paths.cache, "main-a.png", layout, profile=profile)
 
-    assert wallpaper_change.show_again(main, app_paths, desktop=desktop, layout=layout, set_command="") is True
+    assert startup(layout=layout, profile=profile) == Restored(None)
     assert bool(desktop.handed) is rendered_again
-
-
-def test_startup_without_a_render_shows_nothing(app_paths, display_layout, desktop, startup):
-    write_render(app_paths.cache, "preview/draft-a.png", display_layout(TINY_DISPLAYS))
-
-    assert startup() is False
-    assert desktop.handed == []

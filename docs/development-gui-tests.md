@@ -1,8 +1,7 @@
 # Running GUI tests
 
-The tests in `tests/gui` drive the real wx windows (tray application, editor, dialogs,
-hotkey bindings) on a display. They carry the `gui` marker and are deselected by default, so
-`uv run pytest` doesn't need wxPython. CI runs them in a separate `gui` job under `xvfb-run`
+The tests in `tests/gui` drive the real wx windows (tray application, editor, dialogs) on a display. They carry the `gui` marker and are deselected by
+default, so `uv run pytest` doesn't need wxPython. CI runs them in a separate `gui` job under `xvfb-run`
 with the wxPython wheel from the wxPython extras index.
 
 ```sh
@@ -12,8 +11,7 @@ uv run pytest -m gui
 They need wxPython importable and a display (`DISPLAY` or `WAYLAND_DISPLAY`); without
 either, every GUI test is skipped with the reason. Windows open briefly on the current
 desktop. Nothing touches your configuration or wallpaper: each test uses scratch
-directories, a fixed pair of monitors, a recording stand-in for the system hotkeys and a
-`true {image}` wallpaper command.
+directories, a fixed pair of monitors and a `true {image}` wallpaper command.
 
 To keep the windows off your desktop, run under a virtual display:
 

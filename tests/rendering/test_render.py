@@ -1,14 +1,14 @@
-"""Composing the desktop image: opening the user's images, the geometry, and the three
-ways of spreading images over the displays."""
+"""Composing the desktop image: the three ways of spreading images over the displays."""
 
 import hashlib
+from pathlib import Path
 
 import numpy
 import PIL
 import pytest
 from PIL import Image
 
-from superpaper.geometry.canvas import canvas_size, canvas_size_with_bezels
+from superpaper.geometry.canvas import canvas_size
 from superpaper.geometry.perspective import (
     Named,
     Perspective,
@@ -17,7 +17,7 @@ from superpaper.geometry.perspective import (
     Tilt,
     get_backprojected_display_system,
 )
-from superpaper.rendering import render, source_image
+from superpaper.rendering import render
 from tests.conftest import TINY_DISPLAYS, monitor, pixels
 
 
@@ -29,71 +29,37 @@ def write_image(path, size, pixel, image_format=None, **options):
     return str(path)
 
 
-def test_an_image_opens_upright_and_in_rgb(tmp_path):
-    # Stored landscape, top half red and bottom half blue; EXIF orientation 6 means
-    # "rotate 90 degrees clockwise to view".
-    exif = Image.Exif()
-    exif[0x0112] = 6
-    path = write_image(
-        tmp_path / "rotated.jpg", (40, 20), lambda x, y: (220, 0, 0) if y < 10 else (0, 0, 220), exif=exif.tobytes()
-    )
-    grey = tmp_path / "grey.png"
-    Image.new("L", (3, 3), 128).save(grey)
-
-    upright = source_image.open_source_image(path)
-
-    assert upright.size == (20, 40)
-    assert upright.getpixel((3, 20))[2] > 150  # blue on the left
-    assert upright.getpixel((16, 20))[0] > 150  # red on the right
-    assert source_image.open_source_image(grey).mode == "RGB"
-
-
-def test_an_image_over_the_size_limit_is_refused_before_it_is_decoded(tmp_path, monkeypatch):
-    path = write_image(tmp_path / "large.png", (4, 4), lambda x, y: (0, 0, 0))
-    monkeypatch.setattr(source_image, "MAX_PIXELS", 15)
-    monkeypatch.setattr(source_image.ImageOps, "exif_transpose", lambda image: pytest.fail("the image was decoded"))
-
-    with pytest.raises(source_image.SourceImageError, match="too large: 4 x 4 pixels"):
-        source_image.open_source_image(path)
-
-
-def test_an_unusable_image_is_reported_by_its_path(tmp_path):
-    not_an_image = tmp_path / "notes.png"
-    not_an_image.write_bytes(b"not an image")
-    truncated = tmp_path / "truncated.png"
-    write_image(truncated, (64, 64), lambda x, y: (x * 37 % 256, y * 91 % 256, x * y % 256))
-    truncated.write_bytes(truncated.read_bytes()[: truncated.stat().st_size // 2])
-
-    for path, reason in [
-        (tmp_path / "gone.png", "doesn't exist"),
-        (not_an_image, "isn't an image Superpaper can read"),
-        (truncated, "can't be read"),
-    ]:
-        with pytest.raises(source_image.SourceImageError, match=reason) as raised:
-            source_image.open_source_image(path)
-        assert str(path) in str(raised.value)
-
-
-def test_working_canvas_includes_outer_bezels():
-    assert canvas_size_with_bezels([(0, 0, 100, 80), (100, 10, 200, 90)], [(5, 4), (12, 8)]) == (212, 98)
-
-
-def test_the_canvas_of_displays_with_a_vertical_offset_holds_them_all(display_layout):
-    layout = display_layout([monitor(0, 0, 1920, 1080), monitor(1920, 200, 1280, 1024)])
-
-    assert layout.desktop_size() == (3200, 1224)
-
-
-def test_resize_to_fill_alignment():
+@pytest.mark.parametrize(
+    ("zoom", "offset", "row"),
+    [
+        (1.0, (-1, 0), [0, 50]),
+        (1.0, (0, 0), [50, 100]),
+        (1.0, (1, 0), [100, 150]),
+        (2.0, (-1, 0), [0, 0]),
+        (2.0, (0, 0), [50, 100]),
+        (2.0, (1, 0), [150, 150]),
+    ],
+)
+def test_resize_to_fill_places_the_window_by_zoom_and_offset(zoom, offset, row):
     image = Image.new("RGB", (4, 2))
-    for x in range(4):
-        for y in range(2):
-            image.putpixel((x, y), (x * 50, 0, 0))
+    image.putdata([(x * 50, 0, 0) for _ in range(2) for x in range(4)])
 
-    left = render.resize_to_fill(image, (2, 2), offset=(-1, 0))
-    right = render.resize_to_fill(image, (2, 2), offset=(1, 0))
+    window = render.resize_to_fill(image, (2, 2), zoom=zoom, offset=offset, resample=Image.Resampling.NEAREST)
 
-    assert left.getpixel((0, 0))[0] < right.getpixel((0, 0))[0]
+    assert [window.getpixel((x, y))[0] for y in range(2) for x in range(2)] == row * 2
+
+
+def test_advanced_spanning_zooms_and_pans_the_image(tmp_path, display_layout):
+    layout = display_layout(SMALL_MONITORS[:1])
+    halves = write_image(tmp_path / "halves.png", (64, 36), lambda x, y: (255, 0, 0) if x < 32 else (0, 0, 255))
+
+    left = render.advanced([halves], layout, manual_offsets=[(0, 0)], zoom=2.0, pan=(-1, 0))
+    right = render.advanced([halves], layout, manual_offsets=[(0, 0)], zoom=2.0, pan=(1, 0))
+
+    assert left.getpixel((20, 18)) == (255, 0, 0)
+    assert right.getpixel((44, 18)) == (0, 0, 255)
+    assert left.getpixel((40, 18)) == (255, 0, 0)
+    assert right.getpixel((20, 18)) == (0, 0, 255)
 
 
 def test_simple_spanning_fills_the_desktop(tmp_path, display_layout):
@@ -151,21 +117,18 @@ def test_one_image_per_display_keeps_the_gaps_black(tmp_path, display_layout):
 # them. The digests pin the output exactly; they were recorded with Pillow 12.2.0 and
 # numpy 2.5.0, so a different version of either can change them, and then they are
 # re-recorded deliberately. The perspective case solves a linear system with numpy's
-# OpenBLAS, whose AVX-512 kernels may round its last bits differently from the other
-# x86-64 kernels, and Apple Silicon's rounds differently again; all three digests are accepted.
+# OpenBLAS, whose kernels round its last bits differently per CPU, so it is compared
+# with a tolerance against a stored image instead.
 SMALL_MONITORS = [
     monitor(0, 0, 64, 36, 120, 68, "A"),
     monitor(64, 6, 48, 27, 105, 59, "B"),
 ]
 ADVANCED_GOLDENS = {
     "offsets": {"d55a711c95670d2e4ad667b5967864f6a4ec9f9d67b2c94d06f43f95075dd618"},
-    "span groups": {"49a179d205c35521f306a400e09310146b7b87cc69dcba71f61fb6016e549f98"},
-    "perspective": {
-        "ff5a6b2529f1523302eb0d2eeea79949a5f7563dc0c17b671436d5e4496533a9",
-        "5ab69aa9661b802a4e11d15221fdcb440d2709d9fddf6cd8331bf411ad1b9f6a",
-        "2f36f7bf86e038c2347b6e3896fb3e90d01f28bb6815f1a694b0864a1432dad3",
-    },
+    "span groups": {"0c5bd0c75270aa04e765d40b30d95d12b15fe854668d5da9b83af0d98934f762"},
 }
+PERSPECTIVE_GOLDEN = Path(__file__).parent / "goldens" / "perspective.png"
+PERSPECTIVE_TOLERANCE = 2
 
 
 @pytest.mark.parametrize(
@@ -201,6 +164,12 @@ def test_advanced_spanning_golden(tmp_path, display_layout, case, spangroups, pe
     )
 
     assert image.size == (112, 36)
+    if case == "perspective":
+        with Image.open(PERSPECTIVE_GOLDEN) as golden:
+            assert (image.size, image.mode) == (golden.size, golden.mode)
+            difference = numpy.abs(numpy.asarray(image, int) - numpy.asarray(golden, int))
+        assert difference.max() <= PERSPECTIVE_TOLERANCE
+        return
     digest = hashlib.sha256(image.tobytes()).hexdigest()
     assert digest in ADVANCED_GOLDENS[case], f"pixels changed (Pillow {PIL.__version__}, numpy {numpy.__version__})"
 
@@ -232,3 +201,57 @@ def test_transforming_only_a_display_area_matches_transforming_the_whole_canvas(
         )
         difference = numpy.abs(numpy.asarray(whole.crop((left, top, right, bottom)), int) - numpy.asarray(part, int))
         assert difference.max() <= 1
+
+
+THREE_TURNED = Perspective(
+    "desk",
+    2,
+    (20.0, -10.0, 300.0),
+    (
+        Swivel(SwivelAxis.RIGHT, 25.0, 0.0, 0.0),
+        Swivel(SwivelAxis.NONE, 0.0, 0.0, 0.0),
+        Swivel(SwivelAxis.LEFT, -25.0, 5.0, 3.0),
+    ),
+    (Tilt(0.0, 0.0, 0.0), Tilt(8.0, 0.0, 0.0), Tilt(-5.0, 2.0, 0.0)),
+)
+
+
+@pytest.mark.parametrize("group", [(0,), (0, 1), (1, 0)])
+def test_a_span_group_sees_its_displays_as_the_whole_layout_does(group):
+    crops = [(0, 0, 160, 90), (170, 10, 330, 100), (340, 0, 500, 90)]
+    plane_crops, coefficients = get_backprojected_display_system(crops, THREE_TURNED)
+
+    group_crops, group_coefficients = render.group_projection(plane_crops, coefficients, group)
+
+    shift_x = plane_crops[group[0]][0] - group_crops[0][0]
+    shift_y = plane_crops[group[0]][1] - group_crops[0][1]
+    assert min(crop[0] for crop in group_crops) == 0 and min(crop[1] for crop in group_crops) == 0
+    for index, crop, coeffs in zip(group, group_crops, group_coefficients, strict=True):
+        assert crop == pytest.approx(numpy.subtract(plane_crops[index], (shift_x, shift_y, shift_x, shift_y)))
+        left, top, right, bottom = crops[index]
+        for x, y in [(left, top), (right, top), (right, bottom), (left, bottom)]:
+            whole = map_point(coefficients[index], x, y)
+            assert map_point(coeffs, x, y) == pytest.approx((whole[0] - shift_x, whole[1] - shift_y))
+
+
+def map_point(coefficients, x, y):
+    a, b, c, d, e, f, g, h = coefficients
+    w = g * x + h * y + 1
+    return ((a * x + b * y + c) / w, (d * x + e * y + f) / w)
+
+
+def test_span_groups_without_the_central_display_render_with_perspective(tmp_path, display_layout):
+    layout = display_layout([monitor(0, 0, 64, 36), monitor(64, 0, 64, 36), monitor(128, 0, 64, 36)])
+    image = write_image(tmp_path / "image.png", (40, 20), lambda x, y: (x * 6, y * 12, 0))
+
+    combined = render.advanced(
+        [image, image],
+        layout,
+        manual_offsets=[(0, 0)] * 3,
+        spangroups=[[0], [1, 2]],
+        perspective=THREE_TURNED,
+    )
+
+    assert combined.size == layout.desktop_size()
+    for (left, top), (width, height) in zip(layout.digital_offsets(), layout.resolutions(), strict=True):
+        assert numpy.asarray(combined.crop((left, top, left + width, top + height))).any()

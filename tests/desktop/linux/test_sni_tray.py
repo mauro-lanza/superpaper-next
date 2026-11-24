@@ -48,18 +48,25 @@ def test_the_top_level_keeps_its_ids_when_the_profiles_change():
     assert sorted(model.nodes) == [1, 2, 3, 4, 5]
 
 
-def test_a_notice_is_a_disabled_line_that_does_nothing():
-    failure = [failure_notice("Image missing")]
-    model = model_of(lambda: (*failure, Item("Exit", lambda: None)))
+def test_a_notice_is_a_disabled_line_without_an_action():
+    model = model_of(lambda: (failure_notice("Image missing"), Item("Exit", lambda: None)))
 
     model.rebuild()
     notice = model.nodes[model.layout[0]]
     model.activate(model.layout[0])
-    failure.clear()
-    model.rebuild()
 
     assert notice.props == {"label": "Last change failed: Image missing", "enabled": False}
     assert notice.action is None
+
+
+def test_a_notice_leaves_the_menu_when_the_failure_is_cleared():
+    failure = [failure_notice("Image missing")]
+    model = model_of(lambda: (*failure, Item("Exit", lambda: None)))
+
+    model.rebuild()
+    failure.clear()
+    model.rebuild()
+
     assert len(model.layout) == 1
 
 
@@ -105,21 +112,20 @@ def test_a_disabled_item_ignores_activation():
     assert started == []
 
 
-def test_disabled_items_and_checked_profiles_carry_their_state():
+def test_disabled_items_and_notices_are_shown_disabled():
     menu = lambda: (  # noqa: E731
         Item("Next Wallpaper", lambda: None, enabled=False),
         Check("Pause Timer", lambda: None, checked=False, enabled=False),
-        Submenu("Profiles", (Check("Work", lambda: None, checked=True), Notice("(no profiles)"))),
+        Submenu("Profiles", (Notice("(no profiles)"),)),
     )
     model = model_of(menu)
 
     model.rebuild()
     next_item, pause, profiles = (model.nodes[node_id] for node_id in model.layout)
-    work, placeholder = (model.nodes[child] for child in profiles.children)
+    (placeholder,) = (model.nodes[child] for child in profiles.children)
 
     assert next_item.props["enabled"] is False
     assert pause.props["enabled"] is False
-    assert work.props == {"label": "Work", "enabled": True, "toggle-type": "checkmark", "toggle-state": 1}
     assert placeholder.props == {"label": "(no profiles)", "enabled": False}
     assert placeholder.action is None
 

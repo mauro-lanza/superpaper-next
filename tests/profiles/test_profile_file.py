@@ -40,6 +40,7 @@ def test_upper_case_image_extensions_are_images(tmp_path):
         ({"name": "  "}, "You must enter a name for the profile."),
         ({"spanmode": "single", "sources": (("a",), ("b",))}, "only one paths field is needed"),
         ({"slideshow": True, "delay": 4.0}, "at least 5 seconds"),
+        ({"slideshow": True, "delay": 0.5}, "at least 5 seconds"),
         ({"sources": ()}, "You must enter at least one path for images."),
         ({"sources": ((),)}, "At least one path for wallpapers must be given."),
         ({"spanmode": "multi", "sources": (("a",), ())}, "Add an image source for every display present."),
@@ -99,7 +100,6 @@ def test_a_profile_is_serialized_byte_stable():
         delay=60.0,
         sortmode="alphabetical",
         corrections=(OffsetsCorrection(((1, -2), (3, 4))),),
-        hotkey=("control", "super", "w"),
         perspective=Named("desk"),
         zoom=1.25,
         pan=(-0.5, 1.0),
@@ -116,7 +116,6 @@ def test_a_profile_is_serialized_byte_stable():
         "delay=60.0\n"
         "sortmode=alphabetical\n"
         "offsets=1,-2;3,4\n"
-        "hotkey=control+super+w\n"
         "perspective=desk\n"
         "zoom=1.25\n"
         "align=-0.5,1.0\n"
@@ -125,26 +124,38 @@ def test_a_profile_is_serialized_byte_stable():
     )
 
 
-def test_a_written_profile_reads_back_the_same(tmp_path):
-    profile = Profile(
-        name="round trip",
-        spanmode="multi",
-        slideshow=False,
-        hotkey=("alt", "1"),
-        perspective=Disabled(),
-        zoom=1.5,
-        pan=(0.25, -1.0),
-        corrections=(OffsetsCorrection(((0, 0), (12, -3))),),
-        sources=((str(tmp_path / "a=b"),), ("/one", "/two")),
-    )
-
+@pytest.mark.parametrize(
+    "profile",
+    [
+        Profile(
+            name="round trip",
+            spanmode="multi",
+            slideshow=False,
+            perspective=Disabled(),
+            zoom=1.5,
+            pan=(0.25, -1.0),
+            corrections=(OffsetsCorrection(((0, 0), (12, -3))),),
+            sources=(("/a=b",), ("/one", "/two")),
+        ),
+        Profile(name="slides", delay=1230.0, sortmode="date_seeded_shuffle", sources=(("/images",),)),
+    ],
+    ids=["fixed image", "slideshow"],
+)
+def test_a_written_profile_reads_back_the_same(profile):
     assert profile_file.parse(profile_file.serialize(profile)) == profile
 
 
-def test_a_slideshow_profile_reads_back_the_same():
-    profile = Profile(name="slides", delay=1230.0, sortmode="date_seeded_shuffle", sources=(("/images",),))
+def test_a_selected_line_of_an_older_version_is_read():
+    profile = profile_file.parse("name=old\nselected=/a.png;/b.png\ndisplay0paths=/images\n")
 
-    assert profile_file.parse(profile_file.serialize(profile)) == profile
+    assert profile.selected == ("/a.png", "/b.png")
+
+
+def test_a_legacy_hotkey_line_is_read_and_not_written_back():
+    profile = profile_file.parse("name=old\nspanmode=single\nhotkey=control+super+w\ndisplay0paths=/images\n")
+
+    assert profile == Profile(name="old", slideshow=True, sources=(("/images",),))
+    assert "hotkey" not in profile_file.serialize(profile)
 
 
 @pytest.mark.parametrize("text", ["default", "disabled", "desk"])
@@ -173,10 +184,15 @@ def test_identical_sources_are_written_with_their_own_display_numbers():
         ("align=", ("pan", (0.0, 0.0))),
         ("align=0.5", ("pan", (0.0, 0.0))),
         ("align=0.5,-2,9", ("pan", (0.5, -1.0))),
+        ("align=nan,0.5", ("pan", (0.0, 0.0))),
+        ("align=0.5,inf", ("pan", (0.0, 0.0))),
+        ("align=-inf,nan", ("pan", (0.0, 0.0))),
         ("spanmode=diagonal", ("spanmode", "single")),
         ("sortmode=random", ("sortmode", "shuffle")),
         ("spangroups=0,x", ("spangroups", None)),
-        ("hotkey=", ("hotkey", None)),
+        ("spangroups=", ("spangroups", None)),
+        ("spangroups=0,,1", ("spangroups", None)),
+        ("hotkey=control+x", ("name", "lenient")),
         ("a line without a setting", ("name", "lenient")),
         ("name", ("name", "lenient")),
         ("unknown=setting", ("name", "lenient")),

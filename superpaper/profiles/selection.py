@@ -12,7 +12,7 @@ import os
 import random
 import threading
 from collections.abc import Callable, Sequence
-from typing import Literal, assert_never, get_args
+from typing import Literal, NamedTuple, assert_never, get_args
 
 logger = logging.getLogger(__name__)
 
@@ -149,9 +149,14 @@ class Selection:
         """The next image for every position, chosen once and kept until it is taken."""
         if self._lists is None:
             self._lists = self._list_images()
+        elif self._pending is None:
+            # Images added to a source join when its cycle has been shown, not mid-cycle.
+            for image_list, paths in zip(self._lists, self._sources, strict=True):
+                if image_list.is_finished():
+                    image_list.relist(_list_position(paths))
         for relists in range(_MAX_RELISTS + 1):
             # An empty position would shift the others' images onto the wrong displays.
-            if any(not image_list.files for image_list in self._lists):
+            if any(not image_list.images for image_list in self._lists):
                 return []
             if self._pending is None:
                 self._pending = _plan_batch(self._lists)
@@ -172,97 +177,97 @@ class Selection:
         return []
 
     def _list_images(self) -> list[_ImageList]:
-        """List the supported images of every position's sources, each image once."""
-        lists = []
-        for paths in self._sources:
-            images = []
-            for path in paths:
-                if os.path.isfile(path):
-                    if is_supported_image(path):
-                        images.append(path)
-                    continue
-                try:
-                    names = os.listdir(path)
-                except FileNotFoundError:
-                    logger.warning("A source was not found: '%s'. Use absolute paths for best reliability.", path)
-                    continue
-                except OSError as error:
-                    logger.warning("A source could not be listed: '%s': %s", path, error)
-                    continue
-                images += [os.path.join(path, name) for name in names if is_supported_image(name)]
-            # The same file can be included through overlapping folders, explicit
-            # paths or symlinks. Keep its first occurrence only.
-            unique = []
-            unique_identities = []
-            seen = set()
-            for image in images:
-                identity = _file_identity(image)
-                if identity not in seen:
-                    seen.add(identity)
-                    unique.append(image)
-                    unique_identities.append(identity)
-            lists.append(_ImageList(unique, unique_identities, self._sortmode))
-        return lists
+        return [_ImageList(_list_position(paths), self._sortmode) for paths in self._sources]
+
+
+class _Image(NamedTuple):
+    path: str
+    identity: str
+
+
+def _list_position(paths: Sequence[str]) -> list[_Image]:
+    """List the supported images of one position's sources, each image once."""
+    images = []
+    for path in paths:
+        if os.path.isfile(path):
+            if is_supported_image(path):
+                images.append(path)
+            continue
+        try:
+            names = os.listdir(path)
+        except FileNotFoundError:
+            logger.warning("A source was not found: '%s'. Use absolute paths for best reliability.", path)
+            continue
+        except OSError as error:
+            logger.warning("A source could not be listed: '%s': %s", path, error)
+            continue
+        images += [os.path.join(path, name) for name in names if is_supported_image(name)]
+    # The same file can be included through overlapping folders, explicit
+    # paths or symlinks. Keep its first occurrence only.
+    unique: dict[str, _Image] = {}
+    for image in images:
+        identity = os.path.normcase(os.path.realpath(image))
+        unique.setdefault(identity, _Image(image, identity))
+    return list(unique.values())
 
 
 class _ImageList:
     """One position's images in slideshow order, rearranged each time they have all been shown."""
 
-    def __init__(self, files: list[str], identities: list[str], sortmode: SortMode):
+    def __init__(self, images: list[_Image], sortmode: SortMode):
         self.counter = 0
-        self.files = files
-        self.identities = identities
+        self.images = images
         self.sortmode = sortmode
         self.arrange()
 
-    def prepare_cycle(self) -> None:
-        """Start the next round once every image has been shown."""
-        if self.counter >= len(self.files):
-            self.counter = 0
-            self.arrange()
+    def is_finished(self) -> bool:
+        return 0 < len(self.images) <= self.counter
+
+    def relist(self, listed: list[_Image]) -> None:
+        """Start the next round over ``listed``: the images still there in their current
+        order, then the new ones."""
+        present = {image.identity for image in listed}
+        kept = [image for image in self.images if image.identity in present]
+        kept_identities = {image.identity for image in kept}
+        self.images = kept + [image for image in listed if image.identity not in kept_identities]
+        self.counter = 0
+        self.arrange()
 
     def arrange(self) -> None:
-        pairs = list(zip(self.files, self.identities, strict=True))
         match self.sortmode:
             case "shuffle":
-                random.shuffle(pairs)
+                random.shuffle(self.images)
             case "date_seeded_shuffle":
                 today = datetime.datetime.now()  # noqa: DTZ005  # intentional local-time seed
-                random.Random(today.strftime("%Y%m%d%H")).shuffle(pairs)
+                random.Random(today.strftime("%Y%m%d%H")).shuffle(self.images)
             case "alphabetical":
-                pairs.sort(key=lambda pair: pair[0])
+                self.images.sort(key=lambda image: image.path)
             case _:
                 assert_never(self.sortmode)
-        self.files[:] = [path for path, _ in pairs]
-        self.identities[:] = [identity for _, identity in pairs]
-
-
-def _file_identity(path: str) -> str:
-    return os.path.normcase(os.path.realpath(path))
 
 
 def _plan_batch(lists: list[_ImageList]) -> tuple[list[str], list[int]]:
     """Choose the next image for every position, each image at most once if that is
     possible: a maximum matching that otherwise keeps every position's own order.
     Returns the images and where each position's order continues afterwards."""
-    candidates = []
+    candidates: list[list[tuple[_Image, int]]] = []
     for image_list in lists:
-        image_list.prepare_cycle()
-        ordered = list(range(image_list.counter, len(image_list.files))) + list(range(image_list.counter))
-        candidates.append([(image_list.files[index], index + 1, image_list.identities[index]) for index in ordered])
+        count = len(image_list.images)
+        ordered = [*range(image_list.counter, count), *range(image_list.counter)]
+        candidates.append([(image_list.images[index], index + 1) for index in ordered])
 
     image_to_position: dict[str, int] = {}
     selected: list[tuple[str, int] | None] = [None] * len(candidates)
 
-    def assign(position, visited):
-        for path, counter, identity in candidates[position]:
-            if identity in visited:
+    def assign(position: int, visited: set[str]) -> bool:
+        for image, counter in candidates[position]:
+            if image.identity in visited:
                 continue
-            visited.add(identity)
-            previous = image_to_position.get(identity)
+            visited.add(image.identity)
+            previous = image_to_position.get(image.identity)
             if previous is None or assign(previous, visited):
-                image_to_position[identity] = position
-                selected[position] = (path, counter)
+                image_to_position[image.identity] = position
+                selected[position] = (image.path, counter)
                 return True
         return False
 
@@ -273,10 +278,11 @@ def _plan_batch(lists: list[_ImageList]) -> tuple[list[str], list[int]]:
 
     # If uniqueness is impossible, duplicates are preferable to an incomplete batch
     # that could shift images onto the wrong displays.
+    chosen = []
     for position, choices in enumerate(candidates):
-        if selected[position] is None:
-            path, counter, _identity = choices[0]
-            selected[position] = (path, counter)
-
-    completed = [choice for choice in selected if choice is not None]
-    return ([choice[0] for choice in completed], [choice[1] for choice in completed])
+        choice = selected[position]
+        if choice is None:
+            image, counter = choices[0]
+            choice = (image.path, counter)
+        chosen.append(choice)
+    return ([path for path, _ in chosen], [counter for _, counter in chosen])

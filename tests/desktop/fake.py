@@ -13,7 +13,6 @@ class FakeDesktop:
         self.pieces_taken = False
         self.native_tray = None
         self.wx_tray_is_clickable = True
-        self.problems_in_dialog = True
         self.tray_requests: list[dict] = []
         self.main_loops_initialised = 0
         self.wallpaper_kept = False
@@ -51,9 +50,6 @@ class FakeDesktop:
 
     def wx_tray_clickable(self) -> bool:
         return self.wx_tray_is_clickable
-
-    def hotkey_problems_in_dialog(self) -> bool:
-        return self.problems_in_dialog
 
     def takes_pieces(self, set_command: str) -> bool:
         return self.pieces_taken
@@ -95,9 +91,6 @@ class FakeDesktop:
 
     def default_dirs(self, environ: Mapping[str, str], install: Path) -> tuple[Path, Path]:
         return install / "config", install / "cache"
-
-    def hotkeys_by_default(self) -> bool:
-        return True
 
     def render_extension(self) -> str:
         return "png"

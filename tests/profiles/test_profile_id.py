@@ -8,6 +8,7 @@ from superpaper.profiles.profile_id import (
     ManagedPathError,
     ProfileId,
     ProfileIdError,
+    existing_profile_path,
     profile_path,
 )
 
@@ -24,6 +25,9 @@ from superpaper.profiles.profile_id import (
         "Café",
         "alpha-beta_2",
         "format\u200dcontrol",
+        "a" * 50,
+        "é" * 50,
+        "😀" * 50,
     ],
 )
 def test_profile_id_accepts_portable_names(name):
@@ -55,6 +59,11 @@ def test_profile_id_accepts_portable_names(name):
 def test_profile_id_rejects_unsafe_names(name, message):
     with pytest.raises(ProfileIdError, match=message):
         ProfileId.parse(name, windows_names=False)
+
+
+def test_direct_construction_validates_path_safety():
+    with pytest.raises(ProfileIdError, match="path separators"):
+        ProfileId("../outside")
 
 
 def test_the_new_profile_entry_is_not_a_profile_name():
@@ -100,18 +109,6 @@ def test_existing_non_portable_names_still_identify_profiles(name, _message):
     assert ProfileId.parse(name, windows_names=False).value == name
 
 
-@pytest.mark.parametrize(
-    "name",
-    [
-        "a" * 50,
-        "é" * 50,
-        "😀" * 50,
-    ],
-)
-def test_profile_id_accepts_exact_length_boundaries(name):
-    assert ProfileId.parse_new(name).value == name
-
-
 def test_new_profile_name_must_be_nfc():
     decomposed = unicodedata.normalize("NFD", "Café")
 
@@ -121,38 +118,19 @@ def test_new_profile_name_must_be_nfc():
     assert ProfileId.parse(decomposed, windows_names=False).value == decomposed
 
 
-@pytest.mark.parametrize("factory", [ProfileId, ProfileId.parse])
-def test_profile_id_public_construction_validates(factory):
-    with pytest.raises(ProfileIdError, match="path separators"):
-        factory("../outside", windows_names=False)
-
-
-@pytest.mark.parametrize("raw", [None, 42, b"Work"])
-def test_profile_id_rejects_non_strings(raw):
-    with pytest.raises(ProfileIdError, match="must be strings"):
-        ProfileId.parse(raw, windows_names=False)
-
-
-def test_collision_key_is_case_insensitive():
+@pytest.mark.parametrize(
+    ("name", "same_as"),
+    [
+        ("Work", "work"),
+        ("Straße", "STRASSE"),
+        (unicodedata.normalize("NFD", "Café"), "café"),
+    ],
+    ids=["case", "casefold", "normalization"],
+)
+def test_names_of_one_file_on_a_case_insensitive_filesystem_share_a_collision_key(name, same_as):
     assert (
-        ProfileId.parse("Work", windows_names=False).collision_key
-        == ProfileId.parse("work", windows_names=False).collision_key
-    )
-
-
-def test_collision_key_uses_unicode_casefold():
-    assert (
-        ProfileId.parse("Straße", windows_names=False).collision_key
-        == ProfileId.parse("STRASSE", windows_names=False).collision_key
-    )
-
-
-def test_collision_key_ignores_unicode_normalization():
-    decomposed = unicodedata.normalize("NFD", "Café")
-
-    assert (
-        ProfileId.parse(decomposed, windows_names=False).collision_key
-        == ProfileId.parse("café", windows_names=False).collision_key
+        ProfileId.parse(name, windows_names=False).collision_key
+        == ProfileId.parse(same_as, windows_names=False).collision_key
     )
 
 
@@ -179,8 +157,7 @@ def test_profile_path_accepts_symlinked_profile(tmp_path):
     (root / "linked.profile").symlink_to(dotfile)
 
     assert (
-        profile_path(root, ProfileId.parse("linked", windows_names=False), allow_missing=False)
-        == root.resolve() / "linked.profile"
+        existing_profile_path(root, ProfileId.parse("linked", windows_names=False)) == root.resolve() / "linked.profile"
     )
 
 
@@ -203,4 +180,4 @@ def test_profile_path_requires_existing_regular_file(tmp_path):
     profile_id = ProfileId.parse("missing", windows_names=False)
 
     with pytest.raises(ManagedPathError, match="does not exist"):
-        profile_path(Path(tmp_path), profile_id, allow_missing=False)
+        existing_profile_path(Path(tmp_path), profile_id)

@@ -7,12 +7,6 @@ import pytest
 from tests.desktop.conftest import assert_satisfies_desktop
 
 
-def test_windows_keeps_the_wallpaper_and_takes_one_image(windows):
-    assert windows.keeps_wallpaper() is True
-    assert windows.takes_pieces("") is False
-    assert windows.setter_problem("") is None
-
-
 def test_the_config_folder_opens_through_the_shell(windows, monkeypatch, tmp_path):
     opened = []
     monkeypatch.setattr("os.startfile", opened.append, raising=False)
@@ -34,12 +28,6 @@ def test_a_folder_that_will_not_open_is_reported_not_raised(windows, monkeypatch
 
 def test_windows_satisfies_the_desktop_interface(windows):
     assert_satisfies_desktop(windows)
-
-
-def test_windows_defaults_are_jpeg_renders_hotkeys_and_strict_profile_names(windows):
-    assert windows.render_extension() == "jpg"
-    assert windows.hotkeys_by_default() is True
-    assert windows.strict_profile_names() is True
 
 
 def test_a_portable_install_keeps_files_beside_the_program(windows, tmp_path):

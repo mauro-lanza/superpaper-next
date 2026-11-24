@@ -14,7 +14,7 @@ and saved two perspectives.
 
 import pytest
 
-from superpaper.geometry import display_detection
+from superpaper.geometry import display_detection, display_store
 from superpaper.geometry.perspective import Perspective, Swivel, SwivelAxis, Tilt
 from tests.conftest import monitor
 from tests.desktop.fake import FakeDesktop
@@ -98,10 +98,10 @@ def saved_layouts(tmp_path):
     return tmp_path
 
 
-def detect(monkeypatch, config_dir, monitors):
+def detect(config_dir, monitors):
     desktop = FakeDesktop()
     desktop.monitors = monitors
-    return display_detection.detect_layout(config_dir, desktop)
+    return display_store.load(config_dir, display_detection.detect_displays(desktop))
 
 
 def edit_the_layout(layout):

@@ -14,6 +14,8 @@ MAX_PIXELS = 250_000_000
 
 PREVIEW_MAX_PIXELS = 4_000_000
 PREVIEW_CACHE_SIZE = 8
+_ORIENTATION = 0x0112
+_QUARTER_TURNS = (5, 6, 7, 8)
 _preview_cache: OrderedDict[tuple[str, int, int], Image.Image] = OrderedDict()
 
 
@@ -21,9 +23,11 @@ class SourceImageError(Exception):
     """One of the user's images can't be used; the message says which and why."""
 
 
-def open_source_image(path) -> Image.Image:
+def open_source_image(path: str | os.PathLike[str], min_size: tuple[int, int] | None) -> Image.Image:
     """Open one of the user's images, upright as its EXIF orientation says, in RGB.
 
+    ``min_size`` is the (width, height) the upright image must at least have; a JPEG is then
+    decoded at the smallest reduced scale that still has both, and ``None`` decodes in full.
     An image over MAX_PIXELS is refused from its header, before it is decoded.
     """
     try:
@@ -46,6 +50,10 @@ def open_source_image(path) -> Image.Image:
             )
             raise SourceImageError(message)
         try:
+            if min_size is not None:
+                # The draft applies to the stored pixels, so a quarter turn swaps the request.
+                turned = source.getexif().get(_ORIENTATION) in _QUARTER_TURNS
+                source.draft("RGB", min_size[::-1] if turned else min_size)
             image = _upright_rgb(source)
         except (OSError, ValueError) as error:  # truncated or corrupt image data
             message = f"The image {path} can't be read: {error}"
@@ -53,7 +61,7 @@ def open_source_image(path) -> Image.Image:
     return image
 
 
-def open_preview_image(path) -> Image.Image:
+def open_preview_image(path: str | os.PathLike[str]) -> Image.Image:
     """Like open_source_image, but at most PREVIEW_MAX_PIXELS and remembered until the file changes.
 
     The caller must not modify the result. Only the UI thread calls this, so no lock.
@@ -61,20 +69,20 @@ def open_preview_image(path) -> Image.Image:
     try:
         stat = os.stat(path)
     except OSError:
-        return open_source_image(path)  # raises the SourceImageError that says why
+        return open_source_image(path, None)  # raises the SourceImageError that says why
     key = (os.fspath(path), stat.st_mtime_ns, stat.st_size)
     cached = _preview_cache.get(key)
     if cached is not None:
         _preview_cache.move_to_end(key)
         return cached
-    image = _downscaled(open_source_image(path))
+    image = _downscaled(open_source_image(path, None))
     _preview_cache[key] = image
     while len(_preview_cache) > PREVIEW_CACHE_SIZE:
         _preview_cache.popitem(last=False)
     return image
 
 
-def source_icon_image(path, size: tuple[int, int]) -> Image.Image | None:
+def source_icon_image(path: str | os.PathLike[str], size: tuple[int, int]) -> Image.Image | None:
     """The image at ``path`` shrunk to fit ``size`` keeping its aspect, or None if it can't be read.
 
     Opened on its own, not through the preview cache, so a long source list doesn't evict
@@ -100,7 +108,16 @@ def _is_too_large(source: Image.Image) -> bool:
 
 def _upright_rgb(source: Image.Image) -> Image.Image:
     upright = ImageOps.exif_transpose(source)
-    return upright if upright.mode == "RGB" else upright.convert("RGB")
+    if upright.mode == "RGB":
+        return upright
+    if not upright.has_transparency_data:
+        return upright.convert("RGB")
+    # Black, like the desktop canvas behind the image: convert("RGB") would keep the colour
+    # hidden under transparent pixels.
+    rgba = upright.convert("RGBA")
+    opaque = Image.new("RGB", rgba.size)
+    opaque.paste(rgba, mask=rgba.getchannel("A"))
+    return opaque
 
 
 def _downscaled(image: Image.Image) -> Image.Image:

@@ -208,14 +208,14 @@ def test_save_asks_before_removing_sources_of_a_vanished_display(gui_env, superp
 def test_a_display_change_during_a_modal_waits_until_it_closes(gui_env, superpaper, monkeypatch):
     panel = open_multi_after_a_display_vanished(gui_env, superpaper)
 
-    def question(message, msg_type="Info", parent=None, style="OK"):
+    def question(message, title="Info", parent=None):
         with gui_env.ui.message.modal():
             gui_env.change_displays(THREE_DISPLAYS)
             gui_env.wait_for_displays(superpaper)
             assert current_panel(panel) is panel
         return True
 
-    monkeypatch.setattr(gui_env.ui.editor, "show_message_dialog", question)
+    monkeypatch.setattr(gui_env.ui.editor, "confirm", question)
 
     assert panel._save_profile() is True
 

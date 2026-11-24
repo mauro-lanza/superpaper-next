@@ -1,6 +1,6 @@
 # Superpaper Next
 
-A community-maintained fork of [Superpaper](https://github.com/hhannine/superpaper), an advanced multi monitor wallpaper manager for **Linux**, with partial, unvalidated support for **Windows** and **MacOS** (on MacOS hotkeys are unsupported).
+A community-maintained fork of [Superpaper](https://github.com/hhannine/superpaper), an advanced multi monitor wallpaper manager for **Linux**, with partial, unvalidated support for **Windows** and **MacOS**.
 
 This fork focuses on KDE Plasma 6 support and the wallpaper selection experience. Development and testing is primarily done on Plasma 6; other desktop environments may work but are not actively tested.
 
@@ -39,7 +39,6 @@ This fork focuses on KDE Plasma 6 support and the wallpaper selection experience
 - Command-line interface
 - Run a script after wallpaper change: [example script](./docs/examples/run-after-wp-change.py)
 - Tray applet for slideshow control. On Linux a native StatusNotifierItem tray is used when a `StatusNotifierWatcher` is on the session bus (left-click opens the settings, middle-click advances the wallpaper, right-click shows the menu with the profiles under **Profiles**); otherwise the classic wx tray is used.
-- Hotkey support for easy slideshow control (Linux and Windows; off by default and unsupported on MacOS)
 - Align test tool to help fine tune your settings (Accessible only from GUI)
 
 In the above banner photo you can see the PPI and bezel corrections in action. The left one is a 27" 4K display, and the right one is a 25" 1440p display.
@@ -102,7 +101,7 @@ You can either:
 
 - Open Superpaper as a graphical application
   - First run opens help and wallpaper settings. Disable 'show help at start' to run Superpaper silently in the background.
-  - Control Superpaper in the background from the tray menu or with hotkeys.
+  - Control Superpaper in the background from the tray menu.
 - Call it from the [command-line](./docs/cli-usage.md)
   - Perspective profiles are created in the GUI and selected with `--perspective`.
 

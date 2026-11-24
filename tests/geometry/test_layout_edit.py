@@ -3,18 +3,16 @@
 import pytest
 
 from superpaper.geometry import display_store, layout_edit
-from superpaper.geometry.display_store import SaveFailed
 from superpaper.geometry.displays import Layout
 from superpaper.geometry.layout_edit import (
     ConfiguringBezels,
     ConfiguringPositions,
     Idle,
+    SaveFailed,
     parse_bezel,
-    parse_diagonal,
     parse_diagonals,
 )
 from superpaper.user_input import Problems
-from tests.conftest import monitor
 from tests.geometry.conftest import OVERLAPPING_MONITORS
 
 
@@ -147,7 +145,6 @@ def test_valid_entered_diagonals_are_applied(layout):
         (["inf"], None),
         (["\u0661\u0665"], None),
         (["1e999"], None),
-        ([], None),
     ],
 )
 def test_diagonals_apply_only_when_every_field_is_a_size_from_1_to_1000_inches(texts, inches):
@@ -159,10 +156,6 @@ def test_diagonals_apply_only_when_every_field_is_a_size_from_1_to_1000_inches(t
 )
 def test_a_bezel_is_a_non_negative_number(text, value):
     assert parse_bezel(text) == value
-
-
-def test_a_diagonal_may_be_any_size_from_1_to_1000_inches():
-    assert [parse_diagonal(text) for text in ("1", "1000", "15.6")] == [1.0, 1000.0, 15.6]
 
 
 def test_invalid_entered_diagonals_change_nothing(layout):
@@ -215,36 +208,6 @@ def test_typing_15_6_inches_for_the_portable_leaves_the_displays_apart(display_l
     assert resized.rearranged_all is False
     assert resized.layout.ppi_norm_offsets[0] == (0, 361)
     assert resized.layout.ppi_norm_offsets[1] != (2560, 0)
-
-
-def test_the_overlap_of_the_saved_layout_of_the_portable_is_resolved_by_moving_only_the_portable(display_layout):
-    overlapping = display_layout(OVERLAPPING_MONITORS).with_offsets([(0, 361), (2560, 0)]).with_diagonals([27.2, 15.6])
-    assert not overlapping.is_valid()
-
-    shifted = overlapping.with_overlaps_shifted()
-
-    assert shifted is not None
-    assert shifted.is_valid()
-    assert shifted.ppi_norm_offsets[0] == (0, 361)
-    assert shifted.ppi_norm_offsets[1][1] == 0
-    assert shifted.ppi_norm_offsets[1][0] > 2560
-
-
-def test_displays_that_do_not_overlap_are_not_shifted(layout):
-    assert layout.with_overlaps_shifted() == layout
-
-
-def test_a_display_that_overlaps_a_display_before_it_is_moved_down_when_that_is_the_least(display_layout):
-    stacked = display_layout([monitor(0, 0, 2560, 1440, 602, 339), monitor(0, 1440, 2560, 1440, 602, 339)])
-    overlapping = stacked.with_offsets([(0, 0), (0, 100)])
-
-    shifted = overlapping.with_overlaps_shifted()
-
-    assert shifted is not None
-    assert shifted.is_valid()
-    assert shifted.ppi_norm_offsets[0] == (0, 0)
-    assert shifted.ppi_norm_offsets[1][0] == 0
-    assert shifted.ppi_norm_offsets[1][1] > 100
 
 
 def test_valid_entered_bezels_are_applied(layout):

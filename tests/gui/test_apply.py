@@ -376,7 +376,7 @@ def test_the_dropdown_marker_follows_every_change_of_the_running_profile(gui_env
     gui_env.start_profile(running_work, "Home")
     assert marked() == ["Home" + RUNNING]
 
-    running_work.start_profile_by_id(gui_env.saved(running_work, "Work").profile_id)  # what a hotkey does
+    running_work.start_profile(gui_env.saved(running_work, "Work"))
     assert marked() == ["Work" + RUNNING]
 
     gui_env.profile_file("Work").unlink()

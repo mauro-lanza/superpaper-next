@@ -1,6 +1,6 @@
 """Fixtures for the GUI tests: a real wx.App on the current display, Superpaper started
 against scratch directories and a fixed pair of monitors, and recorders in place of
-everything that would reach the user's desktop (dialogs, hotkeys, wallpaper commands).
+everything that would reach the user's desktop (dialogs, wallpaper commands).
 
 Each test gets its own environment: starting Superpaper takes milliseconds, and tests then
 can't depend on each other's state.
@@ -24,15 +24,13 @@ from superpaper.desktop.tray_menu import Submenu
 from superpaper.geometry import display_store
 from superpaper.geometry.perspective import Perspective, Swivel, SwivelAxis, Tilt
 from superpaper.profiles.profile_id import ProfileId
-from superpaper.settings import read_settings
+from superpaper.settings import Settings, read_settings
 from superpaper.unsaved_changes import Answer, ApplyAnswer
 from tests.conftest import TWO_DISPLAYS
 from tests.gui.snapshots import Snapshots
 
 HERE = Path(__file__).parent
-SETTINGS = (
-    "logging=false\nuse hotkeys=false\nshow_help_at_start=false\nset_command=true {image}\nwarn_large_img=false\n"
-)
+SETTINGS = "logging=false\nshow_help_at_start=false\nset_command=true {image}\nwarn_large_img=false\n"
 SLIDESHOW = "name={name}\nspanmode=single\nslideshow=true\ndelay=600\nsortmode=alphabetical\ndisplay0paths={images}\n"
 STILL = "name={name}\nspanmode=single\nslideshow=false\ndisplay0paths={images}\n"
 
@@ -41,23 +39,6 @@ def pytest_collection_modifyitems(items):
     for item in items:
         if HERE in item.path.parents:
             item.add_marker(pytest.mark.gui)
-
-
-class RecordingSystemHotkey:
-    """system_hotkey's SystemHotkey without grabbing any keys on the user's desktop."""
-
-    def __init__(self, consumer="callback", check_queue_interval=0.01):
-        self.consumer = consumer
-        self.bound = {}
-
-    def register(self, hotkey, *args, callback=None, overwrite=False):
-        self.bound[tuple(hotkey)] = callback if self.consumer == "callback" else args
-
-    def unregister(self, hotkey):
-        del self.bound[tuple(hotkey)]
-
-    def press(self, hotkey):
-        self.consumer("an event", hotkey, [self.bound[tuple(hotkey)]])
 
 
 @pytest.fixture(scope="session")
@@ -131,7 +112,7 @@ class GuiEnv:
 
     def start(self, *, settings=None, startup_profile=None):
         """A running Superpaper, quit when the test ends."""
-        settings = settings or read_settings(self.settings_path, hotkeys_by_default=True)
+        settings = settings or read_settings(self.settings_path) or Settings()
         superpaper = self.ui.app.start_superpaper(self.ui.wx.Frame(None), self.paths, settings, linux, startup_profile)
         self.started.append(superpaper)
         return superpaper
@@ -234,17 +215,6 @@ class GuiEnv:
     def child_of(self, frame, kind):
         return next(child for child in frame.GetChildren() if isinstance(child, kind))
 
-    def enable_hotkeys(self, superpaper):
-        """Hotkeys on, bound through the recording system_hotkey."""
-        superpaper.hotkeys = self.ui.hotkeys.Hotkeys(
-            next_wallpaper=superpaper.session.next,
-            pause=superpaper.session.toggle_pause,
-            start_profile=superpaper.start_profile_by_id,
-            call_soon=self.ui.wx.CallAfter,
-            report=lambda message: self.dialogs.append(("hotkeys", "Error", message.splitlines()[0])),
-            show_problems=True,
-        )
-
     def yes_to_message_dialogs(self):
         """Answer yes/no questions (as the editor asks before deleting a profile) with Yes."""
         self.answer_yes = True
@@ -277,7 +247,6 @@ def seed_images(images):
 def gui_env(wx_app, app_paths, tmp_path, monkeypatch):
     import wx
 
-    import superpaper.desktop.hotkeys as hotkeys
     import superpaper.session
     import superpaper.ui.app as app
     import superpaper.ui.browse_dialog as browse_dialog
@@ -296,7 +265,6 @@ def gui_env(wx_app, app_paths, tmp_path, monkeypatch):
         editor=editor,
         message=message,
         help=help_dialog,
-        hotkeys=hotkeys,
         perspective_dialog=perspective_dialog,
         session=superpaper.session,
         settings_dialog=settings_dialog,
@@ -317,7 +285,6 @@ def gui_env(wx_app, app_paths, tmp_path, monkeypatch):
     monkeypatch.setattr(linux, "detect_monitors", lambda: TWO_DISPLAYS)
     monkeypatch.setattr(linux, "watch_displays", env.watch_displays)
     monkeypatch.setattr(app, "DISPLAY_CHANGE_DEBOUNCE_MS", 50)
-    monkeypatch.setitem(sys.modules, "system_hotkey", SimpleNamespace(SystemHotkey=RecordingSystemHotkey))
     monkeypatch.setattr(sni_tray, "sni_supported", lambda: False)
 
     real_run = subprocess.run
@@ -328,17 +295,20 @@ def gui_env(wx_app, app_paths, tmp_path, monkeypatch):
 
     monkeypatch.setattr(process.subprocess, "run", recording_run)
 
-    def dialog_recorder(source):
-        def record_dialog(message, msg_type="Info", parent=None, style="OK"):
-            env.dialogs.append((source, msg_type, str(message).splitlines()[0]))
+    def dialog_recorder(source, answer):
+        def record_dialog(message, title="Info", parent=None):
+            env.dialogs.append((source, title, str(message).splitlines()[0]))
             with ui.message.modal():
-                return env.answer_yes if style == "YES_NO" else None
+                return answer()
 
         return record_dialog
 
     for name, module in list(sys.modules.items()):
-        if name.startswith("superpaper.ui.") and hasattr(module, "show_message_dialog"):
-            monkeypatch.setattr(module, "show_message_dialog", dialog_recorder(name.rsplit(".", 1)[-1]))
+        source = name.rsplit(".", 1)[-1]
+        if name.startswith("superpaper.ui.") and hasattr(module, "show_message"):
+            monkeypatch.setattr(module, "show_message", dialog_recorder(source, lambda: None))
+        if name.startswith("superpaper.ui.") and hasattr(module, "confirm"):
+            monkeypatch.setattr(module, "confirm", dialog_recorder(source, lambda: env.answer_yes))
         if name.startswith("superpaper.ui.") and hasattr(module, "ask_unsaved_changes"):
             monkeypatch.setattr(module, "ask_unsaved_changes", env.ask_unsaved_changes)
         if name.startswith("superpaper.ui.") and hasattr(module, "ask_apply_with_unsaved_displays"):
@@ -379,7 +349,7 @@ def snapshots(request, gui_env):
 def saved_layout(gui_env):
     """The layout of the two fixed monitors as a user has saved it: the default positions and
     one perspective, "wall", that isn't the default."""
-    layout = display_detection.detect_layout(gui_env.paths.config, linux)
+    layout = display_store.load(gui_env.paths.config, display_detection.detect_displays(linux))
     count = len(layout.displays)
     viewer_position = (0.0, 0.0, layout.max_ppi() * 1200 / 25.4)
     wall = Perspective(

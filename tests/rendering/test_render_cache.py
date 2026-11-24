@@ -2,14 +2,12 @@
 
 import os
 
+import pytest
 from PIL import Image
 
 from superpaper.rendering import render_cache
+from superpaper.rendering.render_cache import Slot
 from tests.conftest import TINY_DISPLAYS, pixels
-
-
-def profile_slot(cache, name):
-    return render_cache.slot(cache, name)
 
 
 def names(directory):
@@ -26,7 +24,7 @@ def touch(directory, *filenames, modified=None):
 
 
 def test_renders_take_turns_so_the_one_on_screen_is_never_rewritten(tmp_path):
-    work = profile_slot(tmp_path, "work")
+    work = Slot(tmp_path, "work")
     image = Image.new("RGB", (5, 3), (10, 20, 30))
 
     first = render_cache.save(work, image, extension="png", signature="s")
@@ -42,8 +40,44 @@ def test_renders_take_turns_so_the_one_on_screen_is_never_rewritten(tmp_path):
         assert (saved.format, saved.size, saved.getpixel((4, 2))) == ("PNG", (5, 3), (10, 20, 30))
 
 
+@pytest.mark.parametrize(("newer", "older"), [("a", "b"), ("b", "a")])
+def test_the_next_render_replaces_the_older_one(tmp_path, newer, older):
+    touch(tmp_path, f"work-{newer}.png", modified=2_000_000_000)
+    touch(tmp_path, f"work-{older}.png", modified=1_000_000_000)
+
+    saved = render_cache.save(Slot(tmp_path, "work"), Image.new("RGB", (1, 1)), extension="png", signature="s")
+
+    assert saved.name == f"work-{older}.png"
+
+
+def test_a_new_render_leaves_none_of_the_pieces_of_the_one_it_replaces(tmp_path, display_layout):
+    touch(tmp_path, "work-a.png", modified=2_000_000_000)
+    touch(tmp_path, "work-b.png", "work-b-crop-0.png", "work-b-crop-1.png", "work-b-crop-2.png", modified=1_000_000_000)
+    work = Slot(tmp_path, "work")
+
+    saved = render_cache.save(work, Image.new("RGB", (5, 3)), extension="png", signature="s")
+    pieces = render_cache.cut_pieces(saved, display_layout(TINY_DISPLAYS))
+
+    latest = render_cache.latest(work)
+    assert latest is not None
+    assert latest.pieces == tuple(pieces)
+    assert len(pieces) == 2
+
+
+def test_a_render_whose_signature_was_not_written_is_unknown(tmp_path):
+    touch(tmp_path, "work-a.jpg", modified=2_000_000_000)
+    touch(tmp_path, "work-b.jpg", "work-b.jpg.sig", modified=1_000_000_000)
+    (tmp_path / "work-b.jpg.sig").write_text("old", encoding="utf-8")
+    transparent = Image.new("RGBA", (1, 1))  # JPEG can't hold it: the save stops before the signature
+
+    with pytest.raises(OSError, match="RGBA"):
+        render_cache.save(Slot(tmp_path, "work"), transparent, extension="jpg", signature="new")
+
+    assert not (tmp_path / "work-b.jpg.sig").exists()
+
+
 def test_renders_are_saved_with_the_given_extension(tmp_path):
-    saved = render_cache.save(profile_slot(tmp_path, "work"), Image.new("RGB", (5, 3)), extension="jpg", signature="s")
+    saved = render_cache.save(Slot(tmp_path, "work"), Image.new("RGB", (5, 3)), extension="jpg", signature="s")
 
     assert saved.name == "work-a.jpg"
     with Image.open(saved) as image:
@@ -90,28 +124,17 @@ def test_the_latest_render_comes_with_its_pieces_in_display_order(tmp_path):
     pieces = [f"work-b-crop-{index}.png" for index in range(12)]
     touch(tmp_path, "work-b.png", *pieces, modified=2_000_000_000)
     (tmp_path / "work-b.png.sig").write_text("what it was made from", encoding="utf-8")
+    touch(tmp_path, "plain-a.png")
 
-    latest = render_cache.latest(profile_slot(tmp_path, "work"))
+    latest = render_cache.latest(Slot(tmp_path, "work"))
 
     assert latest == render_cache.Rendered(
-        tmp_path / "work-b.png", [tmp_path / piece for piece in pieces], 2_000_000_000, "what it was made from"
+        tmp_path / "work-b.png", tuple(tmp_path / piece for piece in pieces), "what it was made from"
     )
-    assert render_cache.latest(profile_slot(tmp_path, "home")) is None
-
-
-def test_a_render_without_a_signature_has_none(tmp_path):
-    touch(tmp_path, "work-a.png")
-
-    assert render_cache.latest(profile_slot(tmp_path, "work")).signature is None
-
-
-def test_the_next_render_replaces_the_older_one(tmp_path):
-    touch(tmp_path, "work-a.png", modified=2_000_000_000)
-    touch(tmp_path, "work-b.png", modified=1_000_000_000)
-
-    saved = render_cache.save(profile_slot(tmp_path, "work"), Image.new("RGB", (1, 1)), extension="png", signature="s")
-
-    assert saved.name == "work-b.png"
+    assert render_cache.latest(Slot(tmp_path, "home")) is None
+    unsigned = render_cache.latest(Slot(tmp_path, "plain"))
+    assert unsigned is not None
+    assert unsigned.signature is None
 
 
 def test_the_sweep_removes_only_renders_of_profiles_that_are_gone(tmp_path):

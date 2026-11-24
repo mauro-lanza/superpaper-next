@@ -10,13 +10,13 @@ from dataclasses import dataclass
 
 from superpaper.geometry import canvas, display_store
 from superpaper.geometry.displays import Layout
-from superpaper.geometry.perspective import Perspective, Swivel, SwivelAxis, Tilt
+from superpaper.geometry.perspective import DegeneratePerspective, Perspective, Swivel, SwivelAxis, Tilt
 from superpaper.geometry.units import mm_to_pixels, pixels_to_mm
 from superpaper.user_input import Offset, Problems, parse_float
 
 # "default" and "disabled" clash with the editor's perspective choices.
 _RESERVED_PERSPECTIVE_NAMES = frozenset({"default", "disabled", display_store.NO_DEFAULT_PERSPECTIVE.casefold()})
-ROTATION_CELL_NAMES = (
+_ROTATION_CELL_NAMES = (
     "Swivel angle",
     "Sw. ax. lat. off.",
     "Sw. ax. dep. off.",
@@ -39,7 +39,7 @@ class PerspectiveForm:
     swivel_axes: tuple[int, ...]
     """The swivel axis chosen for each display (a SwivelAxis value)."""
     rotation_cells: tuple[tuple[str, ...], ...]
-    """Each display's texts, in the order of ROTATION_CELL_NAMES."""
+    """Each display's texts, in the order of _ROTATION_CELL_NAMES."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -114,37 +114,39 @@ def stage_perspective(
         return Problems(("Profile name is required.",))
     if layout.perspective(form.name) is None:
         try:
-            check_new_perspective_name(form.name)
+            _check_new_perspective_name(form.name)
         except ValueError as error:
             return Problems((str(error),))
     try:
-        viewer_offset_mm = parse_viewer_offsets_mm(form.viewer_offsets)
-        swivels, tilts = parse_rotations_mm(form.swivel_axes, form.rotation_cells)
+        viewer_offset_mm = _parse_viewer_offsets_mm(form.viewer_offsets)
+        swivels, tilts = _parse_rotations_mm(form.swivel_axes, form.rotation_cells)
     except ValueError as error:
         return Problems((str(error),))
-    perspective = perspective_from_mm(
+    perspective = _perspective_from_mm(
         form.name, layout.max_ppi(), form.central_display, viewer_offset_mm, swivels, tilts
     )
 
     # Checked as they are, so the layout is only changed once they are accepted.
-    if warn_large and not confirmed:
+    try:
         size = canvas.source_size(layout.ppi_norm_crops(offsets), perspective)
-        if canvas.exceeds_perspective_limit(size):
-            return NeedsConfirm(_large_image_warning(size))
+    except DegeneratePerspective as error:
+        return Problems((str(error),))
+    if warn_large and not confirmed and canvas.exceeds_perspective_limit(size):
+        return NeedsConfirm(_large_image_warning(size))
 
     return Staged(
         layout.with_perspective(perspective, use_perspective=form.use_perspective, is_default=form.is_default)
     )
 
 
-def check_new_perspective_name(name: str) -> None:
+def _check_new_perspective_name(name: str) -> None:
     """Raise ValueError if ``name`` cannot be given to a perspective being saved."""
     if name.casefold() in _RESERVED_PERSPECTIVE_NAMES:
         message = f"'{name}' is reserved; choose another perspective name."
         raise ValueError(message)
 
 
-def parse_viewer_offsets_mm(texts: Sequence[str]) -> list[float]:
+def _parse_viewer_offsets_mm(texts: Sequence[str]) -> list[float]:
     """The viewer's (horizontal, vertical, distance) offsets in millimetres, as typed.
 
     Raises ValueError saying what is wrong with them; the distance must be positive.
@@ -160,20 +162,20 @@ def parse_viewer_offsets_mm(texts: Sequence[str]) -> list[float]:
     return offsets
 
 
-def parse_rotations_mm(
+def _parse_rotations_mm(
     axes: Sequence[int], cells: Sequence[Sequence[str]]
 ) -> tuple[list[tuple[SwivelAxis, float, float, float]], list[tuple[float, float, float]]]:
     """The swivels and tilts of the displays in the dialog's grid, as typed.
 
     ``axes`` holds each display's swivel axis choice (a SwivelAxis value) and ``cells`` its
-    texts in the order of ROTATION_CELL_NAMES. Raises ValueError naming the display and
+    texts in the order of _ROTATION_CELL_NAMES. Raises ValueError naming the display and
     column of a cell that is not a number.
     """
     swivels = []
     tilts = []
     for display, (axis, row) in enumerate(zip(axes, cells, strict=True)):
         numbers = []
-        for name, text in zip(ROTATION_CELL_NAMES, row, strict=True):
+        for name, text in zip(_ROTATION_CELL_NAMES, row, strict=True):
             number = parse_float(text)
             if number is None:
                 message = f"Display {display}, '{name}': '{text}' is not a number; separate decimals with a point."
@@ -184,7 +186,7 @@ def parse_rotations_mm(
     return swivels, tilts
 
 
-def perspective_from_mm(
+def _perspective_from_mm(
     name: str,
     max_ppi: float,
     central_display: int,

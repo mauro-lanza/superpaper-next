@@ -6,18 +6,17 @@ fields, and calls the functions here to turn it into a Profile and to tell wheth
 changed. Saving, deleting, reverting and applying what it describes is superpaper.profile_actions.
 """
 
+import os
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import assert_never
 
-from superpaper.geometry.canvas import DisplayArea
+from superpaper.geometry.canvas import DisplayArea, source_size
 from superpaper.geometry.displays import Layout
-from superpaper.geometry.perspective import Default, PerspectiveChoice
-from superpaper.hotkey_keys import format_hotkey, parse_hotkey, unparsable_problem
+from superpaper.geometry.perspective import Default, DegeneratePerspective, PerspectiveChoice
 from superpaper.profiles import profile_file
 from superpaper.profiles.profile_file import Correction, OffsetsCorrection, Profile, SpanMode
-from superpaper.profiles.profile_store import StoredProfile
-from superpaper.profiles.selection import SortMode, is_file
+from superpaper.profiles.selection import SortMode
 from superpaper.user_input import Offset, OffsetError, parse_float
 
 SORT_LABELS: dict[SortMode, str] = {
@@ -29,6 +28,8 @@ SORT_LABELS: dict[SortMode, str] = {
 _SORT_MODE_OF_LABEL = {label: mode for mode, label in SORT_LABELS.items()}
 
 SpanGroups = tuple[tuple[int, ...], ...]
+MAX_SPANGROUP_DISPLAY = 9
+"""The profile file writes a span group as one digit per display."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,8 +42,6 @@ class ProfileForm:
     delay_minutes: str
     sort_label: str | None
     """One of the SORT_LABELS, or None while the dropdown has no choice."""
-    hotkey_enabled: bool
-    hotkey: str
     offsets_applied: bool
     offsets: tuple[str, ...]
     """The "x,y" field of each display."""
@@ -91,6 +90,30 @@ def display_areas(layout: Layout, span_mode: SpanMode) -> list[DisplayArea]:
             return layout.real_areas()
         case _:
             assert_never(span_mode)
+
+
+def source_quality_size(layout: Layout, choice: PerspectiveChoice, offsets: Sequence[Offset]) -> tuple[int, int] | None:
+    """The size an image should have to fill the displays of ``layout`` with the manual
+    ``offsets`` and perspective ``choice``; None if the perspective turns a display edge-on."""
+    perspective = layout.perspective_for(choice) if layout.use_perspective else None
+    try:
+        return source_size(layout.ppi_norm_crops(offsets), perspective)
+    except DegeneratePerspective:
+        return None
+
+
+def fit_to_displays(form: ProfileForm, count: int) -> ProfileForm:
+    """``form`` with the offsets and span group choices cut or filled up to ``count`` displays.
+    Per-display sources stay as they are."""
+    return replace(
+        form,
+        offsets=_fitted(form.offsets, count, "0,0"),
+        spangroup_choices=_fitted(form.spangroup_choices, count, 0),
+    )
+
+
+def _fitted[T](values: Sequence[T], count: int, filler: T) -> tuple[T, ...]:
+    return tuple(values[:count]) + (filler,) * (count - len(values))
 
 
 def applied_offsets(applied: bool, fields: Sequence[str]) -> tuple[Offset, ...]:
@@ -145,8 +168,6 @@ def blank_form(layout: Layout) -> ProfileForm:
         slideshow=False,
         delay_minutes="",
         sort_label=None,
-        hotkey_enabled=False,
-        hotkey="",
         offsets_applied=False,
         offsets=count * ("0,0",),
         spangroups_enabled=False,
@@ -160,7 +181,10 @@ def blank_form(layout: Layout) -> ProfileForm:
 
 
 def form_from(profile: Profile, layout: Layout) -> ProfileForm:
-    """The form that shows ``profile`` for the displays of ``layout``."""
+    """The form that shows ``profile`` for the displays of ``layout``.
+
+    Legacy ppi=, diagonal_inches= and bezels= corrections are not shown, so saving drops
+    them: layouts own them now."""
     corrections = profile.display_corrections(layout.resolutions())
     # An old profile that corrects positions without saying advanced, is shown as advanced.
     legacy_advanced = profile.spanmode == "single" and bool(corrections.ppimode or profile.bezels or profile.offsets)
@@ -181,8 +205,6 @@ def form_from(profile: Profile, layout: Layout) -> ProfileForm:
         slideshow=profile.slideshow,
         delay_minutes=str(profile.delay / 60) if profile.slideshow else "",
         sort_label=SORT_LABELS[profile.sortmode] if profile.slideshow else None,
-        hotkey_enabled=bool(profile.hotkey),
-        hotkey=format_hotkey(profile.hotkey),
         offsets_applied=bool(profile.offsets),
         offsets=offsets,
         spangroups_enabled=bool(spangroups),
@@ -217,9 +239,6 @@ def parse_form(form: ProfileForm) -> tuple[Profile, list[str]]:
                 delay = 60 * minutes  # minutes here, seconds in the file
         if form.sort_label is not None:
             sortmode = _SORT_MODE_OF_LABEL[form.sort_label]
-    hotkey = parse_hotkey(form.hotkey) if form.hotkey_enabled else None
-    if form.hotkey_enabled and (problem := unparsable_problem(form.hotkey)):
-        problems.append(problem)
     # manual offsets; an empty field means no offset
     corrections: tuple[Correction, ...] = ()
     if form.offsets_applied:
@@ -247,15 +266,20 @@ def parse_form(form: ProfileForm) -> tuple[Profile, list[str]]:
     else:
         sources = (tuple(path for _, path in form.sources),)
 
+    spangroups = applied_spangroups(form)
+    if spangroups and any(display > MAX_SPANGROUP_DISPLAY for group in spangroups for display in group):
+        problems.append(
+            f"Span groups can only include displays 0 to {MAX_SPANGROUP_DISPLAY}: the profile file writes one digit per display."
+        )
+
     profile = Profile(
         name=form.name,
         spanmode=form.span_mode,
-        spangroups=applied_spangroups(form),
+        spangroups=spangroups,
         slideshow=form.slideshow,
         delay=delay,
         sortmode=sortmode,
         sources=sources,
-        hotkey=hotkey,
         perspective=form.perspective,
         zoom=zoom,
         pan=pan,
@@ -273,19 +297,17 @@ def fingerprint(form: ProfileForm) -> str:
     return profile_file.serialize(profile) + "\n".join(problems)
 
 
-def chosen_images(profile: Profile, picked: Sequence[str] | None, loaded: StoredProfile | None) -> list[str] | None:
+def chosen_images(profile: Profile, picked: Sequence[str] | None, loaded_images: list[str] | None) -> list[str] | None:
     """The images chosen to show: those clicked in the source list (one, or one per display
-    in multi mode), or else for one image spanned (single or advanced) what the profile
-    open in the editor shows.
+    in multi mode), or else for one image spanned (single or advanced) the images the
+    profile open in the editor shows.
 
-    That profile is the one loaded, by its original name, so a rename in progress keeps
-    the selection. None for one image per display without a click, which a slideshow or
-    the first images of the sources provide.
+    ``loaded_images`` are those of the profile as loaded, by its original name, so a
+    rename in progress keeps the selection. None for one image per display without a
+    click, which a slideshow or the first images of the sources provide.
     """
-    if picked and all(is_file(image) for image in picked):
+    if picked and all(os.path.isfile(image) for image in picked):
         return list(picked)
     if profile.spanmode == "multi":
         return None
-    if loaded is not None:
-        return loaded.selection.images
-    return None
+    return loaded_images

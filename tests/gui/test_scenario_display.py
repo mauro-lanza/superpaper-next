@@ -7,7 +7,8 @@ verifies is the sequence (edit, save, revert, restart) against the layout files.
 from dataclasses import replace
 
 from superpaper.desktop import linux
-from superpaper.geometry.display_detection import detect_layout
+from superpaper.geometry import display_store
+from superpaper.geometry.display_detection import detect_displays
 
 
 def state(layout):
@@ -24,7 +25,7 @@ def state(layout):
 
 def assert_restart_loads(layout, config):
     """Load the layout afresh, as the next start does, and expect the editor's."""
-    again = state(detect_layout(config, linux))
+    again = state(display_store.load(config, detect_displays(linux)))
     differences = {name: (value, again[name]) for name, value in state(layout).items() if again[name] != value}
     assert not differences
 
@@ -124,7 +125,7 @@ def test_display_settings_and_perspectives(gui_env, saved_layout, snapshots):
     files_before = (layout_file(), perspective_file())
     saved = dialog.onSave(None)
     # Staged with the band: nothing is written until the band's Save.
-    assert saved is True
+    assert saved == "desk"
     assert layout().default_perspective == "desk"
     assert (layout_file(), perspective_file()) == files_before
     assert superpaper.session.layout.default_perspective is None
@@ -184,13 +185,13 @@ def test_display_settings_and_perspectives(gui_env, saved_layout, snapshots):
     gui_env.settle(superpaper)
     warned = gui_env.shown()
     snapshot("couch-refused")
-    assert refused is False
+    assert refused is None
     assert [kind for _, kind, _ in warned] == ["Info"]
     assert state(layout()) == state_before
     assert (layout_file(), perspective_file()) == files_before
     gui_env.answer_yes = True
     accepted = dialog.onSave(None)
-    assert accepted is True
+    assert accepted == "couch"
     assert (layout_file(), perspective_file()) == files_before
     save_band()
     snapshot("couch-accepted")
@@ -217,7 +218,7 @@ def test_display_settings_and_perspectives(gui_env, saved_layout, snapshots):
     assert "[desk]" not in perspective_file()
 
     # Restart: the saved layout is what loads, and the session's layout is the saved one.
-    restarted = detect_layout(config, linux)
+    restarted = display_store.load(config, detect_displays(linux))
     assert_restart_loads(layout(), config)
     assert state(superpaper.session.layout) == state(restarted)
     assert not list(config.glob(".superpaper-*.tmp"))

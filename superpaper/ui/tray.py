@@ -6,7 +6,6 @@ menu, through the same methods of TaskBarIcon.
 
 import logging
 from collections.abc import Callable
-from functools import partial
 from typing import assert_never
 
 import wx  # ty:ignore[unresolved-import]
@@ -14,9 +13,11 @@ import wx.adv  # ty:ignore[unresolved-import]
 
 from superpaper.__version__ import __version__
 from superpaper.desktop.backend import Desktop
-from superpaper.desktop.tray_menu import Check, Item, MenuEntry, Notice, Separator, Submenu, failure_notice
-from superpaper.paths import resource
-from superpaper.ui.message import show_message_dialog
+from superpaper.desktop.tray_menu import Check, Item, MenuEntry, Notice, Separator, Submenu, tray_menu
+from superpaper.paths import AppPaths, resource
+from superpaper.profiles.profile_store import ProfileStore, StoredProfile
+from superpaper.session import Session
+from superpaper.ui.message import show_message
 
 logger = logging.getLogger(__name__)
 
@@ -59,30 +60,30 @@ class TaskBarIcon(wx.adv.TaskBarIcon):
 
     The application provides what the menu does beyond the session: ``open_editor()``,
     ``open_settings()``, ``reload_profiles()``, ``start_profile(stored)``, ``next_wallpaper()`` and ``quit()``;
-    ``config_dir`` is the folder "Open Config Folder" opens.
+    ``paths.config`` is the folder "Open Config Folder" opens.
     """
 
     def __init__(
         self,
-        store,
-        session,
+        store: ProfileStore,
+        session: Session,
         desktop: Desktop,
         *,
-        last_failure,
-        config_dir,
-        open_editor,
-        open_settings,
-        reload_profiles,
-        start_profile,
-        next_wallpaper,
-        quit,
+        last_failure: Callable[[], str | None],
+        paths: AppPaths,
+        open_editor: Callable[[], None],
+        open_settings: Callable[[], None],
+        reload_profiles: Callable[[], None],
+        start_profile: Callable[[StoredProfile], None],
+        next_wallpaper: Callable[[], None],
+        quit: Callable[[], None],
     ):
         super().__init__()
         self._store = store
         self._session = session
         self._desktop = desktop
         self._last_failure = last_failure
-        self._config_dir = config_dir
+        self._config_dir = paths.config
         self._open_editor = open_editor
         self._open_settings = open_settings
         self._reload_profiles = reload_profiles
@@ -119,36 +120,20 @@ class TaskBarIcon(wx.adv.TaskBarIcon):
 
     def menu(self) -> tuple[MenuEntry, ...]:
         """The tray menu as it is now, for both the wx and the native SNI tray to show."""
-        running = self._session.running
-        profiles = tuple(
-            Check(
-                stored.profile.name,
-                partial(self._start_profile, stored),
-                checked=running is not None and running.profile_id == stored.profile_id,
-            )
-            for stored in self._store.profiles
-        ) or (Notice("(no profiles)"),)
-        failure = self._last_failure()
-        failed = (failure_notice(failure), Separator()) if failure is not None else ()
-        return (
-            *failed,
-            Item("Open Config Folder", self.open_config),
-            Item("Wallpaper Configuration", self._open_editor),
-            Item("Settings", self._open_settings),
-            Item("Reload Profiles", self._reload_profiles),
-            Separator(),
-            Submenu("Profiles", profiles),
-            Separator(),
-            Item("Next Wallpaper", self._next_wallpaper, enabled=running is not None),
-            Check(
-                "Pause Timer",
-                self._session.toggle_pause,
-                checked=self._session.paused,
-                enabled=running is not None and running.profile.slideshow,
-            ),
-            Separator(),
-            Item("About", self.on_about),
-            Item("Exit", self._quit),
+        return tray_menu(
+            self._store.profiles,
+            self._session.running,
+            paused=self._session.paused,
+            last_failure=self._last_failure(),
+            open_config_folder=self.open_config,
+            open_editor=self._open_editor,
+            open_settings=self._open_settings,
+            reload_profiles=self._reload_profiles,
+            start_profile=self._start_profile,
+            next_wallpaper=self._next_wallpaper,
+            toggle_pause=self._session.toggle_pause,
+            about=self.on_about,
+            quit=self._quit,
         )
 
     def CreatePopupMenu(self):
@@ -173,7 +158,7 @@ class TaskBarIcon(wx.adv.TaskBarIcon):
         result = self._desktop.open_folder(self._config_dir)
         if not result.ok:
             logger.error("open_config failed for %s: %s", self._config_dir, result.problem)
-            show_message_dialog("There was an error trying to open the config folder.")
+            show_message("There was an error trying to open the config folder.")
 
     def on_about(self):
         """Opens About dialog."""

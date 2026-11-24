@@ -19,7 +19,7 @@ def edges_in_unit(layout: Layout, *, use_px: bool) -> list[Edges]:
     def unit(pixels: float) -> float:
         return pixels if use_px else pixels_to_mm(pixels, max_ppi)
 
-    crops = layout.ppi_norm_crops(len(layout.displays) * [(0, 0)])
+    crops = layout.ppi_norm_crops([])
     bezels = layout.ppi_norm_bezels()
     return [
         (unit(crop[0]), unit(crop[1]), unit(crop[2] + bezel[0]), unit(crop[3] + bezel[1]))
@@ -34,7 +34,10 @@ def convert_unit(text: str, max_ppi: float, *, to_px: bool) -> str:
     """
     if not text:
         return text
-    value = float(text)
+    value = parse_float(text)
+    if value is None:
+        message = f"'{text}' is not a number."
+        raise ValueError(message)
     return str(mm_to_pixels(value, max_ppi) if to_px else pixels_to_mm(value, max_ppi))
 
 

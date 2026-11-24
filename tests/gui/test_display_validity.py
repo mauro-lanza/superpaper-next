@@ -9,7 +9,7 @@ import pytest
 
 from superpaper.desktop import linux
 from superpaper.geometry import display_store, layout_edit
-from superpaper.geometry.display_detection import detect_layout
+from superpaper.geometry.display_detection import detect_displays
 from tests.geometry.conftest import OVERLAPPING_DAT, OVERLAPPING_KEY, OVERLAPPING_MONITORS
 
 
@@ -130,7 +130,7 @@ def test_the_journey_from_typing_to_the_saved_layout_after_a_restart(gui_env, su
     assert staged.is_valid()
     assert not band.button_system_save.IsEnabled()
     assert superpaper.session.layout.ppi_norm_offsets == staged.ppi_norm_offsets
-    assert detect_layout(gui_env.paths.config, linux).ppi_norm_offsets == staged.ppi_norm_offsets
+    assert display_store.load(gui_env.paths.config, detect_displays(linux)).ppi_norm_offsets == staged.ppi_norm_offsets
 
     gui_env.quit(superpaper)
     restarted = gui_env.start()
@@ -150,7 +150,7 @@ def test_a_perspective_is_staged_with_the_band_and_written_by_its_save(gui_env, 
     dialog.cb_dispsys_def.SetValue(True)
     dialog.tclist_vieweroffs[2].SetValue("700")
 
-    assert dialog.onSave(None) is True
+    assert dialog.onSave(None) == "desk"
 
     assert not (gui_env.paths.config / "display_systems.dat").exists()
     assert not list(gui_env.paths.config.glob("*.persp"))

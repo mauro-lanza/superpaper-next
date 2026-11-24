@@ -2,6 +2,7 @@
 
 from collections.abc import Callable
 from enum import Enum
+from typing import assert_never
 
 
 class Answer(Enum):
@@ -19,14 +20,25 @@ class ApplyAnswer(Enum):
 def unsaved_message(*, profile: bool, displays: bool) -> str | None:
     """The question to ask for what has unsaved changes; None if nothing has."""
     if profile and displays:
-        what = "The profile and the display layout have"
-    elif profile:
-        what = "The profile has"
-    elif displays:
-        what = "The display layout has"
-    else:
-        return None
-    return f"{what} unsaved changes."
+        return "The profile and the display layout have unsaved changes."
+    if profile:
+        return "The profile has unsaved changes."
+    if displays:
+        return "The display layout has unsaved changes."
+    return None
+
+
+def apply_answer(answer: Answer, *, can_save: bool) -> ApplyAnswer:
+    """What Apply's question about unsaved displays was answered, from the button pressed:
+    Save, Discard and Cancel, or, without ``can_save``, only a first button (use the saved
+    displays) and a second one (cancel)."""
+    match answer:
+        case Answer.SAVE:
+            return ApplyAnswer.SAVE_DISPLAYS if can_save else ApplyAnswer.USE_SAVED_DISPLAYS
+        case Answer.DISCARD if can_save:
+            return ApplyAnswer.USE_SAVED_DISPLAYS
+        case _:
+            return ApplyAnswer.CANCEL
 
 
 def may_proceed(answer: Answer, save: Callable[[], bool]) -> bool:
@@ -39,3 +51,5 @@ def may_proceed(answer: Answer, save: Callable[[], bool]) -> bool:
             return True
         case Answer.CANCEL:
             return False
+        case _:
+            assert_never(answer)
