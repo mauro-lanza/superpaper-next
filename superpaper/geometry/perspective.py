@@ -8,7 +8,6 @@ import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import Enum
-from math import pi
 from typing import assert_never
 
 import numpy as np
@@ -17,6 +16,13 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_LABEL = "default"
 DISABLED_LABEL = "disabled"
+
+_VERTICAL = np.array([0.0, 1.0, 0.0])
+_IMAGE_PLANE_NORMAL_END = np.array([0, 0, 1, 1])
+_DEGENERATE_MESSAGE = (
+    "A display is swiveled or tilted so far that the viewer would see it edge-on; "
+    "use smaller angles or move the viewer."
+)
 
 
 class SwivelAxis(Enum):
@@ -61,16 +67,6 @@ class Perspective:
     swivels: tuple[Swivel, ...]
     tilts: tuple[Tilt, ...]
 
-    def of_displays(self, indices: tuple[int, ...] | list[int]) -> Perspective:
-        """The perspective of just the displays at ``indices``."""
-        return Perspective(
-            self.name,
-            self.central_display,
-            self.viewer_pos,
-            tuple(self.swivels[index] for index in indices),
-            tuple(self.tilts[index] for index in indices),
-        )
-
 
 @dataclass(frozen=True, slots=True)
 class Default:
@@ -90,6 +86,10 @@ class Named:
 
 
 PerspectiveChoice = Default | Disabled | Named
+
+
+class DegeneratePerspective(ValueError):
+    """A display is turned so far that the viewer sees it edge-on."""
 
 
 def parse_choice(text: str) -> PerspectiveChoice:
@@ -117,281 +117,99 @@ def choice_label(choice: PerspectiveChoice) -> str:
 def get_backprojected_display_system(
     crops: Sequence[Sequence[float]], perspective: Perspective
 ) -> tuple[list[tuple[float, float, float, float]], list[list[float]]]:
+    """Each display's crop on the image plane, and the Pillow perspective coefficients that
+    map the display's ``crops`` entry onto it.
+
+    The viewer is a point camera at the origin looking along +z. Every display starts flat,
+    facing the viewer at its distance, placed by its crop relative to the central display.
+    Each is then swiveled around a vertical axis and tilted around a horizontal one in 3D.
+    Casting a ray from the viewer through each turned corner back onto the flat image plane
+    gives a stretched quadrilateral: the part of the source image that the display must show
+    for the picture to look flat to the viewer. The coefficients map each display's own
+    rectangle onto its quadrilateral, so Pillow can warp the source image into it.
+
+    Raises DegeneratePerspective when a display is turned edge-on to the viewer.
     """
-    Return a back-projected quadrilateral and associated projection
-    transformation coefficients for each display in the Layout.
-
-    Displays are initialized in a flat plane in homogeneous coordinates
-    front of the viewer using the size and offset data from the Layout.
-    These represent the display as they would be without any swivels or tilts.
-    Then each display is rotated in 3D around a swivel axis and a tilt axis
-    to get a 3D representation of the display setup.
-
-    From this geometric setup, perspective corrections are computed by back-
-    projecting the display corners back onto the initial common plane which
-    represents the image plane. This produces stretched quadrilaterals that
-    are used to compute the perspective correction coefficients that are used
-    with Pillow to perform the perspective transformation on the source image.
-    """
-    sizes = [(crp[2] - crp[0], crp[3] - crp[1]) for crp in crops]
-    central_disp = perspective.central_display
-    viewer_pos_wrt_central = perspective.viewer_pos  # (lateral, vert, depth)
-    swivels = perspective.swivels
-    tilts = perspective.tilts
-    logger.info("swivs: %s", swivels)
-    logger.info("tilts: %s", tilts)
-
-    disp_positions, init_plane_basis = _position_displays_viewer(central_disp, viewer_pos_wrt_central, crops)
-    init_plane_point = disp_positions[central_disp]
-
-    projected_quads = []
-    for sz, pos, swiv, tilt in zip(sizes, disp_positions, swivels, tilts, strict=True):
-        p_quad = _get_backprojected_display(sz, pos, swiv, tilt, init_plane_basis, init_plane_point)
-        projected_quads.append(p_quad)
-    leftmost_corner = min([corner[0] for quad in projected_quads for corner in quad])
-    bottommost_corner = min([corner[1] for quad in projected_quads for corner in quad])
-    translated_quads = []
-    for quad in projected_quads:
-        work_quad = []
-        for corner in quad:
-            work_quad.append((round(corner[0] - leftmost_corner), round(corner[1] - bottommost_corner)))
-        translated_quads.append(work_quad)
-    logger.info("translated_quads: %s", translated_quads)
-    ordered_quads = [(tquad[2], tquad[3], tquad[1], tquad[0]) for tquad in translated_quads]
-    logger.info("ordered_quads: %s", ordered_quads)
-    ordered_crops = [_crop_from_quad(ordqu) for ordqu in ordered_quads]
-    logger.info("ordered_crops: %s", ordered_crops)
-    ppi_norm_corners = [
-        ((crop[0], crop[1]), (crop[2], crop[1]), (crop[2], crop[3]), (crop[0], crop[3])) for crop in crops
+    centers = _display_centers(crops, perspective)
+    plane_point = centers[perspective.central_display]
+    quads = [
+        _backproject_display((crop[2] - crop[0], crop[3] - crop[1]), center, swivel, tilt, plane_point)
+        for crop, center, swivel, tilt in zip(crops, centers, perspective.swivels, perspective.tilts, strict=True)
     ]
-    projected_coeffs = []
-    for ordquad, ppi_norm_quad in zip(ordered_quads, ppi_norm_corners, strict=True):
-        coeffs = _find_coeffs(ordquad, ppi_norm_quad)
-        projected_coeffs.append(coeffs)
-
-    return (ordered_crops, projected_coeffs)
-
-
-def _position_displays_viewer(
-    central_disp: int, viewer_pos_wrt_central: tuple[float, float, float], crops: Sequence[Sequence[float]]
-) -> tuple[list[np.ndarray], list[np.ndarray]]:
-    """Return display positions in viewer coordinates and a basis for the
-    initialized plane."""
-    centers = [((crp[2] + crp[0]) / 2, (crp[3] + crp[1]) / 2) for crp in crops]
-    view_lat_off, view_ver_off, view_dist = viewer_pos_wrt_central
-    # Translate centers so that central_disp center is at (0, 0)
-    cd_cent = centers[central_disp]
-    transl_cents = [(cent[0] - cd_cent[0] + view_lat_off, cent[1] - cd_cent[1] + view_ver_off) for cent in centers]
-    homog_cents = [np.array((tracen[0], tracen[1], view_dist, 1)) for tracen in transl_cents]
-    basis = [
-        np.array([1, 0, 0, 1]),
-        np.array([0, 1, 0, 1]),
-        np.array([0, 0, 1, 1]),
+    left = min(x for quad in quads for x, _ in quad)
+    top = min(y for quad in quads for _, y in quad)
+    plane_quads = [[(x - left, y - top) for x, y in quad] for quad in quads]
+    logger.info("Back-projected display quadrilaterals: %s", plane_quads)
+    coefficients = [
+        _find_coeffs(quad, ((crop[0], crop[1]), (crop[2], crop[1]), (crop[2], crop[3]), (crop[0], crop[3])))
+        for quad, crop in zip(plane_quads, crops, strict=True)
     ]
-    return homog_cents, basis
+    return [_crop_from_quad(quad) for quad in plane_quads], coefficients
 
 
-def _crop_from_quad(quad: Sequence[Sequence[float]]) -> tuple[float, float, float, float]:
-    """Return (left, top, right, bottom) from a list of 4 corners."""
-    leftmost = min([corner[0] for corner in quad])
-    topmost = min([corner[1] for corner in quad])
-    rightmost = max([corner[0] for corner in quad])
-    bottommost = max([corner[1] for corner in quad])
-    return (leftmost, topmost, rightmost, bottommost)
+def _display_centers(crops: Sequence[Sequence[float]], perspective: Perspective) -> list[np.ndarray]:
+    """Each display's centre in homogeneous viewer coordinates, before it is turned."""
+    lateral, vertical, distance = perspective.viewer_pos
+    centers = [((crop[2] + crop[0]) / 2, (crop[3] + crop[1]) / 2) for crop in crops]
+    central_x, central_y = centers[perspective.central_display]
+    return [np.array((x - central_x + lateral, y - central_y + vertical, distance, 1)) for x, y in centers]
 
 
-def _get_backprojected_display(
-    display_size: tuple[float, float],
-    display_center: np.ndarray,
-    swivel_ax_ang_off: Swivel,
-    tilt_ang_off: Tilt,
-    bproj_pln_basis: Sequence[np.ndarray],
-    bproj_pln_point: np.ndarray,
+def _crop_from_quad(quad: Sequence[tuple[float, float]]) -> tuple[float, float, float, float]:
+    """The (left, top, right, bottom) box around ``quad``."""
+    xs = [x for x, _ in quad]
+    ys = [y for _, y in quad]
+    return (min(xs), min(ys), max(xs), max(ys))
+
+
+def _backproject_display(
+    size: tuple[float, float], center: np.ndarray, swivel: Swivel, tilt: Tilt, plane_point: np.ndarray
 ) -> list[tuple[int, int]]:
-    """
-    Return a quadrilateral that is produced then a display is back projected
-    onto the plane of the assumed wallpaper, to be called 'poster plane'.
+    """The display's corners, top left first and clockwise, turned and cast back onto the
+    image plane through ``plane_point``, in that plane's coordinates."""
+    width, height = size
+    x, y, z, _ = center
+    # Viewer y grows downwards like image y, so the corners are in image order.
+    corners = [
+        np.array([x - width / 2, y - height / 2, z, 1]),
+        np.array([x + width / 2, y - height / 2, z, 1]),
+        np.array([x + width / 2, y + height / 2, z, 1]),
+        np.array([x - width / 2, y + height / 2, z, 1]),
+    ]
+    left_middle = (corners[0] + corners[3]) / 2
+    right_middle = (corners[1] + corners[2]) / 2
 
-    Arguments needed are:
-        - swivel angle & axis & axis offset from display edge in ppi norm res
-        - tilt angle & axis offset from display surface horizontal mid line
-        - distance of viewer in ppi norm res
-        - height of viewer relative to the display. assume this to be 1/2?
-            - lateral pos is assumed to be 1/2, centered to the display
-        - display size (physical / ppi normalized resolution)
-
-    Viewer (point camera) is taken to be at the origo of the world coordinates.
-    The display is placed on the z-axis, centering it to (0, 0, view_dist).
-    """
-
-    swiv_ang, swiv_loff, swiv_depth = (
-        swivel_ax_ang_off.angle,
-        swivel_ax_ang_off.lateral_offset,
-        swivel_ax_ang_off.depth_offset,
-    )
-    match swivel_ax_ang_off.axis:
+    match swivel.axis:
         case SwivelAxis.NONE:
-            # No swivel; keep code simpler by performing rotation of 0 degrees
-            swiv_ax = "left"
-            swiv_ang = 0
-            swiv_loff = 0
-            swiv_depth = 0
-        case SwivelAxis.LEFT:
-            swiv_ax = "left"
-        case SwivelAxis.RIGHT:
-            swiv_ax = "right"
+            swiveled = corners
+        case SwivelAxis.LEFT | SwivelAxis.RIGHT:
+            edge_middle = left_middle if swivel.axis is SwivelAxis.LEFT else right_middle
+            pivot = edge_middle[:3] + np.array((swivel.lateral_offset, 0, swivel.depth_offset))
+            # Negated: a positive .persp swivel angle turns the display the other way round this axis.
+            rotation = _rotation_about_line(_VERTICAL, pivot, math.radians(-swivel.angle))
+            swiveled = [rotation @ corner for corner in corners]
         case _:
-            assert_never(swivel_ax_ang_off.axis)
-    tilt_ang, tilt_voff, tilt_depth = tilt_ang_off.angle, tilt_ang_off.vertical_offset, tilt_ang_off.depth_offset
-    # convert angles to radians
-    swiv_ang *= -1 * 2 * pi / 360  # something causes swivels go the wrong way; maybe the y-axis flip?
-    tilt_ang *= 2 * pi / 360
+            assert_never(swivel.axis)
 
-    display_plane = _XYPlaneRectangle(display_center, display_size)
-    axis_swivel = display_plane.swivel_axis(swiv_ax, depth_offset=swiv_depth, lateral_offset=swiv_loff)
-    axis_tilt = display_plane.tilt_axis(depth_offset=tilt_depth, vertical_offset=tilt_voff)
+    tilt_pivot = left_middle[:3] + np.array((0, tilt.vertical_offset, tilt.depth_offset))
+    tilt_rotation = _rotation_about_line(left_middle[:3] - center[:3], tilt_pivot, math.radians(tilt.angle))
+    turned = [tilt_rotation @ corner for corner in swiveled]
 
-    # Swivel and tilt each corner of the display, specifically in this order
-    disp_corners = display_plane.corners
-    rotated_corners = tuple(
-        _swivel_and_tilt(corner, axis_tilt, tilt_ang, axis_swivel, swiv_ang) for corner in disp_corners
-    )
-
-    posterplane_normal = bproj_pln_basis[2]
-    posterplane_basis = bproj_pln_basis[:-1]
-    posterplane_center = bproj_pln_point
-
-    # Back project display plane corners onto poster plane
-    proj_corners = tuple(
-        _backproject_point_to_plane(crnr, posterplane_center, posterplane_normal) for crnr in rotated_corners
-    )
-
-    # Convert corners into poster plane coordinates
-    poster_plane_corners = _convert_to_plane_basis(proj_corners, posterplane_basis, posterplane_center)
-
-    return poster_plane_corners
+    projected = [_backproject_point_to_plane(corner, plane_point) for corner in turned]
+    return [(round(point[0] - plane_point[0]), round(point[1] - plane_point[1])) for point in projected]
 
 
-class _XYPlaneRectangle:
-    """Represent a rectangle in viewer coordinates."""
-
-    def __init__(self, center: np.ndarray, size: tuple[float, float]):
-        self.center = center
-        self.size = size
-        self.corners = self.get_corners()
-
-    def get_corners(self) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-        """Return rect corners as top left, top right, bot left, bot right."""
-        width, height = self.size
-        cent_x, cent_y, cent_z, _ = self.center
-        corners = (
-            np.array([cent_x - width / 2, cent_y + height / 2, cent_z, 1]),
-            np.array([cent_x + width / 2, cent_y + height / 2, cent_z, 1]),
-            np.array([cent_x - width / 2, cent_y - height / 2, cent_z, 1]),
-            np.array([cent_x + width / 2, cent_y - height / 2, cent_z, 1]),
-        )
-        return corners
-
-    def side_middle_pt(self, side: str) -> np.ndarray:
-        """Return the midpoint of side (left/right)."""
-        if side == "left":
-            mid = (self.corners[0] + self.corners[2]) / 2
-        elif side == "right":
-            mid = (self.corners[1] + self.corners[3]) / 2
-        else:
-            msg = f"Unknown side: {side}"
-            raise ValueError(msg)
-        return mid
-
-    def swivel_axis(
-        self, side: str, depth_offset: float = 0, lateral_offset: float = 0
-    ) -> tuple[np.ndarray, np.ndarray]:
-        """Return swivel axis.
-
-        Points from side midpoint to top side top corner."""
-        side_mid = self.side_middle_pt(side)
-        if side == "left":
-            axis_end = self.corners[0]
-        elif side == "right":
-            axis_end = self.corners[1]
-        else:
-            msg = f"Unknown side: {side}"
-            raise ValueError(msg)
-        axis = axis_end - side_mid
-        pt_on_line = side_mid
-        pt_on_line[0] += lateral_offset
-        pt_on_line[2] += depth_offset
-        return (axis, pt_on_line)
-
-    def tilt_axis(
-        self, side: str = "left", depth_offset: float = 0, vertical_offset: float = 0
-    ) -> tuple[np.ndarray, np.ndarray]:
-        """Return tilt axis, including optional offsets.
-
-        Choose positive rotation to tilt display upwards."""
-        side_mid = self.side_middle_pt(side)
-        if side == "left":
-            axis = side_mid - self.center
-        elif side == "right":
-            axis = self.center - side_mid
-        else:
-            msg = f"Unknown side: {side}"
-            raise ValueError(msg)
-        pt_on_line = side_mid
-        pt_on_line[1] += vertical_offset
-        pt_on_line[2] += depth_offset
-        return (axis, pt_on_line)
-
-
-def _swivel_and_tilt(
-    vector: np.ndarray,
-    axis_tilt: tuple[np.ndarray, np.ndarray],
-    tilt: float,
-    axis_swivel: tuple[np.ndarray, np.ndarray],
-    swivel: float,
-) -> np.ndarray:
-    """Swivel and tilt a vector around given axii."""
-    swivel_vec = _rotate_point_around_line(vector, axis_swivel, swivel)
-    tilt_swiveled_vec = _rotate_point_around_line(swivel_vec, axis_tilt, tilt)
-    return tilt_swiveled_vec
-
-
-def _rotate_point_around_line(
-    point: np.ndarray, axis_with_pt: tuple[np.ndarray, np.ndarray], theta: float
-) -> np.ndarray:
-    """Return a point in homogenous coordinates that results in
-    the rotation around a line.
-
-    Point is the one to be rotated, axis is the direction of the line
-    and point_on_line is a point on the line where to move the origo
-    for the duration of the rotation.
-
-    Analytical form of the translation + rotation in homogenous coordinates
-    is
-    M = [[R, p-Rp], [0^T, 1]]
-    """
-    axis, point_on_line = axis_with_pt
-    ax_3d = np.array([axis[0], axis[1], axis[2]])
-    rot_m = _rotation_matrix(ax_3d, theta)
-    p = np.array([point_on_line[0], point_on_line[1], point_on_line[2]])
-    p_rp = p - np.dot(rot_m, p)
-    col_p_rp = np.array([[p_rp[0]], [p_rp[1]], [p_rp[2]]])
-
-    zeros_transp = np.array([0, 0, 0])
-
-    transl_and_rot = np.block([[rot_m, col_p_rp], [zeros_transp, 1]])
-
-    return np.dot(transl_and_rot, point)
+def _rotation_about_line(direction: np.ndarray, pivot: np.ndarray, theta: float) -> np.ndarray:
+    """The homogeneous matrix that rotates by ``theta`` radians about the line through ``pivot``
+    along ``direction``: [[R, p - Rp], [0, 1]]."""
+    rotation = _rotation_matrix(direction, theta)
+    translation = pivot - rotation @ pivot
+    return np.block([[rotation, translation.reshape(3, 1)], [np.zeros(3), 1]])
 
 
 def _rotation_matrix(axis: np.ndarray, theta: float) -> np.ndarray:
-    """
-    Return the rotation matrix associated with counterclockwise rotation about
-    the given axis by theta radians.
-
-    Rodrigues' rotation formula.
-    """
-    axis = np.asarray(axis)
+    """The matrix of a counterclockwise rotation by ``theta`` radians about ``axis``
+    (Euler-Rodrigues formula)."""
     axis = axis / math.sqrt(np.dot(axis, axis))
     a = math.cos(theta / 2.0)
     b, c, d = -axis * math.sin(theta / 2.0)
@@ -406,55 +224,40 @@ def _rotation_matrix(axis: np.ndarray, theta: float) -> np.ndarray:
     )
 
 
-def _backproject_point_to_plane(point: np.ndarray, point_on_plane: np.ndarray, plane_normal: np.ndarray) -> np.ndarray:
-    """Back-project a point along it's ray to a point on a plane
-    parametrized with a normal and point."""
-    norm = plane_normal - point_on_plane
-    n_dot_r = np.dot(norm, point_on_plane)
-    transform = np.array(
-        [
-            [1, 0, 0, 0],
-            [0, 1, 0, 0],
-            [0, 0, 1, 0],
-            [norm[0] / n_dot_r, norm[1] / n_dot_r, norm[2] / n_dot_r, 0],
-        ]
-    )
-    projected_p = np.dot(transform, point)
-    cartes_projected_p = projected_p / projected_p[3]
-    return cartes_projected_p
+def _backproject_point_to_plane(point: np.ndarray, plane_point: np.ndarray) -> np.ndarray:
+    """Where the ray from the viewer through ``point`` meets the image plane through ``plane_point``.
 
-
-def _convert_to_plane_basis(
-    points: Sequence[np.ndarray], basis: Sequence[np.ndarray], origo: np.ndarray
-) -> list[tuple[int, int]]:
-    """Covert homogenous coordinate points into 2d plane basis set at origo."""
-    # pick cartesian part of basis
-    base_x = (basis[0])[:-1]
-    base_y = (basis[1])[:-1]
-    # normalize to unit lenght
-    unit_basis_vecs = (
-        base_x / math.sqrt(np.dot(base_x, base_x)),
-        base_y / math.sqrt(np.dot(base_y, base_y)),
-    )
-    plane_coords = []
-    for pnt in points:
-        x = np.dot(unit_basis_vecs[0], (pnt - origo)[:-1])
-        y = np.dot(unit_basis_vecs[1], (pnt - origo)[:-1])
-        plane_coords.append((round(x), round(y)))
-    return plane_coords
+    The plane's normal is (0, 0, 1) - ``plane_point``, so it faces the viewer only when the viewer
+    sits straight in front of the central display; changing it would change every saved
+    perspective's output.
+    """
+    normal = _IMAGE_PLANE_NORMAL_END - plane_point
+    with np.errstate(divide="ignore", invalid="ignore"):
+        n_dot_r = np.dot(normal, plane_point)
+        transform = np.array(
+            [
+                [1, 0, 0, 0],
+                [0, 1, 0, 0],
+                [0, 0, 1, 0],
+                [normal[0] / n_dot_r, normal[1] / n_dot_r, normal[2] / n_dot_r, 0],
+            ]
+        )
+        projected = transform @ point
+        cartesian = projected / projected[3]
+    if not np.isfinite(cartesian).all():
+        raise DegeneratePerspective(_DEGENERATE_MESSAGE)
+    return cartesian
 
 
 def _find_coeffs(source_coords: Sequence[Sequence[float]], target_coords: Sequence[Sequence[float]]) -> list[float]:
-    """Compute the perspective transfomation coefficients from source and
-    target quadrilaterals.
-
-    Quad corner order needs to be TOP LEFT, TOP RIGHT, BOTTOM RIGHT, BOTTOM LEFT.
-    """
+    """The perspective coefficients that map the ``target_coords`` quad onto ``source_coords``,
+    both ordered top left, top right, bottom right, bottom left."""
     matrix = []
     for s, t in zip(source_coords, target_coords, strict=True):
         matrix.append([t[0], t[1], 1, 0, 0, 0, -s[0] * t[0], -s[0] * t[1]])
         matrix.append([0, 0, 0, t[0], t[1], 1, -s[1] * t[0], -s[1] * t[1]])
-    A = np.array(matrix, dtype=float)
-    B = np.array(source_coords).reshape(8)
-    res = np.linalg.solve(A, B)
-    return np.array(res).reshape(8).tolist()
+    try:
+        solution = np.linalg.solve(np.array(matrix, dtype=float), np.array(source_coords).reshape(8))
+    except np.linalg.LinAlgError as error:
+        raise DegeneratePerspective(_DEGENERATE_MESSAGE) from error
+    return solution.tolist()

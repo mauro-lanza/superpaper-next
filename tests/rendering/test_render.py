@@ -232,3 +232,55 @@ def test_transforming_only_a_display_area_matches_transforming_the_whole_canvas(
         )
         difference = numpy.abs(numpy.asarray(whole.crop((left, top, right, bottom)), int) - numpy.asarray(part, int))
         assert difference.max() <= 1
+
+
+THREE_TURNED = Perspective(
+    "desk",
+    2,
+    (20.0, -10.0, 300.0),
+    (
+        Swivel(SwivelAxis.RIGHT, 25.0, 0.0, 0.0),
+        Swivel(SwivelAxis.NONE, 0.0, 0.0, 0.0),
+        Swivel(SwivelAxis.LEFT, -25.0, 5.0, 3.0),
+    ),
+    (Tilt(0.0, 0.0, 0.0), Tilt(8.0, 0.0, 0.0), Tilt(-5.0, 2.0, 0.0)),
+)
+
+
+@pytest.mark.parametrize("group", [(0,), (0, 1), (1, 0)])
+def test_a_span_group_sees_its_displays_as_the_whole_layout_does(group):
+    crops = [(0, 0, 160, 90), (170, 10, 330, 100), (340, 0, 500, 90)]
+    plane_crops, coefficients = get_backprojected_display_system(crops, THREE_TURNED)
+
+    group_crops, group_coefficients = render.group_projection(plane_crops, coefficients, group)
+
+    shift_x = plane_crops[group[0]][0] - group_crops[0][0]
+    shift_y = plane_crops[group[0]][1] - group_crops[0][1]
+    assert min(crop[0] for crop in group_crops) == 0 and min(crop[1] for crop in group_crops) == 0
+    for index, crop, coeffs in zip(group, group_crops, group_coefficients, strict=True):
+        assert crop == pytest.approx(numpy.subtract(plane_crops[index], (shift_x, shift_y, shift_x, shift_y)))
+        left, top, right, bottom = crops[index]
+        for x, y in [(left, top), (right, top), (right, bottom), (left, bottom)]:
+            whole = map_point(coefficients[index], x, y)
+            assert map_point(coeffs, x, y) == pytest.approx((whole[0] - shift_x, whole[1] - shift_y))
+
+
+def map_point(coefficients, x, y):
+    a, b, c, d, e, f, g, h = coefficients
+    w = g * x + h * y + 1
+    return ((a * x + b * y + c) / w, (d * x + e * y + f) / w)
+
+
+def test_span_groups_without_the_central_display_render_with_perspective(tmp_path, display_layout):
+    layout = display_layout([monitor(0, 0, 64, 36), monitor(64, 0, 64, 36), monitor(128, 0, 64, 36)])
+    image = write_image(tmp_path / "image.png", (40, 20), lambda x, y: (x * 6, y * 12, 0))
+
+    combined = render.advanced(
+        [image, image],
+        layout,
+        manual_offsets=[(0, 0)] * 3,
+        spangroups=[[0], [1, 2]],
+        perspective=THREE_TURNED,
+    )
+
+    assert combined.size == layout.desktop_size()

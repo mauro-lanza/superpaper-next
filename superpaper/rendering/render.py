@@ -4,7 +4,6 @@ Nothing here writes a file or shows anything: render_cache keeps the result and
 superpaper.desktop shows it.
 """
 
-import logging
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -14,8 +13,6 @@ import superpaper.geometry.perspective as persp
 from superpaper.geometry.canvas import Crop, Point, canvas_size, canvas_size_with_bezels
 from superpaper.geometry.displays import Layout
 from superpaper.rendering.source_image import open_source_image
-
-logger = logging.getLogger(__name__)
 
 
 def shift_perspective(coeffs: Sequence[float], left: int, top: int) -> list[float]:
@@ -86,6 +83,25 @@ def _to_group_coordinates(group_crops: list[list[Crop]]) -> list[list[Crop]]:
     ]
 
 
+def group_projection(
+    plane_crops: Sequence[Crop], coefficients: Sequence[Sequence[float]], group: Sequence[int]
+) -> tuple[list[Crop], list[list[float]]]:
+    """The back-projected crops of the displays in ``group`` moved to the origin, and their
+    coefficients mapping desktop-frame crops into that group's image.
+
+    ``plane_crops`` and ``coefficients`` are for the whole layout, so the viewer stays where it
+    is however the displays are grouped.
+    """
+    left = min(plane_crops[index][0] for index in group)
+    top = min(plane_crops[index][1] for index in group)
+    crops = [(crop[0] - left, crop[1] - top, crop[2] - left, crop[3] - top) for crop in (plane_crops[i] for i in group)]
+    shifted = []
+    for index in group:
+        a, b, c, d, e, f, g, h = coefficients[index]
+        shifted.append([a - left * g, b - left * h, c - left, d - top * g, e - top * h, f - top, g, h])
+    return crops, shifted
+
+
 def advanced(
     sources: Sequence[str | Path],
     layout: Layout,
@@ -116,19 +132,17 @@ def advanced(
     grp_bezels = [[bezels_px[index] for index in grp] for grp in spangroups]
 
     combined_image = Image.new("RGB", layout.desktop_size(), color=0)
+    if perspective is not None:
+        plane_crops, coefficients = persp.get_backprojected_display_system(crop_tuples, perspective)
     for source, grp, grp_crops, grp_res_arr, grp_bez in zip(
         sources, spangroups, grp_crop_tuples, grp_res_array, grp_bezels, strict=True
     ):
         img = open_source_image(source)
         if perspective is not None:
-            proj_plane_crops, persp_coeffs = persp.get_backprojected_display_system(
-                grp_crops, perspective.of_displays(grp)
-            )
-            canvas_tuple_proj = canvas_size(proj_plane_crops)
-            logger.info("Back-projected canvas size: %s", canvas_tuple_proj)
-            img_workingsize = resize_to_fill(img, canvas_tuple_proj, zoom=zoom, offset=pan)
-            for coeffs, ppin_crop, display, res in zip(persp_coeffs, grp_crops, grp, grp_res_arr, strict=True):
-                left, top, right, bottom = (round(edge) for edge in ppin_crop)
+            grp_plane_crops, grp_coeffs = group_projection(plane_crops, coefficients, grp)
+            img_workingsize = resize_to_fill(img, canvas_size(grp_plane_crops), zoom=zoom, offset=pan)
+            for coeffs, display, res in zip(grp_coeffs, grp, grp_res_arr, strict=True):
+                left, top, right, bottom = (round(edge) for edge in crop_tuples[display])
                 persp_crop = img_workingsize.transform(
                     (right - left, bottom - top),
                     Image.Transform.PERSPECTIVE,
