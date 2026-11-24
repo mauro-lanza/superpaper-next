@@ -1,6 +1,6 @@
 # Superpaper Next
 
-A community-maintained fork of [Superpaper](https://github.com/hhannine/superpaper), an advanced multi monitor wallpaper manager for **Linux**, with partial, unvalidated support for **Windows** and **MacOS**).
+A community-maintained fork of [Superpaper](https://github.com/hhannine/superpaper), an advanced multi monitor wallpaper manager for **Linux**, with partial, unvalidated support for **Windows** and **MacOS**.
 
 This fork focuses on KDE Plasma 6 support and the wallpaper selection experience. Development and testing is primarily done on Plasma 6; other desktop environments may work but are not actively tested.
 
