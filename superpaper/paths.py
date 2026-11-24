@@ -13,8 +13,6 @@ from dataclasses import dataclass
 from functools import cache
 from pathlib import Path
 
-from superpaper.desktop.backend import Desktop
-
 # Name Superpaper's two directories outright, for a portable setup or a scratch run.
 CONFIG_OVERRIDE = "SUPERPAPER_CONFIG_HOME"
 CACHE_OVERRIDE = "SUPERPAPER_CACHE_HOME"
@@ -45,12 +43,12 @@ def resource(name: str) -> Path:
     return install_dir() / "superpaper" / "resources" / name
 
 
-def resolve_paths(environ: Mapping[str, str], desktop: Desktop) -> AppPaths:
-    """Decide where Superpaper's files live: the OS's default directories, unless
-    SUPERPAPER_CONFIG_HOME and SUPERPAPER_CACHE_HOME name them. Nothing is created."""
+def resolve_paths(environ: Mapping[str, str], defaults: tuple[Path, Path]) -> AppPaths:
+    """Decide where Superpaper's files live: the OS's default (config, cache) directories,
+    unless SUPERPAPER_CONFIG_HOME and SUPERPAPER_CACHE_HOME name them."""
     config = environ.get(CONFIG_OVERRIDE)
     cache = environ.get(CACHE_OVERRIDE)
-    default_config, default_cache = desktop.default_dirs(environ, install_dir())
+    default_config, default_cache = defaults
     config_dir = Path(config) if config else default_config
     cache_dir = Path(cache) if cache else default_cache
     return AppPaths(config=config_dir, profiles=config_dir / "profiles", cache=cache_dir)

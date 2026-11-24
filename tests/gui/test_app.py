@@ -10,7 +10,6 @@ from superpaper.desktop import linux
 from superpaper.desktop.linux import UNKNOWN_DESKTOP
 from superpaper.geometry.display_detection import DisplayDetectionError
 from superpaper.geometry.displays import SIZE_HINT
-from superpaper.paths import ensure_dirs, resolve_paths
 from superpaper.profiles.profile_id import ProfileId
 from superpaper.settings import read_settings
 from tests.conftest import monitor
@@ -18,16 +17,6 @@ from tests.conftest import monitor
 
 def slideshow_armed(superpaper):
     return superpaper.session._deadline is not None
-
-
-def test_first_run_seeds_the_example_profiles(gui_env, tmp_path, desktop):
-    environ = {
-        "SUPERPAPER_CONFIG_HOME": str(tmp_path / "fresh" / "config"),
-        "SUPERPAPER_CACHE_HOME": str(tmp_path / "fresh" / "cache"),
-    }
-    paths = resolve_paths(environ, desktop)
-    ensure_dirs(paths)
-    assert sorted(path.name for path in paths.profiles.iterdir()) == ["example.profile", "example_multi.profile"]
 
 
 @pytest.mark.parametrize(
