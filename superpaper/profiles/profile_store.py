@@ -19,7 +19,14 @@ from superpaper.files import write_atomically
 from superpaper.paths import AppPaths
 from superpaper.profiles import profile_file
 from superpaper.profiles.profile_file import Profile
-from superpaper.profiles.profile_id import ManagedPathError, ProfileId, ProfileIdError, collision_key, profile_path
+from superpaper.profiles.profile_id import (
+    ManagedPathError,
+    ProfileId,
+    ProfileIdError,
+    collision_key,
+    existing_profile_path,
+    profile_path,
+)
 from superpaper.profiles.selection import Selection
 
 logger = logging.getLogger(__name__)
@@ -262,7 +269,7 @@ def delete_malformed(diagnostic: ProfileDiscoveryDiagnostic) -> bool:
 
 
 def validate_managed_profile_id(
-    profiles_dir: Path, name: object, current_profile_id: ProfileId | None = None
+    profiles_dir: Path, name: str, current_profile_id: ProfileId | None = None
 ) -> ProfileId:
     """Return the identity a profile will be saved under, refusing names that can't be used.
 
@@ -286,7 +293,7 @@ def validate_managed_profile_id(
 
 def _delete_managed_profile(paths: AppPaths, stored: StoredProfile) -> None:
     """Delete a loaded profile's file, refusing if the file changed after it was loaded."""
-    path = profile_path(paths.profiles, stored.profile_id, allow_missing=False)
+    path = existing_profile_path(paths.profiles, stored.profile_id)
     if _content_digest(path.read_bytes()) != stored.digest:
         message = f"'{stored.profile_id.value}' changed on disk after it was loaded. Reload it before deleting."
         raise ManagedPathError(message)
@@ -373,6 +380,14 @@ def _forget_selection(path: Path) -> None:
         logger.info("Could not forget the selection in %s: %s", path, error)
 
 
+def _store_or_forget_selection(path: Path, files: list[str] | None) -> None:
+    """Remember ``files``, or without any forget what an earlier profile of this name showed."""
+    if files:
+        _store_selection(path, files)
+    else:
+        _forget_selection(path)
+
+
 def _selection_to_carry_over(selection_file: Path, source_content: bytes) -> list[str] | None:
     """Return the selection a save keeps when the editor didn't choose one."""
     stored = _read_stored_selection(selection_file)
@@ -404,15 +419,14 @@ def _save_managed_profile(
     try:
         destination_id = validate_managed_profile_id(root, profile.name, current_profile_id)
         destination = profile_path(root, destination_id)
-    except (OSError, ManagedPathError, ProfileIdError, ValueError) as error:
+    except (OSError, ValueError) as error:
         raise ProfileTransactionError(_DESTINATION_WRITE, error) from error
     content = profile_file.serialize(profile).encode("utf-8")
     destination_selection = _selection_path(paths.cache, destination_id)
 
     if current_profile_id is None:
         _write_profile(destination, content)
-        if selected:
-            _store_selection(destination_selection, selected)
+        _store_or_forget_selection(destination_selection, selected)
         return destination
 
     source_path, source_content = _read_unchanged_source(root, current_profile_id, expected_source_digest)
@@ -420,8 +434,7 @@ def _save_managed_profile(
     selection = selected or _selection_to_carry_over(source_selection, source_content)
     if destination_id == current_profile_id:
         _write_profile(source_path, content)
-        if selection:
-            _store_selection(destination_selection, selection)
+        _store_or_forget_selection(destination_selection, selection)
         return source_path
 
     _write_profile(destination, content)
@@ -432,13 +445,12 @@ def _save_managed_profile(
     if update_active:
         try:
             write_active_profile(paths.cache, destination_id)
-        except (OSError, ValueError) as error:
+        except OSError as error:
             rollback_errors = _undo_remove(source_path, source_content)
             if not rollback_errors:
                 rollback_errors = _undo_create(destination)
             raise ProfileTransactionError(_ACTIVE_POINTER_UPDATE, error, rollback_errors) from error
-    if selection:
-        _store_selection(destination_selection, selection)
+    _store_or_forget_selection(destination_selection, selection)
     _forget_selection(source_selection)
     return destination
 
@@ -449,7 +461,7 @@ def _read_unchanged_source(root: Path, profile_id: ProfileId, expected_digest: b
         error = ManagedPathError("The profile being saved was not loaded from disk.")
         raise ProfileTransactionError(_SOURCE_VERIFICATION, error)
     try:
-        path = profile_path(root, profile_id, allow_missing=False)
+        path = existing_profile_path(root, profile_id)
         content = path.read_bytes()
     except (OSError, ManagedPathError) as error:
         raise ProfileTransactionError(_SOURCE_VERIFICATION, error) from error

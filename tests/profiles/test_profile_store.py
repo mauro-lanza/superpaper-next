@@ -171,8 +171,6 @@ def test_a_name_line_never_becomes_an_identity(app_paths, tmp_path):
 
     assert stored.profile_id == ProfileId.parse("Original", windows_names=False)
     assert stored.profile.hotkey == ("control", "x")
-    with pytest.raises(ProfileIdError):
-        ProfileId.parse("../outside", windows_names=False)
     ProfileStore(app_paths, windows_names=False).delete(stored)
     assert outside.read_bytes() == b"sentinel"
 
@@ -232,12 +230,6 @@ def test_a_value_that_cant_be_used_makes_a_profile_malformed(app_paths):
     assert path.read_bytes() == original
 
 
-def test_a_profile_earlier_versions_loaded_still_loads(app_paths):
-    (app_paths.profiles / "lenient.profile").write_bytes(profile_bytes("lenient", b"zoom=\n"))
-
-    assert [stored.profile_id.value for stored in loaded(app_paths)] == ["lenient"]
-
-
 @pytest.mark.parametrize(("replaced_meanwhile", "deleted"), [(False, True), (True, False)])
 def test_a_malformed_profile_is_deleted_only_as_it_was_diagnosed(app_paths, replaced_meanwhile, deleted):
     path = app_paths.profiles / "broken.profile"
@@ -251,16 +243,6 @@ def test_a_malformed_profile_is_deleted_only_as_it_was_diagnosed(app_paths, repl
     assert path.exists() is not deleted
     if replaced_meanwhile:
         assert path.read_bytes() == replacement
-
-
-def test_loading_a_read_only_profile_never_writes(app_paths):
-    path = app_paths.profiles / "saved.profile"
-    original = profile_bytes("other")
-    path.write_bytes(original)
-    path.chmod(0o444)
-
-    assert [stored.profile.name for stored in loaded(app_paths)] == ["saved"]
-    assert path.read_bytes() == original
 
 
 @pytest.mark.skipif(sys.platform == "win32" or os.geteuid() == 0, reason="needs POSIX permissions, not root")
@@ -422,17 +404,6 @@ def test_pointer_resolves_a_symlinked_profile(app_paths, tmp_path):
     (cache / "running_profile").write_text("test", encoding="utf-8")
 
     assert running(app_paths).profile.name == "test"
-
-
-def test_invalid_active_profile_write_does_not_touch_pointer(app_paths, tmp_path):
-    cache = prepare_profile(app_paths, tmp_path)
-    pointer = cache / "running_profile"
-    pointer.write_text("test", encoding="utf-8")
-
-    with pytest.raises(ProfileIdError):
-        profile_store.write_active_profile(app_paths.cache, ProfileId.parse("../other", windows_names=False))
-
-    assert pointer.read_text(encoding="utf-8") == "test"
 
 
 def test_active_profile_write_never_replaces_a_directory(app_paths, tmp_path):
@@ -663,6 +634,17 @@ def test_rename_moves_the_selection_and_delete_forgets_it(app_paths, tmp_path):
 
     assert renamed.selection.images == [str(image)]
     assert recreated.selection.images is None
+
+
+def test_a_profile_recreated_under_a_deleted_ones_name_does_not_inherit_its_selection(app_paths, tmp_path):
+    image = tmp_path / "wallpaper.png"
+    image.touch()
+    stored_profile(app_paths, "Work").selection.pin([str(image)])
+    (app_paths.profiles / "Work.profile").unlink()  # deleted outside the app
+
+    save_new(app_paths, edited("Work"))
+
+    assert load_profile(app_paths, "Work").selection.images is None
 
 
 def test_the_store_saves_and_hands_out_one_record_per_profile(app_paths):

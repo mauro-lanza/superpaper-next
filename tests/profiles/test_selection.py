@@ -55,6 +55,16 @@ def test_a_source_without_images_leaves_every_position_without_one(tmp_path):
     assert Selection([[image], [str(empty)]], "alphabetical", 2).advance() == []
 
 
+def test_a_new_image_joins_the_slideshow_when_the_cycle_starts_again(tmp_path):
+    a, b = touch(tmp_path / "a.png", tmp_path / "b.png")
+    images = Selection([[str(tmp_path)]], "alphabetical", 1)
+    assert [images.advance(), images.advance()] == [[a], [b]]
+
+    (c,) = touch(tmp_path / "c.png")
+
+    assert [images.advance() for _ in range(3)] == [[a], [b], [c]]
+
+
 def test_an_image_deleted_after_listing_is_skipped(tmp_path):
     first, second = touch(tmp_path / "a.png", tmp_path / "b.png")
     images = Selection([[str(tmp_path)]], "alphabetical", 1)

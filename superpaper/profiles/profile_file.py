@@ -11,7 +11,7 @@ import logging
 import math
 import os
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Literal, assert_never, get_args
 
 from superpaper.geometry.perspective import Default, Disabled, PerspectiveChoice, choice_label, parse_choice
@@ -156,105 +156,78 @@ def parse(text: str) -> Profile:
     Raises ProfileFormatError for a value that can't be used, such as a delay that isn't
     a number or a display diagonal of 0 inches.
     """
-    defaults = Profile(name="default_profile")
-    name = defaults.name
-    spanmode = defaults.spanmode
-    spangroups = defaults.spangroups
-    slideshow = defaults.slideshow
-    delay = defaults.delay
-    sortmode = defaults.sortmode
-    sources = list(defaults.sources)
-    hotkey = defaults.hotkey
-    perspective = defaults.perspective
-    zoom = defaults.zoom
-    pan = defaults.pan
-    corrections = list(defaults.corrections)
-    bezels = list(defaults.bezels)
-    selected = defaults.selected
+    profile = Profile(name="default_profile")
     for line in text.splitlines():
         key, separator, value = line.partition("=")
-        if not separator:
-            if line.strip():
-                logger.info("Skipping a profile line without a setting: %s", line)
-            continue
-        value = value.strip()
-        if key == "name":
-            name = value
-        elif key == "spanmode":
-            mode = next((mode for mode in SPAN_MODES if mode == value.lower()), None)
-            if mode is None:
-                logger.info("Unknown span mode '%s' in profile '%s'.", value, name)
-            else:
-                spanmode = mode
-        elif key == "spangroups":
-            try:
-                spangroups = parse_spangroups(value.split(","))
-            except ValueError as error:
-                logger.info("Unusable spangroups '%s' in profile '%s': %s", value, name, error)
-                spangroups = None
-        elif key == "slideshow":
-            slideshow = value.lower() == "true"
-        elif key == "delay":
-            delay = _numbers(key, value, float)[0]
-            if not math.isfinite(delay) or delay <= 0:
-                message = f"The setting {key}={value} needs a positive, finite number of seconds."
-                raise ProfileFormatError(message)
-        elif key == "sortmode":
-            chosen = next((mode for mode in SORT_MODES if mode == value.lower()), None)
-            if chosen is None:
-                logger.info("Unknown sort mode '%s' in profile '%s'.", value, name)
-            else:
-                sortmode = chosen
-        elif key == "offsets":
-            # x1,y1;x2,y2;... in pixels, from the leftmost display.
-            corrections.append(OffsetsCorrection(tuple(_parse_offset(pair) for pair in value.split(";"))))
-        elif key == "bezels":
-            bezels += _numbers(key, value, float)
-        elif key == "ppi":
-            corrections.append(PpiCorrection(tuple(_numbers(key, value, int))))
-        elif key == "diagonal_inches":
-            inches = _numbers(key, value, float)
-            # Densities are pixels per inch of diagonal, so a diagonal of 0 makes the
-            # profile unusable; earlier versions failed to load such a profile as well.
-            if 0 in inches:
-                message = "A display diagonal of 0 inches."
-                raise ProfileFormatError(message)
-            corrections.append(DiagonalCorrection(tuple(inches)))
-        elif key == "hotkey":
-            hotkey = parse_hotkey(value)
-        elif key == "perspective":
-            perspective = parse_choice(value)
-        elif key == "zoom":
-            zoom = parse_float(value)
-            zoom = 1.0 if zoom is None else max(1.0, zoom)
-        elif key == "align":
-            try:
-                parts = value.split(",")
-                pan = (min(1.0, max(-1.0, float(parts[0]))), min(1.0, max(-1.0, float(parts[1]))))
-            except ValueError, IndexError:
-                pan = (0.0, 0.0)
-        elif key == "selected":
-            selected = tuple(path for path in value.split(";") if path) or None
-        elif key.startswith("display"):
-            sources.append(tuple(path for path in value.split(";") if path))
-        else:
-            logger.info("Unknown setting in profile '%s': %s", name, line)
-    return Profile(
-        name=name,
-        spanmode=spanmode,
-        spangroups=spangroups,
-        slideshow=slideshow,
-        delay=delay,
-        sortmode=sortmode,
-        sources=tuple(sources),
-        hotkey=hotkey,
-        perspective=perspective,
-        zoom=zoom,
-        pan=pan,
-        corrections=tuple(corrections),
-        bezels=tuple(bezels),
-        selected=selected,
-    )
+        if separator:
+            profile = _with_setting(profile, key, value.strip(), line)
+        elif line.strip():
+            logger.info("Skipping a profile line without a setting: %s", line)
+    return profile
+
+
+def _with_setting(profile: Profile, key: str, value: str, line: str) -> Profile:
+    """``profile`` with the setting of one ``key=value`` line applied."""
+    if key == "name":
+        return replace(profile, name=value)
+    if key == "spanmode":
+        mode = next((mode for mode in SPAN_MODES if mode == value.lower()), None)
+        if mode is None:
+            logger.info("Unknown span mode '%s' in profile '%s'.", value, profile.name)
+            return profile
+        return replace(profile, spanmode=mode)
+    if key == "spangroups":
+        try:
+            return replace(profile, spangroups=parse_spangroups(value.split(",")))
+        except ValueError as error:
+            logger.info("Unusable spangroups '%s' in profile '%s': %s", value, profile.name, error)
+            return replace(profile, spangroups=None)
+    if key == "slideshow":
+        return replace(profile, slideshow=value.lower() == "true")
+    if key == "delay":
+        delay = _numbers(key, value, float)[0]
+        if not math.isfinite(delay) or delay <= 0:
+            message = f"The setting {key}={value} needs a positive, finite number of seconds."
+            raise ProfileFormatError(message)
+        return replace(profile, delay=delay)
+    if key == "sortmode":
+        sortmode = next((mode for mode in SORT_MODES if mode == value.lower()), None)
+        if sortmode is None:
+            logger.info("Unknown sort mode '%s' in profile '%s'.", value, profile.name)
+            return profile
+        return replace(profile, sortmode=sortmode)
+    if key == "offsets":
+        # x1,y1;x2,y2;... in pixels, from the leftmost display.
+        offsets = OffsetsCorrection(tuple(_parse_offset(pair) for pair in value.split(";")))
+        return replace(profile, corrections=(*profile.corrections, offsets))
+    if key == "bezels":
+        return replace(profile, bezels=(*profile.bezels, *_numbers(key, value, float)))
+    if key == "ppi":
+        ppi = PpiCorrection(tuple(_numbers(key, value, int)))
+        return replace(profile, corrections=(*profile.corrections, ppi))
+    if key == "diagonal_inches":
+        inches = _numbers(key, value, float)
+        # Densities are pixels per inch of diagonal, so a diagonal of 0 makes the
+        # profile unusable; earlier versions failed to load such a profile as well.
+        if 0 in inches:
+            message = "A display diagonal of 0 inches."
+            raise ProfileFormatError(message)
+        return replace(profile, corrections=(*profile.corrections, DiagonalCorrection(tuple(inches))))
+    if key == "hotkey":
+        return replace(profile, hotkey=parse_hotkey(value))
+    if key == "perspective":
+        return replace(profile, perspective=parse_choice(value))
+    if key == "zoom":
+        zoom = parse_float(value)
+        return replace(profile, zoom=1.0 if zoom is None else max(1.0, zoom))
+    if key == "align":
+        return replace(profile, pan=_parse_pan(value))
+    if key == "selected":
+        return replace(profile, selected=tuple(path for path in value.split(";") if path) or None)
+    if key.startswith("display"):
+        return replace(profile, sources=(*profile.sources, tuple(path for path in value.split(";") if path)))
+    logger.info("Unknown setting in profile '%s': %s", profile.name, line)
+    return profile
 
 
 def serialize(profile: Profile) -> str:
@@ -369,16 +342,28 @@ def _numbers[T: (int, float)](key: str, value: str, kind: type[T]) -> list[T]:
 def parse_spangroups(groups: Sequence[str]) -> tuple[tuple[int, ...], ...]:
     """Each group of display ids, one digit per display, without duplicates, sorted.
 
-    Raises ValueError naming the group that holds a non-digit.
+    Raises ValueError naming the group that is empty or holds a non-digit.
     """
     parsed = []
     for group in groups:
+        if not group:
+            message = "A span group has no displays."
+            raise ValueError(message)
         try:
             parsed.append(tuple(sorted({int(display) for display in group})))
         except ValueError:
             message = f"One of the display ids was not an integer: {group}"
             raise ValueError(message) from None
     return tuple(parsed)
+
+
+def _parse_pan(value: str) -> tuple[float, float]:
+    """The x,y pan of an align= value, each clamped to -1..1; none if it isn't two finite numbers."""
+    match [parse_float(part) for part in value.split(",")[:2]]:
+        case [float(x), float(y)]:
+            return (min(1.0, max(-1.0, x)), min(1.0, max(-1.0, y)))
+        case _:
+            return (0.0, 0.0)
 
 
 def _parse_offset(pair: str) -> tuple[int, int]:

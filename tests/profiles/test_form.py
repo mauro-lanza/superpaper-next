@@ -1,11 +1,10 @@
 """The profile editor's rules, without a UI: what a form means as a profile and when it counts
 as changed."""
 
-from types import SimpleNamespace
-
 import pytest
 
 from superpaper.profiles import form as profile_form
+from superpaper.profiles import profile_file
 from superpaper.profiles.form import (
     applied_offsets,
     fingerprint,
@@ -249,7 +248,7 @@ def images(tmp_path):
 
 
 def test_chosen_images_for_one_image_per_display_are_none_without_a_click(images):
-    loaded = SimpleNamespace(selection=SimpleNamespace(images=["/x.png"]))
+    loaded = ["/x.png"]
     multi = Profile(name="m", spanmode="multi")
     single = Profile(name="s")
     both = [str(images / "a.png"), str(images / "b.png")]
@@ -258,6 +257,25 @@ def test_chosen_images_for_one_image_per_display_are_none_without_a_click(images
     assert profile_form.chosen_images(single, [str(images / "a.png")], loaded) == [str(images / "a.png")]
     assert profile_form.chosen_images(single, [str(images)], loaded) == ["/x.png"]
     assert profile_form.chosen_images(single, None, None) is None
+
+
+def test_span_groups_of_displays_past_the_ninth_cannot_be_saved():
+    choices = (*(10 * (0,)), 1)
+
+    profile, problems = parse_form(blank(span_mode="advanced", spangroups_enabled=True, spangroup_choices=choices))
+
+    assert profile.spangroups == ((*range(10),), (10,))
+    assert any("displays 0 to 9" in problem for problem in problems)
+    assert not parse_form(blank(span_mode="advanced", spangroups_enabled=True, spangroup_choices=(0, 1)))[1]
+
+
+def test_a_profile_with_empty_spangroups_round_trips_through_the_form(layout):
+    profile = profile_file.parse("name=Work\nslideshow=false\nspangroups=\ndisplay0paths=/a\n")
+
+    saved, problems = parse_form(form_from(profile, layout))
+
+    assert problems == []
+    assert saved.spangroups is None
 
 
 def test_a_new_profile_starts_blank_with_a_field_for_every_display(layout):

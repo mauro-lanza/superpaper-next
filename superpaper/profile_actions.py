@@ -81,7 +81,7 @@ def save_profile(
         # Saving loads the profiles again: once, here.
         stored = store.save(
             profile,
-            selected=chosen_images(profile, picked, loaded),
+            selected=chosen_images(profile, picked, loaded.selection.images if loaded is not None else None),
             current=loaded,
             update_active=session.renames_running(current_profile_id, profile.name),
         )
