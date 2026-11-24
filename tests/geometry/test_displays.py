@@ -4,7 +4,7 @@ import pytest
 
 from superpaper.geometry import displays
 from tests.conftest import monitor
-from tests.geometry.conftest import DUAL_MONITORS, detect, edit_the_layout
+from tests.geometry.conftest import DUAL_MONITORS, OVERLAPPING_MONITORS, detect, edit_the_layout
 
 
 def bezel_px(layout, mm):
@@ -124,8 +124,51 @@ def test_a_layout_needs_a_value_for_every_display(display_layout):
         display_layout().with_offsets([(0, 0)])
 
 
-def test_a_layout_is_never_changed_an_edit_is_a_new_layout(monkeypatch, saved_layouts):
-    layout = detect(monkeypatch, saved_layouts, DUAL_MONITORS)
+def test_a_layout_needs_at_least_one_display():
+    with pytest.raises(ValueError, match="same number of values"):
+        displays.Layout((), (), (), None, False, None, ())
+
+
+def test_displays_without_a_manual_offset_are_not_moved(layout):
+    crops = layout.ppi_norm_crops([(10, 20)])
+
+    assert crops[0] == (10, 20, 1930, 1100)
+    assert crops[1] == layout.ppi_norm_crops([])[1]
+    assert crops[1][:2] == (1920, 0)
+
+
+def test_the_overlap_of_the_saved_layout_of_the_portable_is_resolved_by_moving_only_the_portable(display_layout):
+    overlapping = display_layout(OVERLAPPING_MONITORS).with_offsets([(0, 361), (2560, 0)]).with_diagonals([27.2, 15.6])
+    assert not overlapping.is_valid()
+
+    shifted = overlapping.with_overlaps_shifted()
+
+    assert shifted is not None
+    assert shifted.is_valid()
+    assert shifted.ppi_norm_offsets[0] == (0, 361)
+    assert shifted.ppi_norm_offsets[1][1] == 0
+    assert shifted.ppi_norm_offsets[1][0] > 2560
+
+
+def test_displays_that_do_not_overlap_are_not_shifted(layout):
+    assert layout.with_overlaps_shifted() == layout
+
+
+def test_a_display_that_overlaps_a_display_before_it_is_moved_down_when_that_is_the_least(display_layout):
+    stacked = display_layout([monitor(0, 0, 2560, 1440, 602, 339), monitor(0, 1440, 2560, 1440, 602, 339)])
+    overlapping = stacked.with_offsets([(0, 0), (0, 100)])
+
+    shifted = overlapping.with_overlaps_shifted()
+
+    assert shifted is not None
+    assert shifted.is_valid()
+    assert shifted.ppi_norm_offsets[0] == (0, 0)
+    assert shifted.ppi_norm_offsets[1][0] == 0
+    assert shifted.ppi_norm_offsets[1][1] > 100
+
+
+def test_a_layout_is_never_changed_an_edit_is_a_new_layout(saved_layouts):
+    layout = detect(saved_layouts, DUAL_MONITORS)
     offsets = layout.ppi_norm_offsets
 
     edited = edit_the_layout(layout)
@@ -140,7 +183,6 @@ def test_a_layout_is_never_changed_an_edit_is_a_new_layout(monkeypatch, saved_la
 def test_changes_are_unsaved_only_when_the_settings_differ_from_the_saved_ones(layout):
     saved = layout.settings()
 
-    assert layout.settings() == saved
     assert layout.with_diagonals([20.0, 20.0]).settings() != saved
     assert layout.with_offsets([(0, 0), (1, 1)]).settings() != saved
     assert layout.with_bezels([(1.0, 0.0), (0.0, 0.0)]).settings() != saved

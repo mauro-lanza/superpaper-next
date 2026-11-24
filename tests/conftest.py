@@ -77,11 +77,13 @@ def display_layout(desktop, tmp_path):
 
     The layouts are loaded from ``config_dir``, by default a directory with none saved.
     """
-    from superpaper.geometry import display_detection
+    from superpaper.geometry import display_detection, display_store
 
     def build(monitors=TWO_DISPLAYS, config_dir=None):
         desktop.monitors = monitors
-        return display_detection.detect_layout(config_dir or tmp_path / "no-saved-layouts", desktop)
+        return display_store.load(
+            config_dir or tmp_path / "no-saved-layouts", display_detection.detect_displays(desktop)
+        )
 
     return build
 

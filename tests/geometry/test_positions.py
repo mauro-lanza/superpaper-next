@@ -27,9 +27,10 @@ def test_a_typed_unit_conversion_keeps_an_empty_field_empty(layout):
     assert float(positions.convert_unit(str(ppi), ppi, to_px=False)) == pytest.approx(25.4)
 
 
-def test_a_typed_unit_conversion_of_a_non_number_raises(layout):
-    with pytest.raises(ValueError, match="could not convert"):
-        positions.convert_unit("abc", layout.max_ppi(), to_px=True)
+@pytest.mark.parametrize("text", ["abc", "nan"])
+def test_a_typed_unit_conversion_of_a_non_number_raises(layout, text):
+    with pytest.raises(ValueError, match="not a number"):
+        positions.convert_unit(text, layout.max_ppi(), to_px=True)
 
 
 def test_new_offsets_are_moved_to_the_origin_in_pixels():

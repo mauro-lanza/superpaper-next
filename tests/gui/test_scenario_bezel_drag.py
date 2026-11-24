@@ -6,7 +6,7 @@ One test: each step starts from the layout the one before left in the editor and
 
 from superpaper.desktop import linux
 from superpaper.geometry import display_store
-from superpaper.geometry.display_detection import detect_layout
+from superpaper.geometry.display_detection import detect_displays
 
 
 def saved_offsets(config):
@@ -80,4 +80,4 @@ def test_dragged_positions_survive_a_bezel_revert_and_save(gui_env, saved_layout
 
     display_store.save_layout(config, panel.staged.layout)
     assert saved_offsets(config) == saved
-    assert list(detect_layout(config, linux).ppi_norm_offsets) == reverted
+    assert list(display_store.load(config, detect_displays(linux)).ppi_norm_offsets) == reverted

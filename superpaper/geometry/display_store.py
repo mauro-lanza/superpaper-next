@@ -15,7 +15,7 @@ import configparser
 import io
 import locale
 import logging
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -43,13 +43,6 @@ class _SavedLayout:
     """The diagonals the user entered, or None for the detected sizes."""
     use_perspective: bool
     default_perspective: str | None
-
-
-@dataclass(frozen=True, slots=True)
-class SaveFailed:
-    """Settings that couldn't be written to disk, and why."""
-
-    message: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,17 +101,6 @@ def save_layout(config_dir: Path, layout: Layout) -> None:
     _write_layout(config_dir, layout.key, _as_saved(layout))
 
 
-def save_or_failure(
-    save: Callable[[Path, Layout], None], config_dir: Path, layout: Layout, what: str
-) -> SaveFailed | None:
-    """Run ``save``; why it failed, worded for ``what`` was being saved, or None."""
-    try:
-        save(config_dir, layout)
-    except (OSError, configparser.Error, ValueError) as error:
-        return SaveFailed(f"The {what} could not be saved: {error}")
-    return None
-
-
 def _read_layout(config_dir: Path, key: str) -> _SavedLayout | None:
     """The layout saved under ``key``, or None if there is none."""
     config = _read(config_dir / LAYOUTS_FILE)
@@ -148,8 +130,7 @@ def _write_layout(config_dir: Path, key: str, layout: _SavedLayout) -> None:
     try:
         config = _read(path)
     except (configparser.Error, ValueError) as error:
-        # Saving is the user's way out of a file that can't be read: it is replaced.
-        logger.warning("Replacing the unreadable %s: %s; the old file is kept as %s", path, error, _keep(path))
+        _replace_unreadable(path, error)
         config = configparser.ConfigParser()
     config[key] = {
         "ppi_norm_offsets": _rows_to_str(layout.ppi_norm_offsets),
@@ -162,11 +143,14 @@ def _write_layout(config_dir: Path, key: str, layout: _SavedLayout) -> None:
     _write(path, config)
 
 
-def _keep(path: Path) -> Path:
-    """Move an unreadable ``path`` aside to ``<name>.corrupt``, replacing an earlier one; returns where it went."""
+def _replace_unreadable(path: Path, error: Exception) -> None:
+    """Move an unreadable ``path`` aside to ``<name>.corrupt``, replacing an earlier one, and log it.
+
+    Saving is the user's way out of a file that can't be read.
+    """
     kept = path.with_name(path.name + ".corrupt")
     path.replace(kept)
-    return kept
+    logger.warning("Replacing the unreadable %s: %s; the old file is kept as %s", path, error, kept)
 
 
 def _read_perspectives(config_dir: Path, key: str) -> tuple[Perspective, ...]:
@@ -193,7 +177,7 @@ def _write_perspectives(config_dir: Path, key: str, perspectives: Sequence[Persp
         try:
             _read_perspectives(config_dir, key)
         except (configparser.Error, ValueError) as error:
-            logger.warning("Replacing the unreadable %s: %s; the old file is kept as %s", path, error, _keep(path))
+            _replace_unreadable(path, error)
     if not perspectives and not path.exists():
         return
     config = configparser.ConfigParser()
@@ -214,7 +198,7 @@ def _as_saved(layout: Layout) -> _SavedLayout:
     return _SavedLayout(
         ppi_norm_offsets=layout.ppi_norm_offsets,
         bezel_mms=tuple(layout.bezels_in_mm()),
-        user_diagonal_inches=layout.user_diagonal_inches or None,
+        user_diagonal_inches=layout.user_diagonal_inches,
         use_perspective=layout.use_perspective,
         default_perspective=layout.default_perspective,
     )
@@ -227,12 +211,11 @@ def _with_saved(layout: Layout, saved: _SavedLayout) -> Layout:
         logger.warning("Ignoring the saved bezels, which can't be negative: %s", saved.bezel_mms)
     else:
         bezels_mm = saved.bezel_mms
-    diagonals = saved.user_diagonal_inches or None
     return replace(
         layout,
         ppi_norm_offsets=saved.ppi_norm_offsets,
         bezels_mm=bezels_mm,
-        user_diagonal_inches=diagonals,
+        user_diagonal_inches=saved.user_diagonal_inches,
         use_perspective=saved.use_perspective,
         default_perspective=saved.default_perspective,
     )

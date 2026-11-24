@@ -379,7 +379,7 @@ def snapshots(request, gui_env):
 def saved_layout(gui_env):
     """The layout of the two fixed monitors as a user has saved it: the default positions and
     one perspective, "wall", that isn't the default."""
-    layout = display_detection.detect_layout(gui_env.paths.config, linux)
+    layout = display_store.load(gui_env.paths.config, display_detection.detect_displays(linux))
     count = len(layout.displays)
     viewer_position = (0.0, 0.0, layout.max_ppi() * 1200 / 25.4)
     wall = Perspective(

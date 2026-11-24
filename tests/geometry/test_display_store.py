@@ -8,13 +8,16 @@ from superpaper import files
 from superpaper.geometry import display_store
 from superpaper.geometry.displays import Display, Layout
 from superpaper.geometry.perspective import Perspective, Swivel, SwivelAxis, Tilt
+from tests.conftest import monitor
 from tests.geometry.conftest import (
     DISPLAY_SYSTEMS_DAT,
     DUAL_KEY,
     DUAL_MONITORS,
     DUAL_PERSP,
+    LAPTOP_KEY,
     LAPTOP_MONITORS,
     SAVED_COUCH,
+    SAVED_DESK,
     detect,
     edit_the_layout,
 )
@@ -103,8 +106,8 @@ def test_the_files_use_the_encoding_older_versions_read(tmp_path, monkeypatch):
     assert display_store.load(tmp_path, DISPLAYS).perspectives == (cafe,)
 
 
-def test_saving_an_unchanged_layout_is_byte_stable(monkeypatch, saved_layouts):
-    layout = detect(monkeypatch, saved_layouts, DUAL_MONITORS)
+def test_saving_an_unchanged_layout_is_byte_stable(saved_layouts):
+    layout = detect(saved_layouts, DUAL_MONITORS)
     dat = (saved_layouts / "display_systems.dat").read_bytes()
     persp = (saved_layouts / f"{DUAL_KEY}.persp").read_bytes()
 
@@ -115,18 +118,18 @@ def test_saving_an_unchanged_layout_is_byte_stable(monkeypatch, saved_layouts):
     assert (saved_layouts / f"{DUAL_KEY}.persp").read_bytes() == persp
 
 
-def test_repeated_saves_are_byte_stable(monkeypatch, saved_layouts):
+def test_repeated_saves_are_byte_stable(saved_layouts):
     for _ in range(3):
-        display_store.save_layout(saved_layouts, detect(monkeypatch, saved_layouts, DUAL_MONITORS))
+        display_store.save_layout(saved_layouts, detect(saved_layouts, DUAL_MONITORS))
 
     assert (saved_layouts / "display_systems.dat").read_text(encoding="utf-8") == DISPLAY_SYSTEMS_DAT
 
 
-def test_perspectives_with_whole_numbers_are_byte_stable(monkeypatch, tmp_path):
+def test_perspectives_with_whole_numbers_are_byte_stable(tmp_path):
     persp_file = tmp_path / f"{DUAL_KEY}.persp"
     persp_file.write_text(WHOLE_NUMBER_PERSP, encoding="utf-8")
 
-    layout = detect(monkeypatch, tmp_path, DUAL_MONITORS)
+    layout = detect(tmp_path, DUAL_MONITORS)
     display_store.save_layout(tmp_path, layout)
 
     assert persp_file.read_text(encoding="utf-8") == WHOLE_NUMBER_PERSP
@@ -142,33 +145,33 @@ def test_perspectives_with_whole_numbers_are_byte_stable(monkeypatch, tmp_path):
         WHOLE_NUMBER_PERSP.replace("5,8,0", "5,8"),
     ],
 )
-def test_a_perspective_that_is_not_made_of_numbers_is_refused(monkeypatch, tmp_path, broken):
+def test_a_perspective_that_is_not_made_of_numbers_is_refused(tmp_path, broken):
     (tmp_path / f"{DUAL_KEY}.persp").write_text(broken, encoding="utf-8")
 
     with pytest.raises(ValueError):
-        detect(monkeypatch, tmp_path, DUAL_MONITORS)
+        detect(tmp_path, DUAL_MONITORS)
 
 
-def test_a_fresh_layout_is_saved_with_float_bezels_as_earlier_versions_wrote_it(monkeypatch, tmp_path):
-    layout = detect(monkeypatch, tmp_path, LAPTOP_MONITORS)
+def test_a_fresh_layout_is_saved_with_float_bezels_as_earlier_versions_wrote_it(tmp_path):
+    layout = detect(tmp_path, LAPTOP_MONITORS)
 
     display_store.save_layout(tmp_path, layout)
 
     assert "bezel_mms = 0.0,0.0\n" in (tmp_path / "display_systems.dat").read_text(encoding="utf-8")
 
 
-def test_entered_diagonals_are_saved_as_entered(monkeypatch, tmp_path):
-    layout = detect(monkeypatch, tmp_path, DUAL_MONITORS).with_diagonals([27.25, 23.75])
+def test_entered_diagonals_are_saved_as_entered(tmp_path):
+    layout = detect(tmp_path, DUAL_MONITORS).with_diagonals([27.25, 23.75])
 
     display_store.save_layout(tmp_path, layout)
-    reloaded = detect(monkeypatch, tmp_path, DUAL_MONITORS)
+    reloaded = detect(tmp_path, DUAL_MONITORS)
 
     assert reloaded.user_diagonal_inches == (27.25, 23.75)
     assert reloaded.ppi_norm_offsets == layout.ppi_norm_offsets
 
 
-def test_saving_writes_the_perspectives_and_the_choice_with_the_layout(monkeypatch, saved_layouts):
-    layout = edit_the_layout(detect(monkeypatch, saved_layouts, DUAL_MONITORS))
+def test_saving_writes_the_perspectives_and_the_choice_with_the_layout(saved_layouts):
+    layout = edit_the_layout(detect(saved_layouts, DUAL_MONITORS))
     layout = layout.without_perspective("desk").with_perspective(SAVED_COUCH, use_perspective=False, is_default=True)
 
     display_store.save_layout(saved_layouts, layout)
@@ -178,17 +181,17 @@ def test_saving_writes_the_perspectives_and_the_choice_with_the_layout(monkeypat
     assert (saved_layouts / f"{DUAL_KEY}.persp").read_text(encoding="utf-8") == DUAL_PERSP[
         DUAL_PERSP.index("[couch]") :
     ]
-    assert detect(monkeypatch, saved_layouts, DUAL_MONITORS) == layout
+    assert detect(saved_layouts, DUAL_MONITORS) == layout
 
 
-def test_no_perspective_file_is_made_for_a_layout_without_perspectives(monkeypatch, tmp_path):
-    display_store.save_layout(tmp_path, detect(monkeypatch, tmp_path, LAPTOP_MONITORS))
+def test_no_perspective_file_is_made_for_a_layout_without_perspectives(tmp_path):
+    display_store.save_layout(tmp_path, detect(tmp_path, LAPTOP_MONITORS))
 
     assert [path.name for path in tmp_path.iterdir()] == ["display_systems.dat"]
 
 
-def test_a_layout_that_overlaps_is_never_saved(monkeypatch, saved_layouts):
-    layout = detect(monkeypatch, saved_layouts, DUAL_MONITORS)
+def test_a_layout_that_overlaps_is_never_saved(saved_layouts):
+    layout = detect(saved_layouts, DUAL_MONITORS)
     overlapping = layout.with_offsets([(0, 0), (10, 10)])
     dat = (saved_layouts / "display_systems.dat").read_bytes()
 
@@ -196,41 +199,35 @@ def test_a_layout_that_overlaps_is_never_saved(monkeypatch, saved_layouts):
         display_store.save_layout(saved_layouts, overlapping)
 
     assert (saved_layouts / "display_systems.dat").read_bytes() == dat
-    assert (
-        display_store.save_or_failure(display_store.save_layout, saved_layouts, overlapping, "display settings")
-        is not None
-    )
 
 
-def test_saving_replaces_a_layout_file_that_cannot_be_read_keeping_the_old_one_aside(
-    monkeypatch, saved_layouts, caplog
-):
-    layout = detect(monkeypatch, saved_layouts, DUAL_MONITORS).without_perspective("couch")
+def test_saving_replaces_a_layout_file_that_cannot_be_read_keeping_the_old_one_aside(saved_layouts, caplog):
+    layout = detect(saved_layouts, DUAL_MONITORS).without_perspective("couch")
     (saved_layouts / "display_systems.dat").write_text("no section header\n", encoding="utf-8")
     (saved_layouts / "display_systems.dat.corrupt").write_text("an earlier one\n", encoding="utf-8")
     with pytest.raises(configparser.Error):
-        detect(monkeypatch, saved_layouts, DUAL_MONITORS)
+        detect(saved_layouts, DUAL_MONITORS)
 
     display_store.save_layout(saved_layouts, layout)
 
-    assert detect(monkeypatch, saved_layouts, DUAL_MONITORS) == layout
+    assert detect(saved_layouts, DUAL_MONITORS) == layout
     assert (saved_layouts / "display_systems.dat.corrupt").read_text(encoding="utf-8") == "no section header\n"
     assert "display_systems.dat.corrupt" in caplog.text
 
 
-def test_saving_keeps_a_perspective_file_that_cannot_be_read_aside(monkeypatch, saved_layouts, caplog):
-    layout = detect(monkeypatch, saved_layouts, DUAL_MONITORS)
+def test_saving_keeps_a_perspective_file_that_cannot_be_read_aside(saved_layouts, caplog):
+    layout = detect(saved_layouts, DUAL_MONITORS)
     persp = saved_layouts / f"{DUAL_KEY}.persp"
     persp.write_text("[desk]\ncentral_disp = x\n", encoding="utf-8")
 
     display_store.save_layout(saved_layouts, layout)
 
     assert (saved_layouts / f"{DUAL_KEY}.persp.corrupt").read_text(encoding="utf-8") == "[desk]\ncentral_disp = x\n"
-    assert detect(monkeypatch, saved_layouts, DUAL_MONITORS) == layout
+    assert detect(saved_layouts, DUAL_MONITORS) == layout
     assert ".persp.corrupt" in caplog.text
 
 
-def test_a_saved_layout_whose_displays_overlap_does_not_load(monkeypatch, tmp_path):
+def test_a_saved_layout_whose_displays_overlap_does_not_load(tmp_path):
     key = Layout.initial(DISPLAYS).key
     (tmp_path / display_store.LAYOUTS_FILE).write_text(
         f"[{key}]\nppi_norm_offsets = 0,0;10,10\nbezel_mms = 0.0,0.0;0.0,0.0\n"
@@ -274,3 +271,61 @@ def test_files_that_cannot_be_used_give_the_default_arrangement_and_stay_as_they
     assert loaded.layout == default
     assert "can't be used" in loaded.problem
     assert path.read_bytes() == before
+
+
+def test_negative_saved_bezels_are_ignored(tmp_path, caplog):
+    key = Layout.initial(DISPLAYS).key
+    (tmp_path / display_store.LAYOUTS_FILE).write_text(
+        f"[{key}]\n"
+        "ppi_norm_offsets = 0,0;2000,0\n"
+        "bezel_mms = -3.0,0.0;0.0,0.0\n"
+        "user_diagonal_inches = None\n"
+        "use_perspective = 1\n"
+        "def_perspective = None\n",
+        encoding="utf-8",
+    )
+
+    layout = display_store.load(tmp_path, DISPLAYS)
+
+    assert layout.bezels_in_mm() == [(0.0, 0.0), (0.0, 0.0)]
+    assert layout.ppi_norm_offsets == ((0, 0), (2000, 0))
+    assert "Ignoring the saved bezels" in caplog.text
+
+
+def test_a_saved_layout_loads(saved_layouts):
+    layout = detect(saved_layouts, DUAL_MONITORS)
+
+    assert layout.ppi_norm_offsets == ((0, 0), (2605.7204000891693, 98.49418762870297))
+    assert layout.bezels_in_mm() == [(10.5, 0.0), (0.0, 0.0)]
+    assert layout.uses_user_diagonals is True
+    assert layout.diagonal_inches() == [27.0, 23.8]
+    assert [display.detected_phys_size_mm for display in layout.displays] == [(597, 336), (527, 296)]
+    assert layout.ppi_norm_resolutions() == [(2560, 1440), (2257, 1269)]
+    assert layout.ppi_norm_crops([(0, 0), (0, 0)]) == [(0, 0, 2560, 1440), (2606, 98, 4863, 1367)]
+    assert layout.use_perspective is True
+    assert layout.default_perspective == "desk"
+    assert layout.perspectives == (SAVED_DESK, SAVED_COUCH)
+
+
+def test_the_laptop_layout_loads_with_its_diagonal_override(saved_layouts):
+    layout = detect(saved_layouts, LAPTOP_MONITORS)
+
+    (laptop,) = layout.displays
+    assert laptop.phys_size_failed is True
+    assert laptop.detected_phys_size_mm == (509, 286)
+    assert layout.diagonal_inches() == [15.6]
+    assert layout.default_perspective is None
+    assert layout.perspectives == ()
+
+
+def test_monitors_without_a_saved_layout_get_a_guessed_one(saved_layouts):
+    moved = [DUAL_MONITORS[0], monitor(0, 1440, 1920, 1080, 527, 296, "HDMI-A-1")]
+
+    layout = detect(saved_layouts, moved)
+
+    assert layout.key not in {DUAL_KEY, LAPTOP_KEY}
+    assert layout.uses_user_diagonals is False
+    assert layout.bezels_in_mm() == [(0.0, 0.0), (0.0, 0.0)]
+    assert layout.ppi_norm_offsets == ((0, 0), (150, 1440))
+    assert layout.default_perspective is None
+    assert layout.perspectives == ()
