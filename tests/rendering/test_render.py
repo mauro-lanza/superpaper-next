@@ -1,6 +1,7 @@
 """Composing the desktop image: the three ways of spreading images over the displays."""
 
 import hashlib
+from pathlib import Path
 
 import numpy
 import PIL
@@ -116,21 +117,18 @@ def test_one_image_per_display_keeps_the_gaps_black(tmp_path, display_layout):
 # them. The digests pin the output exactly; they were recorded with Pillow 12.2.0 and
 # numpy 2.5.0, so a different version of either can change them, and then they are
 # re-recorded deliberately. The perspective case solves a linear system with numpy's
-# OpenBLAS, whose AVX-512 kernels may round its last bits differently from the other
-# x86-64 kernels, and Apple Silicon's rounds differently again; all three digests are accepted.
+# OpenBLAS, whose kernels round its last bits differently per CPU, so it is compared
+# with a tolerance against a stored image instead.
 SMALL_MONITORS = [
     monitor(0, 0, 64, 36, 120, 68, "A"),
     monitor(64, 6, 48, 27, 105, 59, "B"),
 ]
 ADVANCED_GOLDENS = {
     "offsets": {"d55a711c95670d2e4ad667b5967864f6a4ec9f9d67b2c94d06f43f95075dd618"},
-    "span groups": {"49a179d205c35521f306a400e09310146b7b87cc69dcba71f61fb6016e549f98"},
-    "perspective": {
-        "ff5a6b2529f1523302eb0d2eeea79949a5f7563dc0c17b671436d5e4496533a9",
-        "5ab69aa9661b802a4e11d15221fdcb440d2709d9fddf6cd8331bf411ad1b9f6a",
-        "2f36f7bf86e038c2347b6e3896fb3e90d01f28bb6815f1a694b0864a1432dad3",
-    },
+    "span groups": {"0c5bd0c75270aa04e765d40b30d95d12b15fe854668d5da9b83af0d98934f762"},
 }
+PERSPECTIVE_GOLDEN = Path(__file__).parent / "goldens" / "perspective.png"
+PERSPECTIVE_TOLERANCE = 2
 
 
 @pytest.mark.parametrize(
@@ -166,6 +164,12 @@ def test_advanced_spanning_golden(tmp_path, display_layout, case, spangroups, pe
     )
 
     assert image.size == (112, 36)
+    if case == "perspective":
+        with Image.open(PERSPECTIVE_GOLDEN) as golden:
+            assert (image.size, image.mode) == (golden.size, golden.mode)
+            difference = numpy.abs(numpy.asarray(image, int) - numpy.asarray(golden, int))
+        assert difference.max() <= PERSPECTIVE_TOLERANCE
+        return
     digest = hashlib.sha256(image.tobytes()).hexdigest()
     assert digest in ADVANCED_GOLDENS[case], f"pixels changed (Pillow {PIL.__version__}, numpy {numpy.__version__})"
 

@@ -77,12 +77,30 @@ def test_an_image_opens_upright_and_in_rgb(tmp_path):
     stored.save(tmp_path / "rotated.jpg", exif=exif.tobytes())
     Image.new("L", (3, 3), 128).save(tmp_path / "grey.png")
 
-    upright = open_source_image(tmp_path / "rotated.jpg")
+    upright = open_source_image(tmp_path / "rotated.jpg", None)
 
     assert upright.size == (20, 40)
     assert upright.getpixel((3, 20))[2] > 150  # blue on the left
     assert upright.getpixel((16, 20))[0] > 150  # red on the right
-    assert open_source_image(tmp_path / "grey.png").mode == "RGB"
+    assert open_source_image(tmp_path / "grey.png", None).mode == "RGB"
+
+
+@pytest.mark.parametrize("orientation", [None, 6])
+@pytest.mark.parametrize("min_size", [(100, 50), (101, 51), (500, 40), (800, 600), (1600, 1200)])
+def test_a_jpeg_is_never_decoded_below_the_requested_size(tmp_path, orientation, min_size):
+    stored = (1600, 1200) if orientation is None else (1200, 1600)
+    path = save(tmp_path / "big.jpg", size=stored, orientation=orientation)
+
+    image = open_source_image(path, min_size)
+
+    assert image.width >= min_size[0]
+    assert image.height >= min_size[1]
+
+
+def test_a_jpeg_is_decoded_at_a_reduced_scale_when_less_is_needed(tmp_path):
+    path = save(tmp_path / "big.jpg", size=(1200, 1600), orientation=6)
+
+    assert open_source_image(path, (100, 50)).size == (200, 150)
 
 
 def test_transparent_pixels_are_black_whatever_colour_they_hide(tmp_path):
@@ -95,7 +113,7 @@ def test_transparent_pixels_are_black_whatever_colour_they_hide(tmp_path):
     palette.save(tmp_path / "palette.png", transparency=0)
 
     for name in ("rgba.png", "palette.png"):
-        image = open_source_image(tmp_path / name)
+        image = open_source_image(tmp_path / name, None)
         assert image.mode == "RGB"
         assert [image.getpixel((x, 0)) for x in range(2)] == [(0, 0, 0), (0, 200, 0)]
 
@@ -106,7 +124,7 @@ def test_an_image_over_the_size_limit_is_refused_before_it_is_decoded(tmp_path, 
     monkeypatch.setattr(source_image.ImageOps, "exif_transpose", lambda image: pytest.fail("the image was decoded"))
 
     with pytest.raises(SourceImageError, match="too large: 4 x 4 pixels"):
-        open_source_image(path)
+        open_source_image(path, None)
 
 
 def test_an_unusable_image_is_reported_by_its_path(tmp_path):
@@ -123,7 +141,7 @@ def test_an_unusable_image_is_reported_by_its_path(tmp_path):
         (truncated, "can't be read"),
     ]:
         with pytest.raises(SourceImageError, match=reason) as raised:
-            open_source_image(path)
+            open_source_image(path, None)
         assert str(path) in str(raised.value)
 
 

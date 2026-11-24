@@ -4,6 +4,7 @@ Nothing here writes a file or shows anything: render_cache keeps the result and
 superpaper.desktop shows it.
 """
 
+import math
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -52,13 +53,22 @@ def resize_to_fill(
         max(round(resize_multiplier * image_size[0]), res[0]),
         max(round(resize_multiplier * image_size[1]), res[1]),
     )
-    img = img.resize(new_size, resample=resample, reducing_gap=reducing_gap)
 
     extra_width = new_size[0] - res[0]
     extra_height = new_size[1] - res[1]
     left = min(max(round(extra_width / 2 * (1 + offset_x)), 0), extra_width)
     top = min(max(round(extra_height / 2 * (1 + offset_y)), 0), extra_height)
-    return img.crop((left, top, left + res[0], top + res[1]))
+    # The window of the scaled image, in the coordinates of ``img``: resizing only that box
+    # avoids building the whole zoomed image.
+    to_source_x = image_size[0] / new_size[0]
+    to_source_y = image_size[1] / new_size[1]
+    box = (left * to_source_x, top * to_source_y, (left + res[0]) * to_source_x, (top + res[1]) * to_source_y)
+    return img.resize(res, resample=resample, box=box, reducing_gap=reducing_gap)
+
+
+def _zoomed(res: tuple[int, int], zoom: float) -> tuple[int, int]:
+    """The size an image must at least have to fill ``res`` at ``zoom`` without being enlarged."""
+    return math.ceil(res[0] * zoom), math.ceil(res[1] * zoom)
 
 
 def simple(
@@ -69,7 +79,8 @@ def simple(
     The image is resized to fill the bounding box of the displays, so this works for any
     arrangement of them. ``zoom`` and ``pan`` place the image as resize_to_fill describes.
     """
-    return resize_to_fill(open_source_image(source), layout.desktop_size(), zoom=zoom, offset=pan)
+    size = layout.desktop_size()
+    return resize_to_fill(open_source_image(source, _zoomed(size, zoom)), size, zoom=zoom, offset=pan)
 
 
 def _to_group_coordinates(group_crops: list[list[Crop]]) -> list[list[Crop]]:
@@ -137,10 +148,12 @@ def advanced(
     for source, grp, grp_crops, grp_res_arr, grp_bez in zip(
         sources, spangroups, grp_crop_tuples, grp_res_array, grp_bezels, strict=True
     ):
-        img = open_source_image(source)
         if perspective is not None:
             grp_plane_crops, grp_coeffs = group_projection(plane_crops, coefficients, grp)
-            img_workingsize = resize_to_fill(img, canvas_size(grp_plane_crops), zoom=zoom, offset=pan)
+            working_size = canvas_size(grp_plane_crops)
+            img_workingsize = resize_to_fill(
+                open_source_image(source, _zoomed(working_size, zoom)), working_size, zoom=zoom, offset=pan
+            )
             for coeffs, display, res in zip(grp_coeffs, grp, grp_res_arr, strict=True):
                 left, top, right, bottom = (round(edge) for edge in crop_tuples[display])
                 persp_crop = img_workingsize.transform(
@@ -155,7 +168,9 @@ def advanced(
             # The canvas includes the outer bezels so the result matches the preview (issue
             # #156); the per-display crops stay resolution-sized.
             canvas_tuple_eff = canvas_size_with_bezels(grp_crops, grp_bez)
-            img_workingsize = resize_to_fill(img, canvas_tuple_eff, zoom=zoom, offset=pan)
+            img_workingsize = resize_to_fill(
+                open_source_image(source, _zoomed(canvas_tuple_eff, zoom)), canvas_tuple_eff, zoom=zoom, offset=pan
+            )
             for crop_tup, display, res in zip(grp_crops, grp, grp_res_arr, strict=True):
                 crop_img = img_workingsize.crop(crop_tup)
                 if crop_img.size != res:
@@ -175,5 +190,6 @@ def multi(
     offsets = layout.digital_offsets()
     combined_image = Image.new("RGB", layout.desktop_size(), color=0)
     for source, res, offset in zip(sources, resolutions, offsets, strict=True):
-        combined_image.paste(resize_to_fill(open_source_image(source), res, zoom=zoom, offset=pan), offset)
+        image = open_source_image(source, _zoomed(res, zoom))
+        combined_image.paste(resize_to_fill(image, res, zoom=zoom, offset=pan), offset)
     return combined_image
