@@ -150,7 +150,7 @@ def test_a_perspective_is_staged_with_the_band_and_written_by_its_save(gui_env, 
     dialog.cb_dispsys_def.SetValue(True)
     dialog.tclist_vieweroffs[2].SetValue("700")
 
-    assert dialog.onSave(None) is True
+    assert dialog.onSave(None) == "desk"
 
     assert not (gui_env.paths.config / "display_systems.dat").exists()
     assert not list(gui_env.paths.config.glob("*.persp"))

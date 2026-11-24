@@ -10,6 +10,7 @@ from superpaper.profiles import profile_file
 from superpaper.profiles.form import ProfileForm, chosen_images, parse_form
 from superpaper.profiles.profile_id import NEW_PROFILE_LABEL, ProfileId, ProfileIdError
 from superpaper.profiles.profile_store import ProfileStore, StoredProfile, validate_managed_profile_id
+from superpaper.profiles.selection import real_file
 from superpaper.session import Session
 from superpaper.user_input import Offset, Problems
 
@@ -95,6 +96,15 @@ def delete_profile(stored: StoredProfile, *, store: ProfileStore, session: Sessi
     # If it was running, its slideshow stops.
     session.update(stored.profile_id, None)
     return None
+
+
+def find_test_image(image: str | None, default_image: str) -> str | Problems:
+    """The real path of ``image``, or of ``default_image`` if none was chosen; or why there is none."""
+    wanted = image or default_image
+    found = real_file(wanted)
+    if found is None:
+        return Problems((f"Test image not found in {[wanted]}.",))
+    return found
 
 
 def align_test_profile(image: str, perspective: PerspectiveChoice, offsets: Sequence[Offset]) -> profile_file.Profile:

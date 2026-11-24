@@ -171,8 +171,8 @@ class BrowsePaths(wx.Dialog):
     def onDefDir(self, event):
         sel_path = self.dir3.GetPath()
         if is_folder(sel_path):
-            self.defdir = sel_path
-            self._remember_default_dir(self.defdir.strip())
+            self.defdir = sel_path.strip()
+            self._remember_default_dir(self.defdir)
 
     def onClrDefDir(self, event):
         self.defdir = ""

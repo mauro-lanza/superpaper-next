@@ -8,12 +8,12 @@ changed. Saving, deleting, reverting and applying what it describes is superpape
 
 import os
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import assert_never
 
-from superpaper.geometry.canvas import DisplayArea
+from superpaper.geometry.canvas import DisplayArea, source_size
 from superpaper.geometry.displays import Layout
-from superpaper.geometry.perspective import Default, PerspectiveChoice
+from superpaper.geometry.perspective import Default, DegeneratePerspective, PerspectiveChoice
 from superpaper.profiles import profile_file
 from superpaper.profiles.profile_file import Correction, OffsetsCorrection, Profile, SpanMode
 from superpaper.profiles.selection import SortMode
@@ -90,6 +90,30 @@ def display_areas(layout: Layout, span_mode: SpanMode) -> list[DisplayArea]:
             return layout.real_areas()
         case _:
             assert_never(span_mode)
+
+
+def source_quality_size(layout: Layout, choice: PerspectiveChoice, offsets: Sequence[Offset]) -> tuple[int, int] | None:
+    """The size an image should have to fill the displays of ``layout`` with the manual
+    ``offsets`` and perspective ``choice``; None if the perspective turns a display edge-on."""
+    perspective = layout.perspective_for(choice) if layout.use_perspective else None
+    try:
+        return source_size(layout.ppi_norm_crops(offsets), perspective)
+    except DegeneratePerspective:
+        return None
+
+
+def fit_to_displays(form: ProfileForm, count: int) -> ProfileForm:
+    """``form`` with the offsets and span group choices cut or filled up to ``count`` displays.
+    Per-display sources stay as they are."""
+    return replace(
+        form,
+        offsets=_fitted(form.offsets, count, "0,0"),
+        spangroup_choices=_fitted(form.spangroup_choices, count, 0),
+    )
+
+
+def _fitted[T](values: Sequence[T], count: int, filler: T) -> tuple[T, ...]:
+    return tuple(values[:count]) + (filler,) * (count - len(values))
 
 
 def applied_offsets(applied: bool, fields: Sequence[str]) -> tuple[Offset, ...]:

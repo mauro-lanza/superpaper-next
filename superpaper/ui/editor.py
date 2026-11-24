@@ -2,13 +2,14 @@
 displays and the display settings band."""
 
 import logging
+from contextlib import contextmanager
 from dataclasses import replace
 from functools import partial
 from typing import assert_never
 
 import wx  # ty:ignore[unresolved-import]
 
-from superpaper.geometry import canvas, layout_edit
+from superpaper.geometry import layout_edit
 from superpaper.geometry.displays import Layout
 from superpaper.geometry.perspective import Default, Disabled, choice_label, parse_choice
 from superpaper.paths import resource
@@ -32,9 +33,10 @@ from superpaper.ui.help import HelpFrame, image_quality_advice, show_help_popup
 from superpaper.ui.message import (
     ask_apply_with_unsaved_displays,
     ask_unsaved_changes,
+    confirm,
     draft_shown,
     in_modal,
-    show_message_dialog,
+    show_message,
     show_modal,
     when_modals_closed,
 )
@@ -49,11 +51,15 @@ RUNNING_MARKER = " (running)"
 VANISHED_SOURCES_MESSAGE = (
     "Some sources are listed for displays that are no longer connected. They are kept, but not shown."
 )
-
-
-def _fitted(values, count, filler):
-    """``values`` cut or filled up with ``filler`` to ``count`` entries."""
-    return tuple(values[:count]) + (filler,) * (count - len(values))
+SPANGROUPS_HELP = (
+    "You can span wallpapers on groups of displays.\n"
+    "To configure this, select a group number for\n"
+    "each display. By default each display belongs\n"
+    "to the first group, group 0.\n"
+    "Once you have selected your groups, add at least\n"
+    "one wallpaper source for each group."
+)
+EDGE_ON_PERSPECTIVE_NOTE = "The selected perspective can't be used:\na display is turned edge-on."
 
 
 class StagedLayout:
@@ -198,7 +204,6 @@ class WallpaperSettingsPanel(wx.Panel):
     ):
         wx.Panel.__init__(self, parent)
         self.frame = parent
-        self.paths = paths
         self._get_settings = get_settings
         self.update_settings = update_settings
         self.store = store
@@ -630,30 +635,38 @@ class WallpaperSettingsPanel(wx.Panel):
     #
     # Profile loading and display methods
     #
+    @contextmanager
+    def _loading_fields(self):
+        """Fields written inside it are not tracked as the user's edits."""
+        self._loading = True
+        try:
+            yield
+        finally:
+            self._loading = False
+
     def populate_fields(self, stored):
         """Populates config dialog fields with a saved profile's settings."""
-        self._loading = True
-        profile = stored.profile
-        self.loaded_profile = stored
-        self._clear_pick()
-        self._remember_edited(stored.profile_id)
-        shown = form.form_from(profile, self.staged.layout)
-        self._write_form(shown)
-        self.wpprev_pnl.zoom = profile.zoom
-        self.wpprev_pnl.offset = profile.pan
+        with self._loading_fields():
+            profile = stored.profile
+            self.loaded_profile = stored
+            self._clear_pick()
+            self._remember_edited(stored.profile_id)
+            shown = form.form_from(profile, self.staged.layout)
+            self._write_form(shown)
+            self.wpprev_pnl.zoom = profile.zoom
+            self.wpprev_pnl.offset = profile.pan
 
-        # Update wallpaper preview from selected profile
-        display_data = self._display_areas()
-        # Preview the store's current record: its selection follows the slideshow.
-        shown_images = (self.store.get(stored.profile_id) or stored).selection.current()
-        self.wpprev_pnl.preview_wallpaper(shown_images, self.span_mode, display_data, self.preview_spangroups())
-        self._set_source_note("" if shown_images else "The images of this profile were not found.")
-        self.wpprev_pnl.layout_editor.toggle_buttons(show_config=self.span_mode == "advanced", in_config=False)
+            # Update wallpaper preview from selected profile
+            display_data = self._display_areas()
+            # Preview the store's current record: its selection follows the slideshow.
+            shown_images = (self.store.get(stored.profile_id) or stored).selection.current()
+            self.wpprev_pnl.preview_wallpaper(shown_images, self.span_mode, display_data, self.preview_spangroups())
+            self._set_source_note("" if shown_images else "The images of this profile were not found.")
+            self.wpprev_pnl.layout_editor.toggle_buttons(show_config=self.span_mode == "advanced", in_config=False)
 
         # Loaded data is the new clean baseline. Slideshow normalization in
         # parse_form means the later (posted) checkbox events produce
         # the same serialization, so this stays clean without a deferred call.
-        self._loading = False
         self._set_clean_baseline()
 
     def _write_form(self, shown: form.ProfileForm):
@@ -685,7 +698,8 @@ class WallpaperSettingsPanel(wx.Panel):
         wx.PostEvent(self.cb_offsets, wx.CommandEvent(commandEventType=wx.EVT_CHECKBOX.typeId))
         persp_label = choice_label(shown.perspective)
         if persp_label:
-            self.ch_persp.SetSelection(self.ch_persp.FindString(persp_label, False))
+            labels = self.ch_persp.GetStrings()
+            self.ch_persp.SetSelection(labels.index(persp_label) if persp_label in labels else wx.NOT_FOUND)
         else:
             self.ch_persp.SetSelection(0)
         self.cb_spangroups.SetValue(shown.spangroups_enabled)
@@ -795,7 +809,7 @@ class WallpaperSettingsPanel(wx.Panel):
         try:
             return parse(self._offset_fields())
         except OffsetError as error:
-            show_message_dialog(str(error), "Error")
+            show_message(str(error), "Error")
             return None
 
     def _typed_offsets(self) -> tuple[Offset, ...] | None:
@@ -897,8 +911,7 @@ class WallpaperSettingsPanel(wx.Panel):
                     "\n"
                     "Saved sources are not affected until you overwrite."
                 )
-                res = show_message_dialog(msg, style="YES_NO")
-                if not res:
+                if not confirm(msg):
                     # user canceled
                     return False
             self.path_listctrl.Destroy()
@@ -952,9 +965,8 @@ class WallpaperSettingsPanel(wx.Panel):
 
     def onIdle(self, event):
         leftdown = wx.GetMouseState().LeftIsDown()
-        update = bool(self.resized and not leftdown)
-        if update:
-            self.wpprev_pnl.full_refresh_preview(update, self.span_mode, spangroups=self.preview_spangroups())
+        if self.resized and not leftdown:
+            self.wpprev_pnl.full_refresh_preview(self.span_mode, spangroups=self.preview_spangroups())
             self.resized = False
         else:
             event.Skip()
@@ -1190,18 +1202,17 @@ class WallpaperSettingsPanel(wx.Panel):
 
     def onSelect(self, event):
         """Acts once a profile is picked in the dropdown menu."""
-        if event.GetEventObject().GetName() == "ProfileChoice":
-            picked = self._dropdown_name()
-            if not self.settle_unsaved_changes(displays=False):
-                loaded = self.loaded_profile.profile.name if self.loaded_profile else NEW_PROFILE_LABEL
-                self._select_in_dropdown(loaded)
-                return
-            # Saving may have renamed, added or moved entries.
-            self._select_in_dropdown(picked)
-            if picked == NEW_PROFILE_LABEL:
-                self.onCreateNewProfile(event)
-            else:
-                self.populate_fields(self.list_of_profiles[self.choice_profiles.GetSelection()])
+        picked = self._dropdown_name()
+        if not self.settle_unsaved_changes(displays=False):
+            loaded = self.loaded_profile.profile.name if self.loaded_profile else NEW_PROFILE_LABEL
+            self._select_in_dropdown(loaded)
+            return
+        # Saving may have renamed, added or moved entries.
+        self._select_in_dropdown(picked)
+        if picked == NEW_PROFILE_LABEL:
+            self.onCreateNewProfile(event)
+        else:
+            self.populate_fields(self.list_of_profiles[self.choice_profiles.GetSelection()])
 
     def onRevert(self, event):
         """Discards unsaved changes and loads the saved profile from disk again, with any
@@ -1281,7 +1292,7 @@ class WallpaperSettingsPanel(wx.Panel):
         if not self.display_band.has_unsaved_changes():
             return True
         message = "The displays changed. The unsaved display settings will be discarded. Continue?"
-        return show_message_dialog(message, "Displays changed", self.frame, style="YES_NO")
+        return confirm(message, "Displays changed", self.frame)
 
     def carried_over(self, layout):
         """What the editor for ``layout`` takes over from this one: the profile loaded, its
@@ -1289,12 +1300,7 @@ class WallpaperSettingsPanel(wx.Panel):
         sources stay as they are, also for displays that are gone."""
         shown = self._read_form() if self.has_unsaved_profile_changes() else None
         if shown is not None:
-            count = len(layout.displays)
-            shown = replace(
-                shown,
-                offsets=_fitted(shown.offsets, count, "0,0"),
-                spangroup_choices=_fitted(shown.spangroup_choices, count, 0),
-            )
+            shown = form.fit_to_displays(shown, len(layout.displays))
         return self.loaded_profile, shown, (self._pick, dict(self._pick_by_display))
 
     def carry_over(self, loaded, shown, picks):
@@ -1307,17 +1313,16 @@ class WallpaperSettingsPanel(wx.Panel):
         else:
             self.onCreateNewProfile(None)
         if shown is not None:
-            self._loading = True
-            self._write_form(shown)
-            self.refresh_layout_preview()
-            self._loading = False
+            with self._loading_fields():
+                self._write_form(shown)
+                self.refresh_layout_preview()
         if current is not None or shown is not None:
             self._pick, self._pick_by_display = pick, pick_by_display
         else:
             self._clear_pick()
         self._update_dirty_state()
         if self._vanished_sources():
-            show_message_dialog(VANISHED_SOURCES_MESSAGE, "Displays changed", self.frame)
+            show_message(VANISHED_SOURCES_MESSAGE, "Displays changed", self.frame)
 
     def _vanished_sources(self):
         """The source rows of displays or groups that no longer exist."""
@@ -1340,9 +1345,7 @@ class WallpaperSettingsPanel(wx.Panel):
         vanished = self._vanished_sources()
         if not vanished:
             return True
-        if not show_message_dialog(
-            VANISHED_SOURCES_MESSAGE + "\n\nRemove them and go on?", "Displays changed", self.frame, style="YES_NO"
-        ):
+        if not confirm(VANISHED_SOURCES_MESSAGE + "\n\nRemove them and go on?", "Displays changed", self.frame):
             return False
         for item in reversed(vanished):
             self.path_listctrl.DeleteItem(item)
@@ -1377,7 +1380,7 @@ class WallpaperSettingsPanel(wx.Panel):
 
     def _show_problems(self, problems: Problems):
         """Tell the user what keeps the profile from being saved or applied."""
-        show_message_dialog("\n\n".join(problems.messages), "Error")
+        show_message("\n\n".join(problems.messages), "Error")
 
     def onSave(self, event):
         """Saves the profile the fields describe, if it is valid."""
@@ -1412,30 +1415,28 @@ class WallpaperSettingsPanel(wx.Panel):
                 self._display_areas(),
                 form.applied_spangroups(current),
             )
-            self.list_of_profiles = self.store.profiles
             self._set_clean_baseline()
         return True
 
     def onCreateNewProfile(self, event):
         """Empties the wallpaper profile config fields."""
-        self._loading = True
-        self.loaded_profile = None
-        self._clear_pick()
-        self._set_source_note("")
-        self._select_in_dropdown(NEW_PROFILE_LABEL)
+        with self._loading_fields():
+            self.loaded_profile = None
+            self._clear_pick()
+            self._set_source_note("")
+            self._select_in_dropdown(NEW_PROFILE_LABEL)
 
-        self.refresh_path_listctrl(False, migrate_paths=False)
+            self.refresh_path_listctrl(False, migrate_paths=False)
 
-        self._write_form(form.blank_form(self.staged.layout))
-        self.onSpanRadio(None)
+            self._write_form(form.blank_form(self.staged.layout))
+            self.onSpanRadio(None)
 
-        # refresh wallpaper preview back to black previews
-        self.wpprev_pnl.draw_displays()
-        self.Refresh()
-        self.Update()
+            # refresh wallpaper preview back to black previews
+            self.wpprev_pnl.draw_displays()
+            self.Refresh()
+            self.Update()
 
         # A fresh (empty) profile starts clean.
-        self._loading = False
         self._set_clean_baseline()
 
     def onDeleteProfile(self, event):
@@ -1443,11 +1444,9 @@ class WallpaperSettingsPanel(wx.Panel):
         selected_name = self._dropdown_name()
         profile = saved_profile(self.store, selected_name)
         if profile is None:
-            show_message_dialog("Selected profile is not saved.", "Error")
+            show_message("Selected profile is not saved.", "Error")
             return
-        if not show_message_dialog(
-            f"Do you want to delete profile: {selected_name}?", "Confirm Delete", style="YES_NO"
-        ):
+        if not confirm(f"Do you want to delete profile: {selected_name}?", "Confirm Delete"):
             return
         problems = delete_profile(profile, store=self.store, session=self.session)
         if problems is not None:
@@ -1461,7 +1460,7 @@ class WallpaperSettingsPanel(wx.Panel):
         # Use the settings currently written out in the fields!
         testimage = [str(resource("test.png"))]
         if not is_file(testimage[0]):
-            show_message_dialog(f"Test image not found in {testimage}.", "Error")
+            show_message(f"Test image not found in {testimage}.", "Error")
             return
         offsets = self._typed_offsets()
         if offsets is None:
@@ -1476,7 +1475,7 @@ class WallpaperSettingsPanel(wx.Panel):
         paused while it is shown."""
         layout = self.staged.layout
         if not layout.is_valid():
-            show_message_dialog(layout_edit.TEST_OVERLAP_MESSAGE, "Error")
+            show_message(layout_edit.TEST_OVERLAP_MESSAGE, "Error")
             return
         wx.BeginBusyCursor()
         self.session.apply_draft(
@@ -1506,7 +1505,7 @@ class WallpaperSettingsPanel(wx.Panel):
         persp_choices = self._perspective_labels()
         self.ch_persp.SetItems(persp_choices)
         if current_label in persp_choices:
-            self.ch_persp.SetSelection(self.ch_persp.FindString(current_label))
+            self.ch_persp.SetSelection(persp_choices.index(current_label))
         else:
             # The form had picked a perspective that no longer exists; fall
             # back to default and surface it as an unsaved change rather than
@@ -1533,20 +1532,12 @@ class WallpaperSettingsPanel(wx.Panel):
                 offsets = self._applied_offsets()
                 if offsets is None:
                     return
-                perspective = layout.perspective_for(self._selected_perspective()) if layout.use_perspective else None
-                quality_text = image_quality_advice(canvas.source_size(layout.ppi_norm_crops(offsets), perspective))
+                size = form.source_quality_size(layout, self._selected_perspective(), offsets)
+                quality_text = image_quality_advice(size) if size is not None else EDGE_ON_PERSPECTIVE_NOTE
             case _:
                 assert_never(self.span_mode)
         show_help_popup(self.wpprev_pnl, text, button, quality_text)
 
     def onHelpSpanGroups(self, evt):
         """Popup span group config help."""
-        text = (
-            "You can span wallpapers on groups of displays.\n"
-            "To configure this, select a group number for\n"
-            "each display. By default each display belongs\n"
-            "to the first group, group 0.\n"
-            "Once you have selected your groups, add at least\n"
-            "one wallpaper source for each group."
-        )
-        show_help_popup(self, text, evt.GetEventObject())
+        show_help_popup(self, SPANGROUPS_HELP, evt.GetEventObject())

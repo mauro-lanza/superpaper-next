@@ -73,7 +73,6 @@ class WallpaperPreviewPanel(wx.Panel):
         self.use_multi_image = False
         self.current_preview_images = []
         self.preview_img_list = []
-        self.bmp_list = []
 
         # Image zoom & positioning (whole-viewport, applied in resize_to_fill)
         self.zoom = 1.0
@@ -92,18 +91,15 @@ class WallpaperPreviewPanel(wx.Panel):
     #
     # UI drawing methods
     #
-    def draw_displays(self, use_ppi_px=False, use_multi_image=False):
+    def draw_displays(self, use_ppi_px=False):
         bmp_canv = black_bitmap(self.dtop_canvas_relsz)
         if not self.preview_img_list:
-            self.bmp_list.append(bmp_canv)
             self.st_bmp_canvas = wx.StaticBitmap(self, wx.ID_ANY, wx.BitmapBundle(bmp_canv))
             self.st_bmp_canvas.SetPosition(wx.Point(self.dtop_canvas_pos))
             self.st_bmp_canvas.Hide()
 
             for size, offs in self.display_rel_sizes:
-                bmp = black_bitmap(size)
-                self.bmp_list.append(bmp)
-                st_bmp = wx.StaticBitmap(self, wx.ID_ANY, wx.BitmapBundle(bmp))
+                st_bmp = wx.StaticBitmap(self, wx.ID_ANY, wx.BitmapBundle(black_bitmap(size)))
                 st_bmp.Hide()
                 st_bmp.SetPosition(wx.Point(*offs))
                 self.preview_img_list.append(st_bmp)
@@ -196,10 +192,10 @@ class WallpaperPreviewPanel(wx.Panel):
         self.layout_editor.move_buttons()
         self.layout_editor.move_bezel_buttons()
 
-    def full_refresh_preview(self, is_resized, span_mode, spangroups=None):
+    def full_refresh_preview(self, span_mode, spangroups=None):
         self.use_multi_image = span_mode == "multi"
         use_ppi_px = span_mode == "advanced"
-        if is_resized and not self.layout_editor.config_mode:
+        if not self.layout_editor.config_mode:
             if self.current_preview_images:
                 self.preview_wallpaper(self.current_preview_images, span_mode, spangroups=spangroups)
                 self.layout_editor.move_bezel_buttons()
@@ -364,7 +360,7 @@ class WallpaperPreviewPanel(wx.Panel):
     def update_display_data(self, display_data, span_mode, spangroups=None):
         self.display_data = display_data
         self.refresh_preview()
-        self.full_refresh_preview(True, span_mode, spangroups=spangroups)
+        self.full_refresh_preview(span_mode, spangroups=spangroups)
 
     def draw_st_bmps(self, dc):
         for st_bmp in self.preview_img_list:

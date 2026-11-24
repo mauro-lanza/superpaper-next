@@ -9,12 +9,17 @@ from superpaper.geometry import perspective_form
 from superpaper.geometry.displays import Layout
 from superpaper.geometry.perspective import Named
 from superpaper.paths import resource
-from superpaper.profile_actions import align_test_profile
+from superpaper.profile_actions import align_test_profile, find_test_image
 from superpaper.profiles.profile_file import Profile
 from superpaper.profiles.profile_id import NEW_PROFILE_LABEL
-from superpaper.profiles.selection import real_file
-from superpaper.ui.help import show_help_popup
-from superpaper.ui.message import show_message_dialog
+from superpaper.ui.help import (
+    CENTRAL_DISPLAY_HELP,
+    DISPLAY_ROTATION_HELP,
+    PERSPECTIVE_HELP,
+    PERSPECTIVE_PROFILE_HELP,
+    help_button,
+)
+from superpaper.ui.message import confirm, show_message
 from superpaper.user_input import Offset, Problems
 
 
@@ -53,7 +58,6 @@ class PerspectiveConfig(wx.Dialog):
         self._stage_perspectives = stage_perspectives
         self._show_test_profile = show_test_profile
         self.test_image = None
-        self.help_bmp = wx.ArtProvider.GetBitmap(wx.ART_QUESTION, wx.ART_BUTTON, wx.Size(20, 20))
         self.warn_large_img = warn_large_img
 
         sizer_main = wx.BoxSizer(wx.VERTICAL)
@@ -62,11 +66,9 @@ class PerspectiveConfig(wx.Dialog):
         sizer_top = wx.BoxSizer(wx.HORIZONTAL)
         self.cb_master = wx.CheckBox(self, -1, "Use perspective corrections")
         self.cb_master.SetValue(self.layout.use_perspective)
-        self.button_help_persp = wx.BitmapButton(self, bitmap=wx.BitmapBundle(self.help_bmp))
-        self.button_help_persp.Bind(wx.EVT_BUTTON, self.onHelpPerspective)
         sizer_top.Add(self.cb_master, 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5)
         sizer_top.AddStretchSpacer()
-        sizer_top.Add(self.button_help_persp, 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 10)
+        sizer_top.Add(help_button(self, PERSPECTIVE_HELP), 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 10)
 
         # Profile options
         self.create_profile_opts()
@@ -85,7 +87,11 @@ class PerspectiveConfig(wx.Dialog):
         self.Fit()
         if self.layout.default_perspective:
             self.populate_fields(self.layout.default_perspective)
-            self.choice_profiles.SetSelection(self.choice_profiles.FindString(self.layout.default_perspective))
+            self._select_profile(self.layout.default_perspective)
+
+    def _select_profile(self, name: str) -> None:
+        """Select ``name`` in the dropdown; names differing only in case are different profiles."""
+        self.choice_profiles.SetSelection(self.choice_profiles.FindString(name, True))
 
     def create_profile_opts(self):
         """Create sizer for perspective profile options."""
@@ -93,9 +99,8 @@ class PerspectiveConfig(wx.Dialog):
         statbox_profs = self.sizer_prof_opts.GetStaticBox()
 
         self.sizer_prof_bar = wx.BoxSizer(wx.HORIZONTAL)
-        self.profnames = self.layout.perspective_names()
-        self.profnames.append(NEW_PROFILE_LABEL)
-        self.choice_profiles = wx.ComboBox(statbox_profs, -1, choices=self.profnames, style=wx.CB_READONLY)
+        self.choice_profiles = wx.ComboBox(statbox_profs, -1, style=wx.CB_READONLY)
+        self.update_choiceprofile()
         self.choice_profiles.Bind(wx.EVT_COMBOBOX, self.onSelect)
         st_choice_profiles = wx.StaticText(statbox_profs, -1, "Perspective profiles:")
         # name txt ctrl
@@ -105,11 +110,9 @@ class PerspectiveConfig(wx.Dialog):
         self.button_new = wx.Button(statbox_profs, label="New")
         self.button_save = wx.Button(statbox_profs, label="Save")
         self.button_delete = wx.Button(statbox_profs, label="Delete")
-        self.button_help_perspprof = wx.BitmapButton(statbox_profs, bitmap=wx.BitmapBundle(self.help_bmp))
         self.button_new.Bind(wx.EVT_BUTTON, self.onCreateNewProfile)
         self.button_save.Bind(wx.EVT_BUTTON, self.onSave)
         self.button_delete.Bind(wx.EVT_BUTTON, self.onDeleteProfile)
-        self.button_help_perspprof.Bind(wx.EVT_BUTTON, self.onHelpPersProfile)
 
         # Add profile bar items to the sizer
         self.sizer_prof_bar.Add(st_choice_profiles, 0, wx.CENTER | wx.ALL, 5)
@@ -120,7 +123,7 @@ class PerspectiveConfig(wx.Dialog):
         self.sizer_prof_bar.Add(self.button_save, 0, wx.CENTER | wx.ALL, 5)
         self.sizer_prof_bar.Add(self.button_delete, 0, wx.CENTER | wx.ALL, 5)
         self.sizer_prof_bar.AddStretchSpacer()
-        self.sizer_prof_bar.Add(self.button_help_perspprof, 0, wx.CENTER | wx.LEFT, 5)
+        self.sizer_prof_bar.Add(help_button(statbox_profs, PERSPECTIVE_PROFILE_HELP), 0, wx.CENTER | wx.LEFT, 5)
 
         self.sizer_prof_opts.Add(self.sizer_prof_bar, 0, wx.EXPAND | wx.ALL, 5)
         sline = wx.StaticLine(statbox_profs, -1, style=wx.LI_HORIZONTAL)
@@ -149,10 +152,8 @@ class PerspectiveConfig(wx.Dialog):
             sizer_viewer_off.Add(st, 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5)
             sizer_viewer_off.Add(tc, 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5)
 
-        self.button_help_centrald = wx.BitmapButton(statbox_profs, bitmap=wx.BitmapBundle(self.help_bmp))
-        self.button_help_centrald.Bind(wx.EVT_BUTTON, self.onHelpCentralDisp)
         sizer_viewer_off.AddStretchSpacer()
-        sizer_viewer_off.Add(self.button_help_centrald, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 5)
+        sizer_viewer_off.Add(help_button(statbox_profs, CENTRAL_DISPLAY_HELP), 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 5)
 
         # Add remaining options to persp profile sizer
         self.sizer_prof_opts.Add(self.cb_dispsys_def, 0, wx.ALL, 5)
@@ -199,10 +200,8 @@ class PerspectiveConfig(wx.Dialog):
         self.sizer_disp_opts.Add(self.grid, 0, wx.ALL | wx.EXPAND, 5)
 
         # help
-        self.button_help_data = wx.BitmapButton(statbox_disp_opts, bitmap=wx.BitmapBundle(self.help_bmp))
-        self.button_help_data.Bind(wx.EVT_BUTTON, self.onHelpData)
         self.sizer_disp_opts.AddStretchSpacer()
-        self.sizer_disp_opts.Add(self.button_help_data, 0, wx.ALIGN_TOP | wx.RIGHT, 5)
+        self.sizer_disp_opts.Add(help_button(statbox_disp_opts, DISPLAY_ROTATION_HELP), 0, wx.ALIGN_TOP | wx.RIGHT, 5)
 
     def display_opt_widget_row(self, row_id):
         """Return a display option widget row."""
@@ -254,7 +253,7 @@ class PerspectiveConfig(wx.Dialog):
             # (its .persp file is gone, say). Offer it as a new profile to fill in:
             # inventing settings here would let the next save of any perspective
             # persist them.
-            self.onCreateNewProfile(None)
+            self._show_blank()
             self.tc_name.SetValue(persp_name)
             self.cb_dispsys_def.SetValue(True)
             return
@@ -278,9 +277,7 @@ class PerspectiveConfig(wx.Dialog):
 
     def update_choiceprofile(self):
         """Reload profile list into the choice box."""
-        self.profnames = self.layout.perspective_names()
-        self.profnames.append(NEW_PROFILE_LABEL)
-        self.choice_profiles.SetItems(self.profnames)
+        self.choice_profiles.SetItems([*self.layout.perspective_names(), NEW_PROFILE_LABEL])
 
     #
     # Button methods
@@ -300,12 +297,13 @@ class PerspectiveConfig(wx.Dialog):
         """Acts once a profile is picked in the dropdown menu."""
         item_str = event.GetString()
         if item_str == NEW_PROFILE_LABEL:
-            self.onCreateNewProfile(event)
+            self._show_blank()
         else:
             self.populate_fields(item_str)
 
-    def onSave(self, evt=None) -> bool:
-        """Stage the perspective config into the editor's layout; whether it was valid."""
+    def onSave(self, evt=None) -> str | None:
+        """Stage the perspective config into the editor's layout; the name it was saved
+        under, or None if it was not valid."""
         persp_name = self.tc_name.GetLineText(0)
         form = perspective_form.PerspectiveForm(
             name=persp_name,
@@ -328,20 +326,20 @@ class PerspectiveConfig(wx.Dialog):
 
         result = stage(confirmed=False)
         if isinstance(result, perspective_form.NeedsConfirm):
-            if not show_message_dialog(result.message, "Info", style="YES_NO"):
-                return False
+            if not confirm(result.message, "Info"):
+                return None
             result = stage(confirmed=True)
         match result:
             case Problems():
-                show_message_dialog(result.messages[0])
-                return False
+                show_message(result.messages[0])
+                return None
             case perspective_form.Staged():
                 self._stage(result.layout)
 
         # update dialog profile list
         self.update_choiceprofile()
-        self.choice_profiles.SetSelection(self.choice_profiles.FindString(persp_name))
-        return True
+        self._select_profile(persp_name)
+        return persp_name
 
     def onDeleteProfile(self, evt):
         """Delete selected perspective profile."""
@@ -352,12 +350,15 @@ class PerspectiveConfig(wx.Dialog):
         self._stage(self.layout.without_perspective(persp_name))
         # update dialog profile list
         self.update_choiceprofile()
-        self.onCreateNewProfile(None)
+        self._show_blank()
+
+    def _show_blank(self):
+        """Select "new profile" and reset the fields to a neutral state."""
+        self._select_profile(NEW_PROFILE_LABEL)
+        self.show_form(perspective_form.blank_form(self.layout))
 
     def onCreateNewProfile(self, evt):
-        """Reset profile settings options to neutral state."""
-        self.choice_profiles.SetSelection(self.choice_profiles.FindString(NEW_PROFILE_LABEL))
-        self.show_form(perspective_form.blank_form(self.layout))
+        self._show_blank()
 
     def onOk(self, event):
         """Apply/save perspective settings and close dialog."""
@@ -365,7 +366,7 @@ class PerspectiveConfig(wx.Dialog):
         # profile is being saved, so simply unchecking "Use perspective
         # corrections" and pressing OK actually sticks.
         self.checkCbmaster()
-        if self.tc_name.GetValue() and not self.onSave():
+        if self.tc_name.GetValue() and self.onSave() is None:
             return
         self.EndModal(wx.ID_OK)
 
@@ -378,33 +379,26 @@ class PerspectiveConfig(wx.Dialog):
 
     def _align_test(self, image: str | None) -> None:
         """Sets a test image wallpaper using the current perspective config."""
-        use_persp = self.cb_master.GetValue()
-        if not use_persp:
+        if not self.cb_master.GetValue():
             msg = "Perspective corrections are disabled. Enable them to test?"
-            if show_message_dialog(msg, style="YES_NO"):
+            if confirm(msg):
                 self.cb_master.SetValue(True)
                 self.checkCbmaster()  # stage it
             else:
                 # Don't enable, stop testing.
-                show_message_dialog("Perspective corrections are disabled, abort test.")
+                show_message("Perspective corrections are disabled, abort test.")
                 return
 
-        wanted = image or str(resource("test.png"))
-        found = real_file(wanted)
-        if found is None:
-            msg = f"Test image not found in {[wanted]}."
-            show_message_dialog(msg, "Error")
+        found = find_test_image(image, str(resource("test.png")))
+        if isinstance(found, Problems):
+            show_message(found.messages[0], "Error")
             return
-        testimage = [found]
-
-        # Save entered perspective values and get its name
-        if not self.onSave():
-            return
-        perspective = Named(self.choice_profiles.GetString(self.choice_profiles.GetSelection()))
 
         # The test is rendered with the layout onSave just staged.
-        profile = align_test_profile(found, perspective, self.typed_offsets)
-        self._show_test_profile(profile, testimage)
+        name = self.onSave()
+        if name is None:
+            return
+        self._show_test_profile(align_test_profile(found, Named(name), self.typed_offsets), [found])
 
     def onChooseTestImage(self, event):
         """Open a file dialog to choose a test image."""
@@ -431,74 +425,4 @@ class PerspectiveConfig(wx.Dialog):
         if self.test_image:
             self._align_test(self.test_image)
         else:
-            show_message_dialog("Choose a test image first.", "Error")
-
-    def onHelpPerspective(self, evt):
-        """Popup perspectives main help."""
-        text = (
-            "Perspective corrections were created to fix the\n"
-            "wallpaper misalignment that arises when your diplays\n"
-            "are not in a common plane, like they would be on the\n"
-            "wall. Straight lines are cut into pieces when displays\n"
-            "are both tilted and turned respective to each other.\n"
-            "These corrections work by undoing the perspective changes\n"
-            "caused by the rotation of the displays.\n"
-            "\n"
-            "In this dialog you may configure perspective setting\n"
-            "profiles, and test their effects with the tools in the\n"
-            "lower left corner."
-        )
-        show_help_popup(self, text, evt.GetEventObject())
-
-    def onHelpPersProfile(self, evt):
-        """Popup perspective profile help."""
-        text = (
-            "Perspective corrections do not work equally well\n"
-            "with different kinds of images so you can create\n"
-            "separate profiles, such as 'tilts_only' or 'swivel+tilt'"
-        )
-        show_help_popup(self, text, evt.GetEventObject())
-
-    def onHelpCentralDisp(self, evt):
-        """Popup central display & viewer position help."""
-        text = (
-            "To compute the perspective transforms the (rough)\n"
-            "position of your eyes relative to your displays\n"
-            "needs to be known. This is entered by selecting\n"
-            "one display as the central display and entering\n"
-            "distance offsets relative to that display's center.\n"
-            "\n"
-            "Distance must be entered and non-zero, horizontal\n"
-            "and vertical offsets are optional. Lenghts are\n"
-            "in millimeters."
-        )
-        show_help_popup(self, text, evt.GetEventObject())
-
-    def onHelpData(self, evt):
-        """Popup central display & viewer position help."""
-        text = (
-            "Here you enter the display rotation (tilt and swivel)\n"
-            "parameters. Use these parameters to tell how your displays\n"
-            "are rotated relative to the setup where they would be in a\n"
-            "common plane.\n"
-            "The parameters are:\n"
-            "     - swivel axis: left or right edge of the display\n"
-            "     - swivel angle in degrees\n"
-            "     - swivel axis lateral offset from display edge [mm]\n"
-            "     - swivel axis depth offset from display edge [mm]\n"
-            "     - tilt angle in degrees\n"
-            "     - tilt axis vertical offset from horizontal midline [mm]\n"
-            "     - tilt axis depth offset from display surface [mm]",
-            "Signs of angles are determined by the right hand rule:\n"
-            "Grab the rotation axis with your right hand fist and extend\n"
-            "your thumb in the direction of the axis: up for swivels and\n"
-            "left for tilts. Now the direction of your curled fingers will\n"
-            "tell the direction the display will rotate with a positive angle\n"
-            "and the rotation is reversed for a negative angle.",
-            "The axis offsets are completely optional. The most important\n"
-            "one is the tilt axis DEPTH offset since the actual axis\n"
-            "of the tilt is the joint in the display mount behind the panel.\n"
-            "Without this depth offset the tilt is performed around the display\n"
-            "horizontal midline which is on the display surface.",
-        )
-        show_help_popup(self, text, evt.GetEventObject())
+            show_message("Choose a test image first.", "Error")

@@ -7,7 +7,7 @@ import wx  # ty:ignore[unresolved-import]
 from superpaper.geometry import canvas, layout_edit
 from superpaper.geometry.layout_edit import parse_bezel
 from superpaper.paths import resource
-from superpaper.ui.message import show_message_dialog
+from superpaper.ui.message import show_message
 from superpaper.ui.positions_dialog import DisplayPositionEntry
 from superpaper.user_input import Problems
 
@@ -33,6 +33,9 @@ class LayoutEditor:
         self.state: layout_edit.EditState = layout_edit.Idle()
         self.bez_buttons = []
         self.draggable_shapes = []
+        self.drag_image = None
+        self.drag_shape = None
+        self.dragStartPos = wx.Point(0, 0)
         self.positions_dragged = False
 
     #
@@ -126,7 +129,7 @@ class LayoutEditor:
         dragged = self.dragged_offsets(staged.layout) if self.positions_dragged else None
         result = layout_edit.save_positions(self.state, staged.layout, dragged)
         if isinstance(result, Problems):
-            show_message_dialog(result.messages[0], "Error", parent=self.preview)
+            show_message(result.messages[0], "Error", parent=self.preview)
             return
         self.bind_movement_binds(False)
         self.toggle_buttons(True, False)
@@ -185,7 +188,7 @@ class LayoutEditor:
         # redraw preview with restored data
         self.preview.display_data = staged.layout.ppi_norm_areas()
         self.preview.refresh_preview()
-        self.preview.full_refresh_preview(True, "advanced")
+        self.preview.full_refresh_preview("advanced")
         self._set_profile_controls_enabled(True)
         self._toggle_bezel_buttons(False, True)
         self.positions_dragged = False
@@ -262,8 +265,6 @@ class LayoutEditor:
     def create_shapes(self):
         """Create draggable objects from display previews."""
         self.draggable_shapes = []
-        self.drag_image = None
-        self.drag_shape = None
 
         for st_bmp in self.preview.preview_img_list:
             shape = self.DragShape(st_bmp.GetBitmap())
@@ -394,7 +395,7 @@ class LayoutEditor:
         self.show_bezel_buttons(False)
         # Show preview positioning config button
         self.toggle_buttons(True, False)
-        self.preview.full_refresh_preview(True, "advanced")
+        self.preview.full_refresh_preview("advanced")
         self.preview.Refresh()
 
     def bezel_config_cancel(self):
@@ -408,7 +409,7 @@ class LayoutEditor:
             pops[0].set_bezel_value(bez_mms[0])
             pops[1].set_bezel_value(bez_mms[1])
         self.preview.display_data = staged.layout.ppi_norm_areas()
-        self.preview.full_refresh_preview(True, "advanced")
+        self.preview.full_refresh_preview("advanced")
         self.preview.Refresh()
 
     def create_bezel_buttons(self):
@@ -524,7 +525,7 @@ class LayoutEditor:
 
             st = wx.StaticText(pnl, -1, "Enter the size of adjacent bezels and gap\nin millimeters:")
             self.tc_bez = wx.TextCtrl(pnl, -1, size=wx.Size(60, -1), style=wx.TE_RIGHT | wx.TE_PROCESS_ENTER)
-            self.tc_bez.Bind(wx.EVT_TEXT_ENTER, self.OnEnter)
+            self.tc_bez.Bind(wx.EVT_TEXT_ENTER, self.onApply)
             self.current_bez_val = "0.0"
             butt_save = wx.Button(pnl, label="Apply")
             butt_canc = wx.Button(pnl, label="Cancel")
@@ -547,10 +548,6 @@ class LayoutEditor:
         def ProcessLeftDown(self, event):
             return False
 
-        def OnEnter(self, evt):
-            """Bind pressing Enter in the txtctrl to apply entered value."""
-            self.onApply(evt)
-
         def OnDismiss(self):
             self.onCancel(None)
 
@@ -564,15 +561,15 @@ class LayoutEditor:
                 msg = result.messages[0]
                 logger.info(msg)
                 self.Hide()
-                show_message_dialog(msg, "Error", parent=self)
+                show_message(msg, "Error", parent=self)
                 self.Show()
                 return
-            self.current_bez_val = str(self.test_bezel_value())
+            self.current_bez_val = str(self.entered_bezel_value())
             self.Hide()
             # propagate values and refresh preview
             preview.staged.layout = result
             preview.display_data = preview.staged.layout.ppi_norm_areas()
-            preview.full_refresh_preview(True, "advanced")
+            preview.full_refresh_preview("advanced")
 
         def onCancel(self, event):
             self.tc_bez.SetValue(self.current_bez_val)
@@ -583,6 +580,6 @@ class LayoutEditor:
             self.tc_bez.SetValue(str(val))
             self.current_bez_val = str(val)
 
-        def test_bezel_value(self):
+        def entered_bezel_value(self):
             """The entered bezel thickness, or None unless it is a non-negative number."""
             return parse_bezel(self.tc_bez.GetValue())

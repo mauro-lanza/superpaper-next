@@ -170,7 +170,7 @@ def headless_tray_module(monkeypatch):
         **wx_stub(),
         **module_stub(
             "superpaper.ui.message",
-            show_message_dialog=lambda *args, **kwargs: None,
+            show_message=lambda *args, **kwargs: None,
             ask_unsaved_changes=lambda *args, **kwargs: None,
         ),
     }

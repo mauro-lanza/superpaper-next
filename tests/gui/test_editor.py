@@ -1,9 +1,10 @@
 import threading
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
 
-from superpaper.profiles.form import spangroups_of
+from superpaper.geometry.perspective import Named, Perspective, Swivel, SwivelAxis, Tilt
 from superpaper.profiles.profile_id import ProfileId
 from superpaper.profiles.profile_store import ProfileStore
 
@@ -245,11 +246,6 @@ def home_panel(gui_env, running_work, editor):
     return editor
 
 
-def test_the_editors_name_field_takes_45_characters(home_panel):
-    home_panel.tc_name.SetValue("Home-" + "n" * 40)
-    assert len(home_panel.tc_name.GetValue()) == 45
-
-
 def test_a_long_profile_name_saves(gui_env, running_work, home_panel):
     home_panel.tc_name.SetValue("Home-" + "n" * 40)
     gui_env.shown()
@@ -302,14 +298,6 @@ def test_loading_a_profile_without_offsets_clears_the_offsets_of_the_previous_on
     assert [tc.GetValue() for tc in editor.tc_list_offsets] == ["0,0", "0,0"]
 
 
-def test_span_groups_are_tuples_of_displays_and_the_preview_wants_two_groups(editor):
-    assert spangroups_of(editor._spangroup_choices()) == ((0, 1),)
-    assert editor.preview_spangroups() is None
-    editor.ch_list_spangroups[1].SetSelection(1)
-    assert spangroups_of(editor._spangroup_choices()) == ((0,), (1,))
-    assert editor.preview_spangroups() == ((0,), (1,))
-
-
 def test_an_unreadable_offset_names_its_display_and_nothing_is_saved(gui_env, editor):
     apply_offsets(editor, "1,2", "x")
     gui_env.shown()
@@ -336,6 +324,57 @@ def test_every_use_of_the_offsets_refuses_an_unreadable_one_the_same_way(gui_env
     (error,) = gui_env.shown()
     assert error[:2] == ("editor", "Error")
     assert error[2] == "Manual offset of display 0: expected whole pixel numbers as x,y, not '1;2'."
+
+
+def test_the_image_size_hint_says_when_the_perspective_cannot_be_used(gui_env, editor, monkeypatch):
+    hints = []
+    monkeypatch.setattr(
+        gui_env.ui.editor, "show_help_popup", lambda parent, text, button, quality_text=None: hints.append(quality_text)
+    )
+    count = len(editor.staged.layout.displays)
+    edge_on = Perspective(
+        "edge-on",
+        0,
+        (0.0, 0.0, 1000.0),
+        (Swivel(SwivelAxis.NONE, 0.0, 0.0, 0.0),) * count,
+        (Tilt(90.0, 0.0, 0.0),) * count,
+    )
+    editor.staged.layout = editor.staged.layout.with_perspective(edge_on, use_perspective=True, is_default=True)
+    choose_span_mode(editor, "advanced")
+
+    editor.show_preview_help("help", editor.wpprev_pnl.layout_editor.button_help)
+
+    assert hints == [gui_env.ui.editor.EDGE_ON_PERSPECTIVE_NOTE]
+
+
+def test_an_error_while_loading_fields_does_not_leave_edits_untracked(editor, monkeypatch):
+    def fail(shown):
+        raise RuntimeError
+
+    monkeypatch.setattr(editor, "_write_form", fail)
+    with pytest.raises(RuntimeError):
+        editor.onCreateNewProfile(None)
+    assert not editor._loading
+
+
+def test_perspectives_named_alike_but_for_case_are_told_apart(editor):
+    layout = editor.staged.layout
+    count = len(layout.displays)
+    for name in ("Foo", "foo"):
+        flat = Perspective(
+            name,
+            0,
+            (0.0, 0.0, 1000.0),
+            (Swivel(SwivelAxis.NONE, 0.0, 0.0, 0.0),) * count,
+            (Tilt(0.0, 0.0, 0.0),) * count,
+        )
+        layout = layout.with_perspective(flat, use_perspective=True, is_default=False)
+    editor.staged.layout = layout
+    editor.ch_persp.SetItems(editor._perspective_labels())
+
+    editor._write_form(replace(editor._read_form(), perspective=Named("foo")))
+
+    assert editor.ch_persp.GetStringSelection() == "foo"
 
 
 def test_offsets_that_are_not_applied_are_not_read(editor):

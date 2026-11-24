@@ -1,6 +1,21 @@
 import pytest
 
-from superpaper.unsaved_changes import Answer, may_proceed, unsaved_message
+from superpaper.unsaved_changes import Answer, ApplyAnswer, apply_answer, may_proceed, unsaved_message
+
+
+@pytest.mark.parametrize(
+    ("answer", "can_save", "expected"),
+    [
+        (Answer.SAVE, True, ApplyAnswer.SAVE_DISPLAYS),
+        (Answer.DISCARD, True, ApplyAnswer.USE_SAVED_DISPLAYS),
+        (Answer.CANCEL, True, ApplyAnswer.CANCEL),
+        (Answer.SAVE, False, ApplyAnswer.USE_SAVED_DISPLAYS),
+        (Answer.DISCARD, False, ApplyAnswer.CANCEL),
+        (Answer.CANCEL, False, ApplyAnswer.CANCEL),
+    ],
+)
+def test_the_button_pressed_decides_how_apply_treats_unsaved_displays(answer, can_save, expected):
+    assert apply_answer(answer, can_save=can_save) is expected
 
 
 @pytest.mark.parametrize(

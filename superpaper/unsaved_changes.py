@@ -28,6 +28,19 @@ def unsaved_message(*, profile: bool, displays: bool) -> str | None:
     return None
 
 
+def apply_answer(answer: Answer, *, can_save: bool) -> ApplyAnswer:
+    """What Apply's question about unsaved displays was answered, from the button pressed:
+    Save, Discard and Cancel, or, without ``can_save``, only a first button (use the saved
+    displays) and a second one (cancel)."""
+    match answer:
+        case Answer.SAVE:
+            return ApplyAnswer.SAVE_DISPLAYS if can_save else ApplyAnswer.USE_SAVED_DISPLAYS
+        case Answer.DISCARD if can_save:
+            return ApplyAnswer.USE_SAVED_DISPLAYS
+        case _:
+            return ApplyAnswer.CANCEL
+
+
 def may_proceed(answer: Answer, save: Callable[[], bool]) -> bool:
     """Whether to go on with what the user was doing: after saving, which must succeed,
     or after discarding, but not after cancelling."""

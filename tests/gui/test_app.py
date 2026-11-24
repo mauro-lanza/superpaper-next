@@ -1,7 +1,6 @@
 import subprocess
 import time
 from dataclasses import replace
-from types import SimpleNamespace
 
 import pytest
 
@@ -11,7 +10,7 @@ from superpaper.desktop.linux import UNKNOWN_DESKTOP
 from superpaper.geometry.display_detection import DisplayDetectionError
 from superpaper.geometry.displays import SIZE_HINT
 from superpaper.profiles.profile_id import ProfileId
-from superpaper.settings import read_settings
+from superpaper.settings import Settings, read_settings
 from tests.conftest import monitor
 
 
@@ -29,24 +28,28 @@ def test_a_startup_failure_is_reported_and_the_app_does_not_start(gui_env, monke
         raise error
 
     monkeypatch.setattr(gui_env.ui.app, "start_superpaper", fail)
-    app = SimpleNamespace(
-        SetAppName=lambda name: None,
-        SetAppDisplayName=lambda name: None,
-        SetTopWindow=lambda frame: None,
-        _paths=gui_env.paths,
-        _settings=None,
-        _desktop=None,
-        _startup_profile=None,
-    )
 
-    started = gui_env.ui.app.App.OnInit(app)
+    with pytest.raises(SystemExit):
+        gui_env.ui.app.App(gui_env.paths, Settings(), linux, None)
 
-    assert started is False
     assert [dialog[:2] for dialog in gui_env.shown()] == [("app", "Error")]
 
 
-def test_tray_starts_with_nothing_running(superpaper):
-    assert superpaper.session.running is None
+def test_a_display_change_queued_before_the_window_closes_does_not_refresh_after_it(gui_env):
+    wx = gui_env.ui.wx
+    refreshed = []
+    frame = wx.Frame(None)
+    gui_env.ui.app._watch_displays(frame, linux, lambda: refreshed.append(True))
+    queued_by_the_os = gui_env.display_watchers[-1]
+
+    queued_by_the_os()
+    # wx delivers the destroy event to a top-level window later than the queued call.
+    frame.ProcessEvent(wx.WindowDestroyEvent(frame))
+    end = time.monotonic() + 0.3
+    gui_env.wait_until(lambda: time.monotonic() > end)
+    frame.Destroy()
+
+    assert refreshed == []
 
 
 def test_tray_asks_once_about_a_profile_that_cant_be_loaded_and_yes_deletes_it(gui_env):

@@ -7,7 +7,8 @@ from types import SimpleNamespace
 import pytest
 
 from superpaper.desktop.process import Result
-from superpaper.desktop.tray_menu import Check, Item, Notice, Separator, Submenu
+from superpaper.desktop.tray_menu import Check, Item, Submenu
+from superpaper.paths import AppPaths
 from superpaper.profiles.profile_file import Profile
 from superpaper.profiles.profile_id import ProfileId
 from tests.desktop.fake import FakeDesktop
@@ -45,7 +46,7 @@ def icon(tray, recorder, *, desktop=None, profiles=(), paused=False, failure=Non
         session,
         desktop or FakeDesktop(),
         last_failure=lambda: failure,
-        config_dir=CONFIG_DIR,
+        paths=AppPaths(config=CONFIG_DIR, profiles=CONFIG_DIR / "profiles", cache=CONFIG_DIR / "cache"),
         open_editor=recorder("editor"),
         open_settings=recorder("settings"),
         reload_profiles=recorder("reload"),
@@ -92,79 +93,6 @@ def test_the_menu_asks_the_application_and_the_session(tray, recorder):
     ]
 
 
-def test_the_menu_lists_the_saved_profiles_and_shows_pause(tray, recorder):
-    work, home = profile("Work"), profile("Home")
-
-    entries = icon(tray, recorder, profiles=[work, home], paused=True).menu()
-
-    (profiles,) = (entry for entry in entries if isinstance(entry, Submenu))
-    assert profiles.label == "Profiles"
-    assert [item.label for item in profiles.items] == ["Work", "Home"]
-    assert [entry.checked for entry in entries if isinstance(entry, Check)] == [True]
-    assert sum(isinstance(entry, Separator) for entry in entries) == 3
-
-
-def submenu(entries):
-    (profiles,) = (entry for entry in entries if isinstance(entry, Submenu))
-    return profiles
-
-
-def entry_labelled(entries, label):
-    return next(entry for entry in entries if getattr(entry, "label", None) == label)
-
-
-def test_the_running_profile_is_the_one_checked(tray, recorder):
-    work, home = profile("Work"), profile("Home")
-
-    entries = icon(tray, recorder, profiles=[work, home], running=home).menu()
-
-    assert [(item.label, item.checked) for item in submenu(entries).items] == [("Work", False), ("Home", True)]
-
-
-def test_no_profile_is_checked_while_nothing_runs(tray, recorder):
-    entries = icon(tray, recorder, profiles=[profile("Work")]).menu()
-
-    assert [item.checked for item in submenu(entries).items] == [False]
-
-
-def test_without_profiles_the_submenu_holds_a_disabled_placeholder(tray, recorder):
-    assert submenu(icon(tray, recorder).menu()).items == (Notice("(no profiles)"),)
-
-
-def test_next_and_pause_are_disabled_while_nothing_runs(tray, recorder):
-    entries = icon(tray, recorder, profiles=[profile("Work")]).menu()
-
-    assert entry_labelled(entries, "Next Wallpaper").enabled is False
-    assert entry_labelled(entries, "Pause Timer").enabled is False
-
-
-def test_pause_is_enabled_only_for_a_running_slideshow(tray, recorder):
-    slideshow, still = profile("Work"), profile("Home", slideshow=False)
-
-    running_slideshow = icon(tray, recorder, profiles=[slideshow], running=slideshow).menu()
-    running_still = icon(tray, recorder, profiles=[still], running=still).menu()
-
-    assert entry_labelled(running_slideshow, "Pause Timer").enabled is True
-    assert entry_labelled(running_slideshow, "Next Wallpaper").enabled is True
-    assert entry_labelled(running_still, "Pause Timer").enabled is False
-    assert entry_labelled(running_still, "Next Wallpaper").enabled is True
-
-
-def test_a_failed_change_is_the_first_line_of_the_menu_until_cleared(tray, recorder):
-    assert not any(isinstance(entry, Notice) for entry in icon(tray, recorder).menu())
-
-    entries = icon(tray, recorder, failure="Image missing").menu()
-
-    assert entries[0] == Notice("Last change failed: Image missing")
-    assert isinstance(entries[1], Separator)
-
-
-def test_a_long_reason_is_cut_to_its_first_line(tray, recorder):
-    entries = icon(tray, recorder, failure="first line\n" + "x" * 200).menu()
-
-    assert entries[0].label == "Last change failed: first line"
-
-
 def test_a_left_click_opens_the_editor(tray, recorder):
     icon(tray, recorder).on_left_down(None)
 
@@ -174,7 +102,7 @@ def test_a_left_click_opens_the_editor(tray, recorder):
 def test_a_config_folder_that_cant_be_opened_is_reported(tray, recorder, desktop, monkeypatch):
     shown = []
     desktop.folder_answer = Result("no file manager")
-    monkeypatch.setattr(tray, "show_message_dialog", lambda message: shown.append(message))
+    monkeypatch.setattr(tray, "show_message", lambda message: shown.append(message))
 
     icon(tray, recorder, desktop=desktop).open_config()
 

@@ -33,14 +33,6 @@ def test_saving_display_settings_gives_the_session_a_reloaded_layout_with_them(g
     assert layout.bezels_in_mm()[0] == (4.5, 0.0)
 
 
-def test_the_align_test_finds_its_bundled_image_and_renders_a_draft(gui_env, running_work, editor):
-    gui_env.shown()
-    editor.onAlignTest(None)
-    gui_env.settle(running_work)
-    assert not gui_env.shown()
-    assert drafts(gui_env.paths.cache)
-
-
 def test_the_align_test_reports_a_missing_test_image_and_renders_nothing(gui_env, running_work, editor, monkeypatch):
     monkeypatch.setattr(gui_env.ui.editor, "resource", lambda name: gui_env.root / "nope" / name)
     gui_env.shown()

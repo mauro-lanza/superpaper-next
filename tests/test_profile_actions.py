@@ -9,6 +9,7 @@ from superpaper.profile_actions import (
     apply_profile,
     check_applicable,
     delete_profile,
+    find_test_image,
     revert_profile,
     save_profile,
     saved_profile,
@@ -192,3 +193,20 @@ def test_the_align_test_without_offsets_has_no_correction():
     profile = align_test_profile("test.png", Disabled(), ())
     assert profile.perspective == Disabled()
     assert profile.corrections == ()
+
+
+def test_the_test_image_is_the_chosen_one_resolved_or_else_the_default(tmp_path):
+    chosen = tmp_path / "chosen.png"
+    chosen.write_bytes(b"")
+    default = tmp_path / "default.png"
+    default.write_bytes(b"")
+    assert find_test_image(str(chosen), str(default)) == str(chosen.resolve())
+    assert find_test_image(None, str(default)) == str(default.resolve())
+
+
+def test_a_missing_test_image_is_reported_by_the_path_asked_for(tmp_path):
+    default = tmp_path / "default.png"
+    default.write_bytes(b"")
+    missing = str(tmp_path / "gone.png")
+    assert find_test_image(missing, str(default)) == Problems((f"Test image not found in {[missing]}.",))
+    assert find_test_image(None, missing) == Problems((f"Test image not found in {[missing]}.",))

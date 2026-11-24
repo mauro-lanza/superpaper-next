@@ -125,7 +125,7 @@ def test_display_settings_and_perspectives(gui_env, saved_layout, snapshots):
     files_before = (layout_file(), perspective_file())
     saved = dialog.onSave(None)
     # Staged with the band: nothing is written until the band's Save.
-    assert saved is True
+    assert saved == "desk"
     assert layout().default_perspective == "desk"
     assert (layout_file(), perspective_file()) == files_before
     assert superpaper.session.layout.default_perspective is None
@@ -185,13 +185,13 @@ def test_display_settings_and_perspectives(gui_env, saved_layout, snapshots):
     gui_env.settle(superpaper)
     warned = gui_env.shown()
     snapshot("couch-refused")
-    assert refused is False
+    assert refused is None
     assert [kind for _, kind, _ in warned] == ["Info"]
     assert state(layout()) == state_before
     assert (layout_file(), perspective_file()) == files_before
     gui_env.answer_yes = True
     accepted = dialog.onSave(None)
-    assert accepted is True
+    assert accepted == "couch"
     assert (layout_file(), perspective_file()) == files_before
     save_band()
     snapshot("couch-accepted")

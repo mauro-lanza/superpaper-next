@@ -93,6 +93,9 @@ class Superpaper:
         self.tray = shell.make_tray(self)
         self._show_at_start()
 
+    def remember_edited(self, profile_id: ProfileId) -> None:
+        self.last_edited = profile_id
+
     def _report_change(self, problem: str | None, *, by_timer: bool) -> None:
         """Remember how the session's last change went, for the tray menu, and tell the user
         when the slideshow's own change fails with a new problem: no other surface shows it.

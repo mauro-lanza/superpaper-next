@@ -8,7 +8,7 @@ import wx  # ty:ignore[unresolved-import]
 from superpaper.geometry import layout_edit
 from superpaper.geometry.displays import Layout
 from superpaper.ui.help import show_help_popup
-from superpaper.ui.message import show_message_dialog
+from superpaper.ui.message import show_message
 
 INVALID_COLOUR = wx.Colour(255, 200, 200)
 LABEL = "Display system settings  (apply to all profiles)"
@@ -254,7 +254,7 @@ class DisplayBand(wx.CollapsiblePane):
         self.staged.layout = resized.layout
         self._refresh_preview()
         if resized.rearranged_all:
-            show_message_dialog(layout_edit.REARRANGED_MESSAGE, "Info")
+            show_message(layout_edit.REARRANGED_MESSAGE, "Info")
 
     def onSave(self, event):
         self.save(redraw=True)
@@ -264,11 +264,11 @@ class DisplayBand(wx.CollapsiblePane):
         if a diagonal is invalid or the write fails. ``redraw`` says whether the running
         profile is to be shown again with them."""
         if self._has_invalid_diagonals():
-            show_message_dialog(INVALID_DIAGONALS_MESSAGE, "Error")
+            show_message(INVALID_DIAGONALS_MESSAGE, "Error")
             return False
         failed = self._save_layout(self.staged.layout)
         if failed is not None:
-            show_message_dialog(failed.message, "Error")
+            show_message(failed.message, "Error")
             return False
         self._on_saved(redraw=redraw)
         self.set_baseline()
@@ -317,7 +317,7 @@ class DisplayBand(wx.CollapsiblePane):
         self._show_diagonals()
         self._refresh_preview()
         if resized.rearranged_all:
-            show_message_dialog(layout_edit.REARRANGED_MESSAGE, "Info")
+            show_message(layout_edit.REARRANGED_MESSAGE, "Info")
         self.update_dirty()
 
     def enable_diagonals(self, enable):

@@ -295,17 +295,20 @@ def gui_env(wx_app, app_paths, tmp_path, monkeypatch):
 
     monkeypatch.setattr(process.subprocess, "run", recording_run)
 
-    def dialog_recorder(source):
-        def record_dialog(message, msg_type="Info", parent=None, style="OK"):
-            env.dialogs.append((source, msg_type, str(message).splitlines()[0]))
+    def dialog_recorder(source, answer):
+        def record_dialog(message, title="Info", parent=None):
+            env.dialogs.append((source, title, str(message).splitlines()[0]))
             with ui.message.modal():
-                return env.answer_yes if style == "YES_NO" else None
+                return answer()
 
         return record_dialog
 
     for name, module in list(sys.modules.items()):
-        if name.startswith("superpaper.ui.") and hasattr(module, "show_message_dialog"):
-            monkeypatch.setattr(module, "show_message_dialog", dialog_recorder(name.rsplit(".", 1)[-1]))
+        source = name.rsplit(".", 1)[-1]
+        if name.startswith("superpaper.ui.") and hasattr(module, "show_message"):
+            monkeypatch.setattr(module, "show_message", dialog_recorder(source, lambda: None))
+        if name.startswith("superpaper.ui.") and hasattr(module, "confirm"):
+            monkeypatch.setattr(module, "confirm", dialog_recorder(source, lambda: env.answer_yes))
         if name.startswith("superpaper.ui.") and hasattr(module, "ask_unsaved_changes"):
             monkeypatch.setattr(module, "ask_unsaved_changes", env.ask_unsaved_changes)
         if name.startswith("superpaper.ui.") and hasattr(module, "ask_apply_with_unsaved_displays"):

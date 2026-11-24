@@ -94,6 +94,23 @@ def test_the_perspective_dialogs_test_renders_the_staged_layout_and_pauses(gui_e
     assert running_work.session.paused is True
 
 
+def test_the_align_test_renders_with_the_perspective_it_just_saved_whatever_the_dropdown_held(
+    gui_env, running_work, editor
+):
+    dialog = gui_env.open_perspectives(editor)
+    for name in ("foo", "Foo"):
+        dialog.tc_name.SetValue(name)
+        dialog.cb_master.SetValue(True)
+        dialog.tclist_vieweroffs[2].SetValue("600")
+        dialog.onAlignTest(None)
+        gui_env.settle(running_work)
+
+    (signature,) = draft_signatures(gui_env.paths.cache)
+    test_image = str(resource("test.png").resolve())
+    profile = align_test_profile(test_image, Named("Foo"), dialog.typed_offsets)
+    assert signature == render_signature(editor.staged.layout, profile, [test_image])
+
+
 def test_the_perspective_dialogs_test_is_refused_while_the_staged_displays_overlap(gui_env, running_work, editor):
     dialog = gui_env.open_perspectives(editor)
     dialog.tc_name.SetValue("study")
