@@ -50,7 +50,7 @@ def test_an_unknown_platform_sets_nothing_and_says_so():
     assert unknown.set_spanmode("").ok
     assert unknown.takes_pieces("") is False
     assert unknown.keeps_wallpaper() is False
-    assert unknown.setter_problem("") is None
+    assert unknown.setter_problem("") == f"Unknown platform: {sys.platform}"
 
 
 def test_an_unknown_platform_cannot_watch_the_displays():

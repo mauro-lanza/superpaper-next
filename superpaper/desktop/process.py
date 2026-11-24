@@ -4,7 +4,7 @@ failures returned as values."""
 import os
 import subprocess
 import sys
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -72,35 +72,45 @@ def host_spawn_env() -> dict[str, str]:
 
     Outside a bundle this is a plain copy of the current environment.
     """
-    env = dict(os.environ)
+    return _restore_saved_vars(_restore_library_paths(os.environ))
 
-    # A spawned /bin/sh would otherwise load the bundled libreadline and die (xdg-open exit 127).
+
+def _restore_library_paths(environ: Mapping[str, str]) -> dict[str, str]:
+    """``environ`` with the library paths the host expects: the saved originals, else without the bundle's.
+
+    A spawned /bin/sh would otherwise load the bundled libreadline and die (xdg-open exit 127).
+    """
+    env = dict(environ)
     meipass = getattr(sys, "_MEIPASS", None)
     bundle_root = env.get("APPDIR")
     for var in ("LD_LIBRARY_PATH", "DYLD_LIBRARY_PATH"):
-        orig = env.pop(var + "_ORIG", None)
-        if orig is not None:
-            if orig:
-                env[var] = orig
-            else:
-                env.pop(var, None)
-            continue
+        original = env.pop(var + "_ORIG", None)
         current = env.get(var)
-        if not current:
+        if original is not None:
+            value = original
+        elif current:
+            host_paths = [
+                path
+                for path in current.split(os.pathsep)
+                if path and path != meipass and not (bundle_root and Path(path).is_relative_to(bundle_root))
+            ]
+            value = os.pathsep.join(host_paths)
+        else:
             continue
-        kept = [
-            p
-            for p in current.split(os.pathsep)
-            if p and p != meipass and not (bundle_root and p.startswith(bundle_root))
-        ]
-        if kept:
-            env[var] = os.pathsep.join(kept)
+        if value:
+            env[var] = value
         else:
             env.pop(var, None)
+    return env
 
-    for key in [k for k in env if k.startswith(_HOSTENV_PREFIX)]:
-        target = key[len(_HOSTENV_PREFIX) :]
-        saved = env.pop(key)
+
+def _restore_saved_vars(environ: Mapping[str, str]) -> dict[str, str]:
+    """``environ`` with the variables AppRun saved put back, or unset where the host had none."""
+    env = {key: value for key, value in environ.items() if not key.startswith(_HOSTENV_PREFIX)}
+    for key, saved in environ.items():
+        if not key.startswith(_HOSTENV_PREFIX):
+            continue
+        target = key.removeprefix(_HOSTENV_PREFIX)
         if saved == _HOSTENV_UNSET:
             env.pop(target, None)
         else:

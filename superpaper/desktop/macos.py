@@ -11,6 +11,7 @@ from AppKit import (  # ty:ignore[unresolved-import]
     NSWorkspace,  # ty:ignore[unresolved-import]
 )
 from Foundation import NSURL, NSNotificationCenter  # ty:ignore[unresolved-import]
+from Quartz import CGDisplayScreenSize  # ty:ignore[unresolved-import]
 
 from superpaper.desktop.monitors import Monitor
 from superpaper.desktop.process import Result, run
@@ -18,8 +19,7 @@ from superpaper.desktop.process import run_hook as run_hook
 from superpaper.desktop.tray_menu import MenuEntry, TrayHandle
 from superpaper.desktop.wallpaper import Pieces, ProfileWallpapers, Wallpaper
 
-_screen_observer: Any = None
-_screen_block: Callable[[Any], None] | None = None
+_screen_blocks: list[Callable[[Any], None]] = []
 
 
 def init_main_loop() -> None:
@@ -50,17 +50,14 @@ def hotkey_problems_in_dialog() -> bool:
 
 
 def takes_pieces(set_command: str) -> bool:
-    """Whether the desktop sets one image per display, so a wallpaper is cut into pieces."""
     return True
 
 
 def keeps_wallpaper() -> bool:
-    """Whether the desktop shows the last wallpaper again after a restart by itself."""
     return False
 
 
 def setter_problem(set_command: str) -> str | None:
-    """Why Superpaper can't set the wallpaper on this desktop, if it can't."""
     return None
 
 
@@ -91,7 +88,6 @@ def set_spanmode(set_command: str) -> Result:
 
 
 def open_folder(folder: Path) -> Result:
-    """Show ``folder`` in the desktop's file manager."""
     return run(["open", os.fspath(folder)])
 
 
@@ -102,14 +98,13 @@ def detect_monitors() -> list[Monitor]:
 
 def watch_displays(on_change: Callable[[], None]) -> bool:
     """Call ``on_change()`` on the main thread when the screen parameters change; always True."""
-    global _screen_observer, _screen_block
 
     def block(notification: Any) -> None:
         on_change()
 
     # NSNotificationCenter doesn't keep the Python callable alive on its own.
-    _screen_block = block
-    _screen_observer = NSNotificationCenter.defaultCenter().addObserverForName_object_queue_usingBlock_(
+    _screen_blocks.append(block)
+    NSNotificationCenter.defaultCenter().addObserverForName_object_queue_usingBlock_(
         NSApplicationDidChangeScreenParametersNotification, None, None, block
     )
     return True
@@ -125,11 +120,11 @@ def _screens() -> list[tuple[Monitor, Any]]:
     screens = list(NSScreen.screens())
     if not screens:
         return []
-    primary_height = _frame(screens[0]).size.height
+    primary_height = screens[0].frame().size.height
     primary_scale = screens[0].backingScaleFactor()
     found = []
     for screen in screens:
-        frame = _frame(screen)
+        frame = screen.frame()
         scale = screen.backingScaleFactor()
         top = primary_height - (frame.origin.y + frame.size.height)
         width_mm, height_mm = _size_in_mm(screen)
@@ -147,17 +142,7 @@ def _screens() -> list[tuple[Monitor, Any]]:
     return found
 
 
-def _frame(screen: Any) -> Any:
-    frame = screen.frame
-    return frame() if callable(frame) else frame
-
-
-def _size_in_mm(screen: Any) -> tuple[int, int] | tuple[None, None]:
-    """The screen's physical size, or unknown without pyobjc-framework-Quartz."""
-    try:
-        from Quartz import CGDisplayScreenSize  # ty:ignore[unresolved-import]
-    except ImportError:
-        return None, None
+def _size_in_mm(screen: Any) -> tuple[int, int]:
     size = CGDisplayScreenSize(screen.deviceDescription()["NSScreenNumber"])
     return round(size.width), round(size.height)
 

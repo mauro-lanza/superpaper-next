@@ -47,12 +47,12 @@ class TrayHandle(Protocol):
     def remove(self) -> None: ...
 
 
-MAX_REASON = 80
+_MAX_REASON = 80
 
 
 def failure_notice(reason: str) -> Notice:
     """The menu line for a wallpaper change that failed: the first line of ``reason``, cut short."""
     line = (reason.strip().splitlines() or [""])[0]
-    if len(line) > MAX_REASON:
-        line = line[: MAX_REASON - 1] + "…"
+    if len(line) > _MAX_REASON:
+        line = line[: _MAX_REASON - 1] + "…"
     return Notice(f"Last change failed: {line}")

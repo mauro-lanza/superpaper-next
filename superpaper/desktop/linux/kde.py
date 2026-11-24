@@ -19,6 +19,9 @@ logger = logging.getLogger(__name__)
 # current activity). Kept in the config directory.
 MAPPING_FILE = "kde_desktop_mapping.json"
 
+# Seconds an activity manager query may take.
+ACTIVITY_MANAGER_TIMEOUT = 5
+
 # Lists every desktop as "id,screen,current;". "current" is 1 for the desktop the current
 # activity shows on a screen that exists. Since Plasma 6.8 a desktop of another activity
 # keeps its screen, as does one of a removed screen (an index past screenCount); before
@@ -92,15 +95,22 @@ def set_wallpaper(pieces: Sequence[str], profiles: ProfileWallpapers) -> Result:
     With activities, each activity shows the last wallpaper of the profile named after
     it, or else ``pieces``, which the running profile's activity always gets.
     """
-    listed = _list_activities()
-    names = activity_names(*listed) if listed else {}
-    if not listed or not names:
-        return _evaluate(wallpaper_script({}, pieces))
-    images = {activity: _activity_images(name, pieces, profiles) for activity, name in names.items()}
     try:
-        desktops = desktop_activities(profiles.state_dir, *listed)
+        return _show(pieces, profiles)
     except PlasmaScriptingUnavailable as error:
         return Result(str(error))
+
+
+def _show(pieces: Sequence[str], profiles: ProfileWallpapers) -> Result:
+    listed = _list_activities()
+    if listed is None:
+        return _evaluate(wallpaper_script({}, pieces))
+    qdbus, activity_ids = listed
+    names = activity_names(qdbus, activity_ids)
+    if not names:
+        return _evaluate(wallpaper_script({}, pieces))
+    images = {activity: _activity_images(name, pieces, profiles) for activity, name in names.items()}
+    desktops = desktop_activities(profiles.state_dir, qdbus, activity_ids)
     if not desktops:
         return Result("Failed to get desktop-activity mapping, cannot set wallpapers")
     by_desktop = {desktop: images[activity] for desktop, activity in desktops.items() if activity in images}
@@ -132,48 +142,65 @@ def desktop_activities(state_dir: Path, qdbus: str, activity_ids: Sequence[str])
     before is remembered in ``state_dir``, and desktops never seen are guessed: the
     other activities' desktops are taken to follow each other, one per screen.
     """
-    desktop_to_activity = _load_mapping(state_dir)
+    remembered = _load_mapping(state_dir)
     current = _activity_manager(qdbus, "CurrentActivity")
     current_activity_id = current.output.strip() if current.ok else None
     plasma_shell = _plasma_shell()
     try:
         desktop_info = plasma_shell.evaluateScript(DESKTOPS_SCRIPT)
         logger.info("Desktop info from plasma: %s", desktop_info)
-        all_desktop_ids = []
-        active_desktop_ids = []
-        for item in (desktop_info or "").split(";"):
-            if "," in item:
-                desktop_id, _screen_id, is_current = (int(part) for part in item.split(","))
-                all_desktop_ids.append(desktop_id)
-                if is_current:
-                    active_desktop_ids.append(desktop_id)
+        all_desktop_ids, active_desktop_ids = _parse_desktops(desktop_info or "")
     except Exception:  # Plasma answered something else
         logger.exception("Failed to get desktop-activity mapping")
         return {}
     if not active_desktop_ids or not current_activity_id:
         logger.error("Could not determine active desktops or current activity")
-        return desktop_to_activity
+        return remembered
 
-    # The desktops on screen now belong to the current activity.
-    mapping_updated = False
-    for desktop_id in active_desktop_ids:
-        if desktop_to_activity.get(desktop_id) != current_activity_id:
-            desktop_to_activity[desktop_id] = current_activity_id
-            mapping_updated = True
-    unmapped_desktop_ids = [d for d in all_desktop_ids if d not in desktop_to_activity]
-    if unmapped_desktop_ids and len(activity_ids) > 1:
-        other_activities = [a for a in activity_ids if a != current_activity_id]
-        for idx, desktop_id in enumerate(unmapped_desktop_ids):
-            activity_idx = idx // len(active_desktop_ids)
-            if activity_idx < len(other_activities):
-                desktop_to_activity[desktop_id] = other_activities[activity_idx]
-                mapping_updated = True
-    if mapping_updated:
-        _save_mapping(state_dir, desktop_to_activity)
+    learned = _assign_activities(remembered, all_desktop_ids, active_desktop_ids, current_activity_id, activity_ids)
+    if learned != remembered:
+        _save_mapping(state_dir, learned)
     logger.info("Current activity: %s", current_activity_id)
     logger.info("Active desktops: %s", active_desktop_ids)
-    logger.info("Desktop to activity mapping: %s", desktop_to_activity)
-    return desktop_to_activity
+    logger.info("Desktop to activity mapping: %s", learned)
+    return learned
+
+
+def _parse_desktops(desktop_info: str) -> tuple[list[int], list[int]]:
+    """The ids of all desktops and of those the current activity shows, from DESKTOPS_SCRIPT's answer."""
+    all_ids = []
+    active_ids = []
+    for item in desktop_info.split(";"):
+        if "," not in item:
+            continue
+        desktop_id, _, is_current = (int(part) for part in item.split(","))
+        all_ids.append(desktop_id)
+        if is_current:
+            active_ids.append(desktop_id)
+    return all_ids, active_ids
+
+
+def _assign_activities(
+    remembered: Mapping[int, str],
+    all_ids: Sequence[int],
+    active_ids: Sequence[int],
+    current_activity_id: str,
+    activity_ids: Sequence[str],
+) -> dict[int, str]:
+    """``remembered`` plus the desktops on screen now, which belong to the current
+    activity, plus a guess for the ones never seen."""
+    mapping = dict(remembered)
+    for desktop_id in active_ids:
+        mapping[desktop_id] = current_activity_id
+    if len(activity_ids) < 2:
+        return mapping
+    unmapped_ids = [desktop_id for desktop_id in all_ids if desktop_id not in mapping]
+    other_activities = [activity for activity in activity_ids if activity != current_activity_id]
+    for position, desktop_id in enumerate(unmapped_ids):
+        activity_position = position // len(active_ids)
+        if activity_position < len(other_activities):
+            mapping[desktop_id] = other_activities[activity_position]
+    return mapping
 
 
 def _activity_images(name: str, pieces: Sequence[str], profiles: ProfileWallpapers) -> list[str]:
@@ -189,14 +216,14 @@ def _activity_images(name: str, pieces: Sequence[str], profiles: ProfileWallpape
 
 
 def _file_urls(paths: Sequence[str]) -> list[str]:
-    return ["file://" + path for path in paths]
+    return [Path(path).absolute().as_uri() for path in paths]
 
 
 def _evaluate(script: str) -> Result:
     try:
         _plasma_shell().evaluateScript(script)
-    except PlasmaScriptingUnavailable as error:
-        return Result(str(error))
+    except PlasmaScriptingUnavailable:
+        raise
     except Exception as error:  # D-Bus failures come in many types
         return Result(f"Plasma did not take the wallpaper: {error}")
     return Result()
@@ -222,7 +249,7 @@ def _qdbus() -> str | None:
 def _activity_manager(qdbus: str, method: str, *arguments: str) -> Result:
     return run(
         [qdbus, "org.kde.ActivityManager", "/ActivityManager/Activities", method, *arguments],
-        timeout=5,
+        timeout=ACTIVITY_MANAGER_TIMEOUT,
         capture_output=True,
     )
 
@@ -266,7 +293,7 @@ def _load_mapping(state_dir: Path) -> dict[int, str]:
     for key, value in data.items():
         try:
             mapping[int(key)] = str(value)
-        except ValueError, TypeError:
+        except ValueError:
             logger.warning("Skipping invalid cache entry: %s -> %s", key, value)
     return mapping
 

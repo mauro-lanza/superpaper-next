@@ -32,7 +32,7 @@ def fake_screen(number, x, y, width, height, scale=1.0):
     frame = SimpleNamespace(origin=SimpleNamespace(x=x, y=y), size=SimpleNamespace(width=width, height=height))
     return SimpleNamespace(
         number=number,
-        frame=frame,
+        frame=lambda: frame,
         backingScaleFactor=lambda: scale,
         localizedName=lambda: f"Screen {number}",
         deviceDescription=lambda: {"NSScreenNumber": number},
@@ -87,7 +87,9 @@ def appkit(monkeypatch, notification_center):
         foundation.NSNotificationCenter = SimpleNamespace(defaultCenter=lambda: notification_center)
         monkeypatch.setitem(sys.modules, "AppKit", appkit_module)
         monkeypatch.setitem(sys.modules, "Foundation", foundation)
-        monkeypatch.setitem(sys.modules, "Quartz", None)
+        quartz = ModuleType("Quartz")
+        quartz.CGDisplayScreenSize = lambda number: SimpleNamespace(width=0.0, height=0.0)
+        monkeypatch.setitem(sys.modules, "Quartz", quartz)
         return set_images
 
     yield install

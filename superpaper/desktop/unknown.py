@@ -40,18 +40,15 @@ def hotkey_problems_in_dialog() -> bool:
 
 
 def takes_pieces(set_command: str) -> bool:
-    """Whether the desktop sets one image per display, so a wallpaper is cut into pieces."""
     return False
 
 
 def keeps_wallpaper() -> bool:
-    """Whether the desktop shows the last wallpaper again after a restart by itself."""
     return False
 
 
 def setter_problem(set_command: str) -> str | None:
-    """Why Superpaper can't set the wallpaper on this desktop, if it can't."""
-    return None
+    return f"Unknown platform: {sys.platform}"
 
 
 def default_dirs(environ: Mapping[str, str], install: Path) -> tuple[Path, Path]:
@@ -90,5 +87,4 @@ def set_wallpaper(wallpaper: Wallpaper, *, set_command: str, profiles: ProfileWa
 
 
 def open_folder(folder: Path) -> Result:
-    """Show ``folder`` in the desktop's file manager."""
     return run(["xdg-open", os.fspath(folder)])

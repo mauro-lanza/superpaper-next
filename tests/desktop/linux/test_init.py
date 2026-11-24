@@ -287,4 +287,4 @@ def test_the_native_tray_is_built_for_this_process_when_a_watcher_runs(monkeypat
 
     assert linux.make_tray(**TRAY_ARGUMENTS) is native_tray
     assert built[0]["bus_name"] == f"org.kde.StatusNotifierItem-{os.getpid()}-1"
-    assert built[0]["title"] == built[0]["tooltip"] == "Superpaper"
+    assert built[0]["title"] == "Superpaper"

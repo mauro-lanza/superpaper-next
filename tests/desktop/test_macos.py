@@ -33,7 +33,6 @@ def test_macos_detects_screens_from_the_top_left_of_the_primary_one(appkit):
 
     assert [(m.x, m.y, m.width, m.height) for m in found] == [(0, 0, 2560, 1440), (2560, -215, 1080, 1920)]
     assert [m.name for m in found] == ["Screen 1", "Screen 2"]
-    assert all(m.width_mm is None and m.height_mm is None for m in found)
 
 
 def test_macos_detects_retina_screens_in_pixels(appkit):
@@ -112,8 +111,7 @@ def test_macos_watches_screen_parameter_changes_and_keeps_the_block(appkit, noti
 
     ((name, sender, queue, block),) = notification_center.observers
     assert (name, sender, queue) == ("screen parameters changed", None, None)
-    assert macos._screen_block is block
-    assert macos._screen_observer is not None
+    assert macos._screen_blocks == [block]
     notification_center.post("screen parameters changed")
     notification_center.post("another notification")
     assert changes == ["changed"]

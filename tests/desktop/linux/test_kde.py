@@ -4,6 +4,7 @@ import json
 import shutil
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -27,7 +28,7 @@ def declared(script, name):
 
 
 def urls(paths):
-    return ["file://" + path for path in paths]
+    return [Path(path).as_uri() for path in paths]
 
 
 def running(profile, state_dir, cached=None):
@@ -185,7 +186,7 @@ def test_image_paths_reach_plasma_as_data_not_code():
 
     script = kde.wallpaper_script({7: [awkward]}, None)
 
-    assert declared(script, "imagesByDesktop") == {"7": ["file://" + awkward]}
+    assert declared(script, "imagesByDesktop") == {"7": urls([awkward])}
     assert len(script.splitlines()) == len(kde.WALLPAPER_SCRIPT.template.splitlines())
 
 

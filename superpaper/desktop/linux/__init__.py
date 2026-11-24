@@ -38,17 +38,18 @@ UNKNOWN_DESKTOP = (
 )
 
 
-def running_kde() -> bool:
+def running_kde(environ: Mapping[str, str]) -> bool:
     """Detect if running in a KDE session."""
-    d_ses = os.environ.get("DESKTOP_SESSION")
-    if d_ses and ("plasma" in d_ses or "kde" in d_ses):
-        return True
-    kde_f_ses = os.environ.get("KDE_FULL_SESSION")
-    xdg_ses_dtop = os.environ.get("XDG_SESSION_DESKTOP")
-    return bool(kde_f_ses == "true" or xdg_ses_dtop == "KDE")
+    session = environ.get("DESKTOP_SESSION", "").lower()
+    return (
+        "plasma" in session
+        or "kde" in session
+        or environ.get("KDE_FULL_SESSION") == "true"
+        or environ.get("XDG_SESSION_DESKTOP", "").lower() == "kde"
+    )
 
 
-def setter(set_command: str) -> Setter:
+def setter(set_command: str, environ: Mapping[str, str]) -> Setter:
     """How the wallpaper is set here: "command" is the user's own.
 
     The DESKTOP_SESSION variable names the desktop. Window managers such as i3 often
@@ -56,22 +57,22 @@ def setter(set_command: str) -> Setter:
     """
     if set_command:
         return "feh" if set_command == "feh" else "command"
-    desk_env = os.environ.get("DESKTOP_SESSION")
-    if not desk_env:
-        return "kde" if running_kde() else "feh"
-    if desk_env in GNOME_SESSIONS:
+    session = environ.get("DESKTOP_SESSION", "").lower()
+    if not session:
+        return "kde" if running_kde(environ) else "feh"
+    if session in GNOME_SESSIONS:
         return "gnome"
-    if desk_env == "cinnamon" or "cinnamon" in desk_env.lower():
+    if "cinnamon" in session:
         return "cinnamon"
-    if desk_env == "mate":
+    if session == "mate":
         return "mate"
-    if desk_env in XFCE_SESSIONS:
+    if session in XFCE_SESSIONS:
         return "xfce"
-    if desk_env.lower() == "lubuntu" or "lxqt" in desk_env.lower():
+    if session == "lubuntu" or "lxqt" in session:
         return "lxqt"
-    if running_kde():
+    if running_kde(environ):
         return "kde"
-    if "i3" in desk_env or desk_env == "/usr/share/xsessions/bspwm":
+    if "i3" in session or session == "/usr/share/xsessions/bspwm":
         return "feh"
     return "unknown"
 
@@ -139,37 +140,32 @@ def make_tray(
         bus_name=f"org.kde.StatusNotifierItem-{os.getpid()}-1",
         icon_path=icon_path,
         title=title,
-        tooltip=title,
     )
 
 
 def wx_tray_clickable() -> bool:
     """wx's tray icon renders but is dead on KDE Plasma 6."""
-    return not running_kde()
+    return not running_kde(os.environ)
 
 
 def hotkey_problems_in_dialog() -> bool:
     """On KDE they are only logged."""
-    return not running_kde()
+    return not running_kde(os.environ)
 
 
 def takes_pieces(set_command: str) -> bool:
-    """Whether the desktop sets one image per display, so a wallpaper is cut into pieces."""
-    return setter(set_command) == "kde"
+    return setter(set_command, os.environ) == "kde"
 
 
 def keeps_wallpaper() -> bool:
-    """Whether the desktop shows the last wallpaper again after a restart by itself."""
     return False
 
 
 def setter_problem(set_command: str) -> str | None:
-    """Why Superpaper can't set the wallpaper on this desktop, if it can't."""
-    return UNKNOWN_DESKTOP if setter(set_command) == "unknown" else None
+    return UNKNOWN_DESKTOP if setter(set_command, os.environ) == "unknown" else None
 
 
 def open_folder(folder: Path) -> Result:
-    """Show ``folder`` in the desktop's file manager."""
     return run(["xdg-open", os.fspath(folder)])
 
 
@@ -178,19 +174,16 @@ def set_wallpaper(wallpaper: Wallpaper, *, set_command: str, profiles: ProfileWa
     instead."""
     image = wallpaper.image
     logger.info("Setting the wallpaper on Linux to %s", image)
-    kind = setter(set_command)
+    kind = setter(set_command, os.environ)
     match kind:
         case "command":
             return _custom_command(set_command, image)
         case "feh":
             return run(["feh", "--bg-scale", "--no-xinerama", image], timeout=QUICK)
         case "gnome":
-            dark = gsettings("org.gnome.desktop.background", "picture-uri-dark", "file://" + image)
-            if not dark.ok:  # GNOME before 42 has no wallpaper for the dark style
-                logger.info("No dark-style wallpaper set: %s", dark.problem)
-            return gsettings("org.gnome.desktop.background", "picture-uri", "file://" + image)
+            return _gnome(image)
         case "cinnamon":
-            return gsettings("org.cinnamon.desktop.background", "picture-uri", "file://" + image)
+            return gsettings("org.cinnamon.desktop.background", "picture-uri", Path(image).absolute().as_uri())
         case "mate":
             return gsettings("org.mate.background", "picture-filename", image)
         case "xfce":
@@ -208,8 +201,7 @@ def set_wallpaper(wallpaper: Wallpaper, *, set_command: str, profiles: ProfileWa
 
 
 def set_spanmode(set_command: str) -> Result:
-    """Set the desktop to span one image across the displays, where that is a setting."""
-    kind = setter(set_command)
+    kind = setter(set_command, os.environ)
     match kind:
         case "gnome":
             return gsettings("org.gnome.desktop.background", "picture-options", "spanned")
@@ -246,6 +238,15 @@ def _custom_command(set_command: str, image: str) -> Result:
         return Result(f"The custom command '{set_command}' may only use {{image}} in braces ({error}).")
     logger.info("Formatted custom command is: '%s'", command)
     return run(command)
+
+
+def _gnome(image: str) -> Result:
+    """Set the picture of both the light and the dark style."""
+    uri = Path(image).absolute().as_uri()
+    dark = gsettings("org.gnome.desktop.background", "picture-uri-dark", uri)
+    if not dark.ok:  # GNOME before 42 has no wallpaper for the dark style
+        logger.info("No dark-style wallpaper set: %s", dark.problem)
+    return gsettings("org.gnome.desktop.background", "picture-uri", uri)
 
 
 def _xfce(image: str) -> Result:
