@@ -3,7 +3,9 @@ layout shows the running profile again; a restart shows the last render only whi
 still right."""
 
 from superpaper.geometry import layout_edit
+from superpaper.geometry.perspective import Named
 from superpaper.paths import resource
+from superpaper.profile_actions import align_test_profile
 from superpaper.unsaved_changes import ApplyAnswer
 from superpaper.wallpaper_change import render_signature
 
@@ -28,11 +30,12 @@ def test_the_align_test_renders_the_staged_layout_not_the_saved_one(gui_env, run
     staged = editor.staged.layout
     assert staged != running_work.session.layout
     test_image = [str(resource("test.png"))]
+    profile = align_test_profile(test_image[0], editor._selected_perspective(), editor._typed_offsets())
 
     editor.onAlignTest(None)
     gui_env.settle(running_work)
 
-    assert draft_signatures(gui_env.paths.cache) == [render_signature(staged, test_image)]
+    assert draft_signatures(gui_env.paths.cache) == [render_signature(staged, profile, test_image)]
     assert running_work.session.layout != staged
 
 
@@ -85,7 +88,9 @@ def test_the_perspective_dialogs_test_renders_the_staged_layout_and_pauses(gui_e
     (signature,) = draft_signatures(gui_env.paths.cache)
     staged = editor.staged.layout
     assert staged.perspective("study") is not None
-    assert signature == render_signature(staged, [str(resource("test.png").resolve())])
+    test_image = str(resource("test.png").resolve())
+    profile = align_test_profile(test_image, Named("study"), dialog.typed_offsets)
+    assert signature == render_signature(staged, profile, [test_image])
     assert running_work.session.paused is True
 
 
@@ -122,7 +127,7 @@ def test_saving_the_display_layout_shows_the_running_profile_again_once_for_the_
     assert len(shown) == 1
     assert stored.selection.images == images
     signature = (gui_env.paths.cache / f"{shown[0]}.sig").read_text(encoding="utf-8")
-    assert signature == render_signature(session.layout, images)
+    assert signature == render_signature(session.layout, stored.profile, images)
     assert session.layout.bezels_in_mm()[0] == (4.5, 0.0)
 
 

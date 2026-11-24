@@ -15,6 +15,7 @@ import superpaper.rendering.render as render
 from superpaper.desktop.backend import Desktop
 from superpaper.desktop.process import Result
 from superpaper.desktop.wallpaper import Pieces, ProfileWallpapers, Spanned, Wallpaper
+from superpaper.geometry.perspective import DegeneratePerspective, choice_label
 from superpaper.paths import AppPaths
 from superpaper.profiles.profile_file import Profile
 from superpaper.profiles.profile_id import ProfileId, ProfileIdError
@@ -55,20 +56,29 @@ def show(
         image = _render(profile, files, layout)
     except SourceImageError as error:
         return _skipped(str(error))
+    except DegeneratePerspective as error:
+        return _skipped(
+            f"The perspective '{choice_label(profile.perspective)}' of profile '{profile.name}' can't be used: {error}"
+        )
     if image is None:
         return _skipped(f"No complete wallpaper selection is available for profile '{profile.name}'.")
     try:
         slot = (
             render_cache.draft_slot(paths.cache)
             if profile_id is None
-            else render_cache.slot(paths.cache, profile_id.value)
+            else render_cache.Slot(paths.cache, profile_id.value)
         )
         output = render_cache.save(
-            slot, image, extension=desktop.render_extension(), signature=render_signature(layout, files)
+            slot, image, extension=desktop.render_extension(), signature=render_signature(layout, profile, files)
         )
     except OSError as error:
         return _skipped(f"The wallpaper could not be saved: {error}")
-    result = set_wallpaper(desktop, output, files, layout=layout, paths=paths, set_command=set_command, running=running)
+    try:
+        result = set_wallpaper(
+            desktop, output, files, layout=layout, paths=paths, set_command=set_command, running=running
+        )
+    except OSError as error:  # the per-display images could not be cut
+        return _skipped(f"The wallpaper could not be cut for the displays: {error}")
     if not result.ok:
         return result.problem
     # Until the desktop takes the new render, the previous one may still be on screen.
@@ -141,22 +151,25 @@ def set_wallpaper(
     return result
 
 
-def render_signature(layout: Layout, files: Sequence[str]) -> str:
-    """What a render is made from: the display layout and the images, as a stable digest."""
-    return hashlib.sha256(repr((layout, list(files))).encode()).hexdigest()
+def render_signature(layout: Layout, profile: Profile, files: Sequence[str]) -> str:
+    """What a render is made from: the display layout, the images and the profile's render
+    settings, as a stable digest."""
+    corrections = profile.display_corrections(layout.resolutions())
+    settings = (profile.spanmode, profile.spangroups, profile.perspective, profile.zoom, profile.pan, corrections)
+    return hashlib.sha256(repr((layout, list(files), settings)).encode()).hexdigest()
 
 
 def show_again(stored: StoredProfile, paths: AppPaths, *, desktop: Desktop, layout: Layout, set_command: str) -> bool:
     """Show the last wallpaper of the profile ``stored`` again at startup, without rendering
-    anything. Returns False unless that render was made for ``layout`` and the profile's
-    current images, so that it can be rendered; drafts shown since are ignored.
+    anything. Returns False unless that render was made for ``layout``, the profile's
+    current images and its render settings, so that it can be rendered; drafts shown since are ignored.
     """
-    rendered = render_cache.latest(render_cache.slot(paths.cache, stored.profile_id.value))
+    rendered = render_cache.latest(render_cache.Slot(paths.cache, stored.profile_id.value))
     if rendered is None:
         logger.info("Profile '%s' has no earlier render to show.", stored.profile.name)
         return False
     current = stored.selection.current()
-    if not current or rendered.signature != render_signature(layout, current):
+    if not current or rendered.signature != render_signature(layout, stored.profile, current):
         logger.info("The last render of profile '%s' is not for its current images and displays.", stored.profile.name)
         return False
     image = str(rendered.image)
@@ -200,7 +213,7 @@ def _cached_pieces(cache_dir: Path, profile_name: str, *, windows_names: bool) -
         profile_id = ProfileId.parse(profile_name, windows_names=windows_names)
     except ProfileIdError:  # an activity name no profile can have
         return []
-    rendered = render_cache.latest(render_cache.slot(cache_dir, profile_id.value))
+    rendered = render_cache.latest(render_cache.Slot(cache_dir, profile_id.value))
     return [str(piece) for piece in rendered.pieces] if rendered else []
 
 

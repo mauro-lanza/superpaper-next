@@ -11,7 +11,16 @@ from PIL import Image
 import superpaper.wallpaper_change as wallpaper_change
 from superpaper.desktop.process import Result
 from superpaper.desktop.wallpaper import Pieces, Spanned
-from superpaper.geometry.perspective import Default, Disabled, Named, Perspective, Swivel, SwivelAxis, Tilt
+from superpaper.geometry.perspective import (
+    Default,
+    DegeneratePerspective,
+    Disabled,
+    Named,
+    Perspective,
+    Swivel,
+    SwivelAxis,
+    Tilt,
+)
 from superpaper.paths import AppPaths
 from superpaper.profiles.profile_file import OffsetsCorrection, Profile
 from superpaper.profiles.profile_id import ProfileId
@@ -59,6 +68,11 @@ def cached(paths):
 
 def errors(caplog):
     return [record.getMessage() for record in caplog.records if record.levelname == "ERROR"]
+
+
+DESK = Perspective(
+    "desk", 0, (0.0, 0.0, 1000.0), (Swivel(SwivelAxis.NONE, 0.0, 0.0, 0.0),) * 2, (Tilt(0.0, 0.0, 0.0),) * 2
+)
 
 
 def test_a_change_is_rendered_kept_and_shown(tmp_path, app_paths, display_layout, desktop):
@@ -180,6 +194,38 @@ def test_a_render_that_cant_be_kept_isnt_shown(tmp_path, app_paths, display_layo
     assert desktop.handed == []
 
 
+def test_a_perspective_that_cant_be_solved_skips_the_change(app_paths, display_layout, desktop, monkeypatch, caplog):
+    def edge_on(*args, **kwargs):
+        message = "a display is edge-on"
+        raise DegeneratePerspective(message)
+
+    monkeypatch.setattr(render, "advanced", edge_on)
+    profile = replace(settings("p", spanmode="advanced"), perspective=Named("desk"))
+    layout = replace(display_layout(TINY_DISPLAYS), use_perspective=True, perspectives=(DESK,))
+
+    problem = draft(profile, ["one.png"], app_paths, layout, desktop)
+
+    assert problem is not None
+    assert "'p'" in problem
+    assert "desk" in problem
+    assert "edge-on" in problem
+    assert errors(caplog) == [f"Wallpaper change skipped: {problem}"]
+    assert desktop.handed == []
+
+
+def test_a_render_that_cant_be_cut_for_the_displays_isnt_shown(tmp_path, app_paths, display_layout, desktop):
+    desktop.pieces_taken = True
+    (app_paths.cache / "simple-a-crop-0.png").mkdir(parents=True)
+
+    problem = change(
+        "simple", [write_image(tmp_path / "source.png")], app_paths, display_layout(TINY_DISPLAYS), desktop
+    )
+
+    assert problem is not None
+    assert problem.startswith("The wallpaper could not be cut for the displays: ")
+    assert desktop.handed == []
+
+
 def test_a_wallpaper_goes_to_the_desktop_and_then_to_the_hook(app_paths, display_layout, desktop, caplog):
     desktop.hook_answer = Result("python3 is missing")
     desktop.answer = Result("the setter failed")
@@ -223,11 +269,12 @@ def test_a_desktop_that_takes_pieces_gets_one_per_display(app_paths, display_lay
 CURRENT = ["/current.png"]
 
 
-def write_render(cache, name, layout, files=CURRENT, **kwargs):
-    """A render in ``cache`` made for ``layout`` and ``files``, with its signature."""
+def write_render(cache, name, layout, files=CURRENT, *, profile=None, **kwargs):
+    """A render in ``cache`` made for ``layout``, ``files`` and ``profile`` (profile "main" by default), with its signature."""
     path = cache / name
     write_image(path, **kwargs)
-    (cache / f"{name}.sig").write_text(wallpaper_change.render_signature(layout, files), encoding="utf-8")
+    signature = wallpaper_change.render_signature(layout, profile or settings("main"), files)
+    (cache / f"{name}.sig").write_text(signature, encoding="utf-8")
 
 
 def selection_showing(*files):
@@ -280,6 +327,24 @@ def test_startup_renders_again_what_was_made_for_another_layout(app_paths, displ
 
     assert startup(other) is False
     assert desktop.handed == []
+
+
+def test_startup_renders_again_what_was_made_with_other_render_settings(app_paths, display_layout, desktop):
+    layout = display_layout(TINY_DISPLAYS)
+    write_render(app_paths.cache, "main-a.png", layout)
+
+    def restore(profile):
+        main = SimpleNamespace(
+            profile=profile,
+            profile_id=ProfileId.parse("main", windows_names=False),
+            selection=selection_showing(*CURRENT),
+        )
+        return wallpaper_change.show_again(main, app_paths, desktop=desktop, layout=layout, set_command="")
+
+    assert restore(replace(settings("main"), zoom=1.5)) is False
+    assert restore(replace(settings("main"), pan=(0.5, 0.0))) is False
+    assert restore(replace(settings("main"), spanmode="advanced")) is False
+    assert restore(replace(settings("main"), delay=5.0, hotkey=("ctrl", "x"))) is True
 
 
 def test_startup_renders_again_what_has_no_signature(app_paths, desktop, startup):
@@ -350,15 +415,13 @@ def test_a_perspective_that_no_longer_exists_isnt_rendered_again_at_startup(
     app_paths, display_layout, desktop, perspective, default, rendered_again
 ):
     desktop.wallpaper_kept = True
-    desk = Perspective(
-        "desk", 0, (0.0, 0.0, 1000.0), (Swivel(SwivelAxis.NONE, 0.0, 0.0, 0.0),) * 2, (Tilt(0.0, 0.0, 0.0),) * 2
-    )
     layout = replace(
-        display_layout(TINY_DISPLAYS), use_perspective=True, default_perspective=default, perspectives=(desk,)
+        display_layout(TINY_DISPLAYS), use_perspective=True, default_perspective=default, perspectives=(DESK,)
     )
-    write_render(app_paths.cache, "main-a.png", layout)
+    profile = replace(settings("main", spanmode="advanced"), perspective=perspective)
+    write_render(app_paths.cache, "main-a.png", layout, profile=profile)
     main = SimpleNamespace(
-        profile=replace(settings("main", spanmode="advanced"), perspective=perspective),
+        profile=profile,
         profile_id=ProfileId.parse("main", windows_names=False),
         selection=selection_showing(*CURRENT),
     )
